@@ -30,8 +30,6 @@ public class ConnectionTest {
     @Test
     public void testConnection() throws IOException {
         new Server();
-        final Connection connection = new Connection(InetAddress.getLocalHost());
-
-        connection.close();
+        new Connection(InetAddress.getLocalHost()).close();
     }
 }
