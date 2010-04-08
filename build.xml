@@ -18,7 +18,4 @@
 				todir="test-reports"/>
 		</junit>
     </target>
-		
-	<target name="clean">
-	</target>
 </project>
