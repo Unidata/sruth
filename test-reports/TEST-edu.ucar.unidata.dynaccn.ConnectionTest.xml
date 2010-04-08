@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuite errors="0" failures="0" hostname="gilda.unidata.ucar.edu" name="edu.ucar.unidata.dynaccn.ConnectionTest" tests="1" time="0.213" timestamp="2010-04-08T20:45:38">
+<testsuite errors="0" failures="0" hostname="gilda.unidata.ucar.edu" name="edu.ucar.unidata.dynaccn.ConnectionTest" tests="1" time="0.078" timestamp="2010-04-08T21:06:41">
   <properties>
     <property name="java.runtime.name" value="Java(TM) SE Runtime Environment" />
     <property name="sun.boot.library.path" value="/usr/java/jdk1.6.0_12/jre/lib/i386" />
@@ -65,7 +65,7 @@
     <property name="sun.desktop" value="gnome" />
     <property name="sun.cpu.isalist" value="" />
   </properties>
-  <testcase classname="edu.ucar.unidata.dynaccn.ConnectionTest" name="testConnection" time="0.011" />
+  <testcase classname="edu.ucar.unidata.dynaccn.ConnectionTest" name="testConnection" time="0.013" />
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
