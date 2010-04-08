@@ -53,7 +53,7 @@ final class Server {
      * 
      * @author Steven R. Emmerson
      */
-    private class Servelet implements Runnable {
+    private class Servlet implements Runnable {
         private final ServerSocket serverSocket;
 
         /**
@@ -62,7 +62,7 @@ final class Server {
          * @param serverSocket
          *            The server socket on which to listen.
          */
-        Servelet(final ServerSocket serverSocket) {
+        Servlet(final ServerSocket serverSocket) {
             assert null != serverSocket;
             assert serverSocket.isBound();
             assert !serverSocket.isClosed();
@@ -101,8 +101,8 @@ final class Server {
             try {
                 final ServerSocket serverSocket = new ServerSocket(port,
                         BACKLOG);
-                final Servelet servelet = new Servelet(serverSocket);
-                final Thread thread = new Thread(servelet);
+                final Servlet servlet = new Servlet(serverSocket);
+                final Thread thread = new Thread(servlet);
 
                 thread.start();
                 serveletThreads[i] = thread;
