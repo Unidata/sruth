@@ -16,5 +16,7 @@
 			<test name="edu.ucar.unidata.dynaccn.ConnectionTest"/>
 		</junit>
     </target>
-      
+		
+	<target name="clean">
+	</target>
 </project>
