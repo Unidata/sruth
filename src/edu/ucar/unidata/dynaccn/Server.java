@@ -6,6 +6,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 
 /**
  * Handles connections by clients. Starts its own thread.
@@ -15,105 +18,132 @@ import java.util.Map;
  * @author Steven R. Emmerson
  */
 final class Server {
-    private static int                        BACKLOG      = 50;
-    private final Map<InetAddress, SocketSet> socketSetMap = new HashMap<InetAddress, SocketSet>(
-                                                                   BACKLOG);
-
     /**
-     * Adds a socket to the collection of ready sockets. Starts serving when
-     * appropriate.
-     * 
-     * @param socket
-     *            The socket to be added.
-     * @throws NullPointerException
-     *             if {@code socket} is {@code null}.
+     * The number of backlog connection requests on each port.
      */
-    private synchronized void add(final Socket socket) {
-        assert null != socket;
-        assert socket.isConnected();
-
-        final InetAddress inetAddress = socket.getInetAddress();
-        SocketSet socketSet = socketSetMap.get(inetAddress);
-
-        if (null == socketSet) {
-            socketSet = new SocketSet();
-        }
-
-        socketSet.add(socket);
-
-        if (socketSet.isComplete()) {
-            socketSetMap.remove(inetAddress);
-        }
-    }
-
+    private static int                         BACKLOG       = 50;
     /**
-     * Handles a connection on a single server socket.
-     * 
-     * Instances are thread-compatible but not thread-safe.
-     * 
-     * @author Steven R. Emmerson
+     * The starting port number.
      */
-    private class Servlet implements Runnable {
-        private final ServerSocket serverSocket;
-
-        /**
-         * Constructs from the server socket.
-         * 
-         * @param serverSocket
-         *            The server socket on which to listen.
-         */
-        Servlet(final ServerSocket serverSocket) {
-            assert null != serverSocket;
-            assert serverSocket.isBound();
-            assert !serverSocket.isClosed();
-
-            this.serverSocket = serverSocket;
-        }
-
-        @Override
-        public void run() {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    add(serverSocket.accept());
-                }
-                catch (final IOException e) {
-                    e.printStackTrace();
-                    break;
-                }
-            }
-        }
-    }
-
-    static final int       START_PORT      = 3880;
-    private final Thread[] serveletThreads = new Thread[SocketSet.COMPLETE_COUNT];
+    static final int                           START_PORT    = 3880;
+    /**
+     * The set of client-specific connections.
+     */
+    private final Map<InetAddress, Connection> connections   = new HashMap<InetAddress, Connection>(
+                                                                     BACKLOG);
+    /**
+     * This instance's server-side sockets.
+     */
+    final ServerSocket[]                       serverSockets = new ServerSocket[Connection.SOCKET_COUNT];
 
     /**
-     * Constructs from nothing. Listens on all available interfaces. Immediately
-     * starts running in an internal thread.
+     * Constructs from nothing. The resulting instance will listen on all
+     * available interfaces.
      * 
      * @throws IOException
-     *             if an I/O error occurs.
+     *             if an I/O error occurs while creating the server sockets.
      */
-    Server() throws IOException {
-        for (int i = 0; i < serveletThreads.length; ++i) {
+    private Server() throws IOException {
+        for (int i = 0; i < serverSockets.length; ++i) {
             final int port = Server.START_PORT + i;
 
             try {
-                final ServerSocket serverSocket = new ServerSocket(port,
-                        BACKLOG);
-                final Servlet servlet = new Servlet(serverSocket);
-                final Thread thread = new Thread(servlet);
-
-                thread.start();
-                serveletThreads[i] = thread;
+                serverSockets[i] = new ServerSocket(port, BACKLOG);
             }
             catch (final IOException e) {
                 while (--i >= 0) {
-                    serveletThreads[i].interrupt();
+                    serverSockets[i].close();
                 }
                 throw (IOException) new IOException("Couldn't listen on port "
                         + port).initCause(e);
             }
         }
+    }
+
+    /**
+     * Creates a server and starts executing it.
+     * 
+     * @return The server's {@link Future}.
+     * @throws IOException
+     *             if an I/O error occurs while creating the server sockets.
+     */
+    static Future<Void> start() throws IOException {
+        final Server server = new Server();
+        final FutureTask<Void> future = new FutureTask<Void>(
+                new Callable<Void>() {
+                    public Void call() throws IOException {
+                        for (;;) {
+                            server.accept();
+                        }
+                    }
+                });
+        new Thread(future).start();
+        return future;
+    }
+
+    /**
+     * Accepts a connection from a client. NOTE: Connections on the individual
+     * sockets are accepted, in sequence, from lowest port to highest.
+     * 
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    private void accept() throws IOException {
+        for (int i = 0; i < serverSockets.length; ++i) {
+            try {
+                add(serverSockets[i].accept());
+            }
+            catch (final IOException e) {
+                for (int j = 0; j < serverSockets.length; ++j) {
+                    try {
+                        serverSockets[j].close();
+                    }
+                    catch (final IOException e1) {
+                    }
+                }
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Adds a socket to the collection of sockets associated with the client.
+     * 
+     * @param socket
+     *            The socket to be added.
+     * @throws IOException
+     *             if an I/O error occurs while processing the socket.
+     * @throws NullPointerException
+     *             if {@code socket} is {@code null}.
+     */
+    private synchronized void add(final Socket socket) throws IOException {
+        assert null != socket;
+        assert socket.isConnected();
+
+        final InetAddress inetAddress = socket.getInetAddress();
+        Connection connection = connections.get(inetAddress);
+
+        if (null == connection) {
+            connection = new Connection();
+        }
+
+        connection.add(socket);
+
+        if (connection.isComplete()) {
+            connections.remove(inetAddress);
+            service(connection);
+        }
+    }
+
+    /**
+     * Services a connection. Starts threads to service the connection.
+     * 
+     * @param connection
+     *            The connection to be serviced.
+     * @throws IOException
+     *             if an I/O error occurs while processing the connection.
+     */
+    private void service(final Connection connection) throws IOException {
+        RequestReceiver.start(connection.getInputRequestStream());
     }
 }

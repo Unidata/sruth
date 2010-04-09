@@ -9,7 +9,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-public class ConnectionTest {
+public class ClientTest {
 
     @BeforeClass
     public static void setUpBeforeClass() throws Exception {
@@ -28,8 +28,8 @@ public class ConnectionTest {
     }
 
     @Test
-    public void testConnection() throws IOException {
-        new Server();
-        new Connection(InetAddress.getLocalHost()).close();
+    public void testClient() throws IOException {
+        Server.start();
+        new Client(InetAddress.getLocalHost());
     }
 }
