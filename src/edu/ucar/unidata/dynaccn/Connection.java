@@ -1,8 +1,8 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.Socket;
 
 /**
@@ -21,7 +21,7 @@ final class Connection {
      * The indexes of the various sockets.
      */
     private static final int REQUEST      = 0;
-    // private static final int NOTICE = 1;
+    private static final int NOTICE       = 1;
     // private static final int DATA = 2;
     /**
      * The sockets that comprise the connection.
@@ -91,14 +91,40 @@ final class Connection {
     }
 
     /**
+     * Returns an {@link ObjectInputStream} that wraps a socket.
+     * 
+     * @param socket
+     *            The socket to wrap.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    private static ObjectInputStream wrapInput(final Socket socket)
+            throws IOException {
+        return new ObjectInputStream(socket.getInputStream());
+    }
+
+    /**
+     * Returns an {@link ObjectOutputStream} that wraps a socket.
+     * 
+     * @param socket
+     *            The socket to wrap.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    private static ObjectOutputStream wrapOutput(final Socket socket)
+            throws IOException {
+        return new ObjectOutputStream(socket.getOutputStream());
+    }
+
+    /**
      * Returns the stream associated with incoming requests for data.
      * 
      * @return The input request stream.
      * @throws IOException
      *             if the input request stream can't be obtained.
      */
-    InputStream getInputRequestStream() throws IOException {
-        return sockets[REQUEST].getInputStream();
+    ObjectInputStream getRequestInputStream() throws IOException {
+        return wrapInput(sockets[REQUEST]);
     }
 
     /**
@@ -106,9 +132,33 @@ final class Connection {
      * 
      * @return The output request stream.
      * @throws IOException
-     *             if the output request stream can't be obtained.
+     *             if the stream can't be obtained.
      */
-    public OutputStream getOutputRequestStream() throws IOException {
-        return sockets[REQUEST].getOutputStream();
+    ObjectOutputStream getRequestOutputStream() throws IOException {
+        return wrapOutput(sockets[REQUEST]);
+    }
+
+    /**
+     * Returns the stream associated with incoming notices of data.
+     * 
+     * @return The input notice stream.
+     * @throws IOException
+     *             if the input notice stream can't be obtained.
+     */
+    ObjectInputStream getNoticeInputStream() throws IOException {
+        return wrapInput(sockets[NOTICE]);
+    }
+
+    /**
+     * Returns the stream associated with outgoing notices of data.
+     * 
+     * @return The output notice stream.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws IOException
+     *             if the stream can't be obtained.
+     */
+    ObjectOutputStream getNoticeOutputStream() throws IOException {
+        return wrapOutput(sockets[NOTICE]);
     }
 }

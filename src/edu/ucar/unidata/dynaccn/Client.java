@@ -4,16 +4,19 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Connects to a remote server and exchanges data.
  * 
  * @author Steven R. Emmerson
  */
-final class Client {
+final class Client implements Callable<Void> {
     /**
      * The connection to the remote server.
      */
@@ -45,6 +48,11 @@ final class Client {
                         + port + " on host " + inetAddress).initCause(e);
             }
         }
-        RequestSender.start(connection.getOutputRequestStream());
+    }
+
+    @Override
+    public Void call() throws IOException, InterruptedException,
+            ExecutionException {
+        return new Peer(connection, new File("/tmp/client")).call();
     }
 }

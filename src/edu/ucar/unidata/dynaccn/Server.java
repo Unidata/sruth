@@ -1,5 +1,6 @@
 package edu.ucar.unidata.dynaccn;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -7,8 +8,7 @@ import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Future;
-import java.util.concurrent.FutureTask;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Handles connections by clients. Starts its own thread.
@@ -17,7 +17,7 @@ import java.util.concurrent.FutureTask;
  * 
  * @author Steven R. Emmerson
  */
-final class Server {
+final class Server implements Callable<Void> {
     /**
      * The number of backlog connection requests on each port.
      */
@@ -43,7 +43,7 @@ final class Server {
      * @throws IOException
      *             if an I/O error occurs while creating the server sockets.
      */
-    private Server() throws IOException {
+    Server() throws IOException {
         for (int i = 0; i < serverSockets.length; ++i) {
             final int port = Server.START_PORT + i;
 
@@ -60,35 +60,23 @@ final class Server {
         }
     }
 
-    /**
-     * Creates a server and starts executing it.
-     * 
-     * @return The server's {@link Future}.
-     * @throws IOException
-     *             if an I/O error occurs while creating the server sockets.
-     */
-    static Future<Void> start() throws IOException {
-        final Server server = new Server();
-        final FutureTask<Void> future = new FutureTask<Void>(
-                new Callable<Void>() {
-                    public Void call() throws IOException {
-                        for (;;) {
-                            server.accept();
-                        }
-                    }
-                });
-        new Thread(future).start();
-        return future;
+    @Override
+    public Void call() throws Exception {
+        for (;;) {
+            accept();
+        }
     }
 
     /**
      * Accepts a connection from a client. NOTE: Connections on the individual
      * sockets are accepted, in sequence, from lowest port to highest.
      * 
+     * @throws ClassNotFoundException
+     *             If the {@link RequestReceiver} receives an invalid object.
      * @throws IOException
-     *             if an I/O error occurs.
+     *             If an I/O error occurs in the {@link RequestReceiver}.
      */
-    private void accept() throws IOException {
+    private void accept() throws Exception {
         for (int i = 0; i < serverSockets.length; ++i) {
             try {
                 add(serverSockets[i].accept());
@@ -111,12 +99,12 @@ final class Server {
      * 
      * @param socket
      *            The socket to be added.
+     * @throws ClassNotFoundException
+     *             If the {@link RequestReceiver} receives an invalid object.
      * @throws IOException
-     *             if an I/O error occurs while processing the socket.
-     * @throws NullPointerException
-     *             if {@code socket} is {@code null}.
+     *             If an I/O error occurs in the {@link RequestReceiver}.
      */
-    private synchronized void add(final Socket socket) throws IOException {
+    private synchronized void add(final Socket socket) throws Exception {
         assert null != socket;
         assert socket.isConnected();
 
@@ -125,6 +113,7 @@ final class Server {
 
         if (null == connection) {
             connection = new Connection();
+            connections.put(inetAddress, connection);
         }
 
         connection.add(socket);
@@ -140,10 +129,16 @@ final class Server {
      * 
      * @param connection
      *            The connection to be serviced.
+     * @throws ClassNotFoundException
+     *             If the {@link RequestReceiver} receives an invalid object.
      * @throws IOException
-     *             if an I/O error occurs while processing the connection.
+     *             If an I/O error occurs in the {@link RequestReceiver}.
+     * @throws ExecutionException
+     *             if servicing the connection is terminated due to an exception
+     *             thrown by one of the server's threads.
      */
-    private void service(final Connection connection) throws IOException {
-        RequestReceiver.start(connection.getInputRequestStream());
+    private Void service(final Connection connection) throws IOException,
+            ClassNotFoundException, InterruptedException, ExecutionException {
+        return new Peer(connection, new File("/tmp/server")).call();
     }
 }

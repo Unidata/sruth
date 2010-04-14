@@ -15,26 +15,31 @@ import java.io.ObjectInputStream;
  * 
  * @author Steven R. Emmerson
  */
-final class RequestReceiver extends Receiver<Request> {
+final class NoticeReceiver extends Receiver<Notice> {
     /**
-     * Constructs the local peer.
+     * Constructs from the local peer.
      * 
      * @param peer
      *            The local peer.
+     * @throws NullPointerException
+     *             if {@code peer == null}.
      */
-    RequestReceiver(final Peer peer) {
-        super(peer, Request.class);
+    NoticeReceiver(final Peer peer) {
+        super(peer, Notice.class);
     }
 
     @Override
     protected ObjectInputStream getInputStream(final Peer peer)
             throws IOException {
-        return peer.getRequestInputStream();
+        return peer.getNoticeInputStream();
     }
 
     @Override
-    protected boolean process(final Request request) {
-        System.out.println("Received request: " + request);
-        return true;
+    protected boolean process(final Notice notice) throws IOException {
+        System.out.println("Received notice: " + notice);
+
+        notice.process(peer);
+
+        return !(notice instanceof DoneNotice);
     }
 }
