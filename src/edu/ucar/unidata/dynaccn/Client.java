@@ -21,6 +21,14 @@ final class Client implements Callable<Void> {
      * The connection to the remote server.
      */
     private final Connection connection = new Connection();
+    /**
+     * Pathname of the directory containing the files to be sent.
+     */
+    private final File       outDir;
+    /**
+     * Pathname of the directory into which to put received files.
+     */
+    private final File       inDir;
 
     /**
      * Constructs from the Internet address of the remote server. Executes
@@ -29,13 +37,22 @@ final class Client implements Callable<Void> {
      * 
      * @param inetAddress
      *            The Internet address of the remote server.
+     * @param outDir
+     *            Pathname of the directory containing files to be sent.
+     * @param inDir
+     *            Pathname of the directory into which to put received files.
      * @throws IOException
      *             if an I/O error occurs while attempting to connect to the
      *             remote server.
      * @throws NullPointerException
-     *             if {@code inetAddress} is {@code null}.
+     *             if {@code inetAddress == null || outDir == null || inDir ==
+     *             null}.
      */
-    Client(final InetAddress inetAddress) throws IOException {
+    Client(final InetAddress inetAddress, final String outDir,
+            final String inDir) throws IOException {
+        this.outDir = new File(outDir);
+        this.inDir = new File(inDir);
+
         for (int i = 0; i < Connection.SOCKET_COUNT; i++) {
             final int port = Server.START_PORT + i;
 
@@ -53,6 +70,6 @@ final class Client implements Callable<Void> {
     @Override
     public Void call() throws IOException, InterruptedException,
             ExecutionException {
-        return new Peer(connection, new File("/tmp/client")).call();
+        return new Peer(connection, outDir, inDir).call();
     }
 }

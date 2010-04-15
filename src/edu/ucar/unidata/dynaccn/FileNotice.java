@@ -6,6 +6,7 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
+import java.io.InvalidObjectException;
 
 /**
  * A notice of an available file.
@@ -43,7 +44,7 @@ final class FileNotice extends Notice {
 
     @Override
     void process(final Peer peer) throws IOException {
-        peer.createEmptyFile(fileInfo);
+        peer.createFile(fileInfo);
     }
 
     /*
@@ -54,5 +55,15 @@ final class FileNotice extends Notice {
     @Override
     public String toString() {
         return this.getClass().getSimpleName() + "{fileInfo=" + fileInfo + "}";
+    }
+
+    private Object readResolve() throws InvalidObjectException {
+        try {
+            return new FileNotice(fileInfo);
+        }
+        catch (final Exception e) {
+            throw (InvalidObjectException) new InvalidObjectException(
+                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        }
     }
 }

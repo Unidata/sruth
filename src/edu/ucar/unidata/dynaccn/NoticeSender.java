@@ -64,9 +64,10 @@ final class NoticeSender extends Sender {
 
         @Override
         public FileInfo next() {
-            final File path = new File(filePaths[index++].getName());
+            final File path = filePaths[index++];
 
-            return new FileInfo(new FileId(path), path.length(), PIECE_SIZE);
+            return new FileInfo(new FileId(new File(path.getName())), path
+                    .length(), PIECE_SIZE);
         }
 
         @Override
@@ -112,23 +113,22 @@ final class NoticeSender extends Sender {
             final FileInfo fileInfo = fileIter.next();
             notice = new FileNotice(fileInfo);
 
-            System.out.println("Writing notice: " + notice);
+            System.out.println("Sending notice: " + notice);
             objStream.writeObject(notice);
 
             final Iterator<PieceInfo> pieceIter = fileInfo
                     .getPieceInfoIterator();
 
-            for (long pieceIndex = 0; pieceIter.hasNext(); pieceIndex++) {
-                final PieceInfo pieceInfo = new PieceInfo(fileInfo, pieceIndex);
-                notice = new PieceNotice(pieceInfo);
+            while (pieceIter.hasNext()) {
+                notice = new PieceNotice(pieceIter.next());
 
-                System.out.println("Writing notice: " + notice);
+                System.out.println("Sending notice: " + notice);
                 objStream.writeObject(notice);
             }
         }
 
         notice = DoneNotice.INSTANCE;
-        System.out.println("Writing notice: " + notice);
+        System.out.println("Sending notice: " + notice);
         objStream.writeObject(notice);
 
         objStream.flush();

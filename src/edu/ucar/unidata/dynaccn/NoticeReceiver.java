@@ -35,7 +35,8 @@ final class NoticeReceiver extends Receiver<Notice> {
     }
 
     @Override
-    protected boolean process(final Notice notice) throws IOException {
+    protected boolean process(final Notice notice) throws IOException,
+            InterruptedException {
         System.out.println("Received notice: " + notice);
 
         notice.process(peer);

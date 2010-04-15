@@ -27,11 +27,17 @@ final class RequestSender extends Sender {
     }
 
     @Override
-    public Void call() throws IOException {
+    public Void call() throws IOException, InterruptedException {
         final ObjectOutputStream stream = peer.getRequestOutputStream();
 
-        stream.writeObject(new Request());
-        stream.flush();
+        for (PieceInfo pieceInfo = peer.getNextWantedPiece(); null != pieceInfo; pieceInfo = peer
+                .getNextWantedPiece()) {
+            final Request request = new Request(pieceInfo);
+
+            System.out.println("Sending request: " + request);
+            stream.writeObject(request);
+            stream.flush();
+        }
 
         return null;
     }

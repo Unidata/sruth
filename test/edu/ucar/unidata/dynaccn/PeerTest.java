@@ -14,7 +14,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-public class ClientTest {
+public class PeerTest {
     /**
      * The server task service used by this class.
      */
@@ -28,6 +28,13 @@ public class ClientTest {
                                                                          Executors
                                                                                  .newCachedThreadPool());
 
+    private static void system(final String[] cmd) throws IOException,
+            InterruptedException {
+        final Process process = Runtime.getRuntime().exec(cmd, null, null);
+        Assert.assertNotNull(process);
+        Assert.assertEquals(0, process.waitFor());
+    }
+
     @BeforeClass
     public static void setUpBeforeClass() throws Exception {
     }
@@ -38,6 +45,13 @@ public class ClientTest {
 
     @Before
     public void setUp() throws Exception {
+        system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
+        system(new String[] { "mkdir", "-p", "/tmp/server/out",
+                "/tmp/server/in" });
+        system(new String[] { "mkdir", "-p", "/tmp/client/out",
+                "/tmp/client/in" });
+        system(new String[] { "sh", "-c", "date > /tmp/server/out/server-file" });
+        system(new String[] { "sh", "-c", "date > /tmp/client/out/client-file" });
     }
 
     @After
@@ -47,8 +61,9 @@ public class ClientTest {
     @Test
     public void testClient() throws IOException, InterruptedException,
             ExecutionException {
-        serverService.submit(new Server());
-        clientService.submit(new Client(InetAddress.getLocalHost()));
+        serverService.submit(new Server("/tmp/server/out", "/tmp/server/in"));
+        clientService.submit(new Client(InetAddress.getLocalHost(),
+                "/tmp/client/out", "/tmp/client/in"));
         final Future<Void> future = clientService.take();
         Assert.assertNotNull(future);
         Assert.assertTrue(future.isDone());

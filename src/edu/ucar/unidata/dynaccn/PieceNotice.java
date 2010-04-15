@@ -5,6 +5,8 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.InvalidObjectException;
+
 /**
  * A notice of an available piece of data.
  * 
@@ -40,12 +42,22 @@ final class PieceNotice extends Notice {
     }
 
     @Override
-    void process(final Peer peer) {
-        // TODO
+    void process(final Peer peer) throws InterruptedException {
+        peer.process(pieceInfo);
     }
 
     @Override
     public String toString() {
         return getClass().getSimpleName() + "{pieceInfo=" + pieceInfo + "}";
+    }
+
+    private Object readResolve() throws InvalidObjectException {
+        try {
+            return new PieceNotice(pieceInfo);
+        }
+        catch (final Exception e) {
+            throw (InvalidObjectException) new InvalidObjectException(
+                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        }
     }
 }

@@ -5,6 +5,7 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+
 /**
  * A notice that indicates that no more notices will be forthcoming.
  * 
@@ -38,5 +39,9 @@ final class DoneNotice extends Notice {
 
     @Override
     void process(final Peer peer) {
+    }
+
+    private Object readResolve() {
+        return INSTANCE;
     }
 }

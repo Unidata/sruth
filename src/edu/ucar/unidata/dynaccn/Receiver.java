@@ -50,7 +50,8 @@ public abstract class Receiver<T> implements Callable<Void> {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    public Void call() throws IOException, ClassNotFoundException {
+    public Void call() throws IOException, ClassNotFoundException,
+            InterruptedException {
         final ObjectInputStream objStream = getInputStream(peer);
 
         while (process(type.cast(objStream.readObject()))) {
@@ -80,6 +81,9 @@ public abstract class Receiver<T> implements Callable<Void> {
      * @return {@code true} if further processing should continue.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
-    protected abstract boolean process(T obj) throws IOException;
+    protected abstract boolean process(T obj) throws IOException,
+            InterruptedException;
 }

@@ -35,15 +35,33 @@ final class Server implements Callable<Void> {
      * This instance's server-side sockets.
      */
     final ServerSocket[]                       serverSockets = new ServerSocket[Connection.SOCKET_COUNT];
+    /**
+     * Pathname of the directory containing files to be sent.
+     */
+    private final File                         outDir;
+    /**
+     * Pathname of the directory in which to put received files.
+     */
+    private final File                         inDir;
 
     /**
      * Constructs from nothing. The resulting instance will listen on all
      * available interfaces.
      * 
+     * @param outDir
+     *            Pathname of the directory containing files to be sent.
+     * @param inDir
+     *            Pathname of the directory in which to put received files.
+     * 
      * @throws IOException
      *             if an I/O error occurs while creating the server sockets.
+     * @throws NullPointerException
+     *             if {@code outDir == null || indir == null}.
      */
-    Server() throws IOException {
+    Server(final String outDir, final String inDir) throws IOException {
+        this.inDir = new File(inDir);
+        this.outDir = new File(outDir);
+
         for (int i = 0; i < serverSockets.length; ++i) {
             final int port = Server.START_PORT + i;
 
@@ -139,6 +157,6 @@ final class Server implements Callable<Void> {
      */
     private Void service(final Connection connection) throws IOException,
             ClassNotFoundException, InterruptedException, ExecutionException {
-        return new Peer(connection, new File("/tmp/server")).call();
+        return new Peer(connection, outDir, inDir).call();
     }
 }

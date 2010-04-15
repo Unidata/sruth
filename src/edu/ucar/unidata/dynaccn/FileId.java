@@ -6,6 +6,7 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.File;
+import java.io.InvalidObjectException;
 import java.io.Serializable;
 
 /**
@@ -106,5 +107,15 @@ final class FileId implements Serializable {
     @Override
     public String toString() {
         return getClass().getSimpleName() + "{path=" + path + "}";
+    }
+
+    private Object readResolve() throws InvalidObjectException {
+        try {
+            return new FileId(path);
+        }
+        catch (final Exception e) {
+            throw (InvalidObjectException) new InvalidObjectException(
+                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        }
     }
 }

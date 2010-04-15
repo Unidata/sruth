@@ -98,8 +98,7 @@ final class FileInfo implements Serializable {
     void vet(final long index) {
         if (0 > index || lastIndex < index) {
             throw new IllegalArgumentException(
-                    "Index lies outside valid range (0 through " + lastIndex
-                            + "): " + index);
+                    "Index lies outside valid range for " + this + ": " + index);
         }
     }
 
@@ -129,10 +128,6 @@ final class FileInfo implements Serializable {
                     "Invalid data-size.  Should have " + size + " bytes; has "
                             + data.length);
         }
-    }
-
-    private Object readResolve() throws InvalidObjectException {
-        return new FileInfo(fileId, fileSize, pieceSize);
     }
 
     /**
@@ -189,6 +184,48 @@ final class FileInfo implements Serializable {
         }
     }
 
+    /**
+     * Returns an iterator over the piece-informations of this instance.
+     * 
+     * @return An iterator over the piece-informations of this instance.
+     */
+    Iterator<PieceInfo> getPieceInfoIterator() {
+        class PieceInfoIterator implements Iterator<PieceInfo> {
+            /**
+             * The index of the next piece to be returned.
+             */
+            private long index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return index <= lastIndex;
+            }
+
+            @Override
+            public PieceInfo next() {
+                return new PieceInfo(FileInfo.this, index++);
+            }
+
+            @Override
+            public void remove() {
+                throw new UnsupportedOperationException();
+            }
+        }
+
+        return new PieceInfoIterator();
+    }
+
+    /**
+     * Returns the absolute abstract pathname of this instance's file resolved
+     * against a given directory.
+     * 
+     * @param dirPath
+     *            The directory against which to resolve the pathname.
+     */
+    File getFile(final File dirPath) {
+        return fileId.getFile(dirPath);
+    }
+
     /*
      * (non-Javadoc)
      * 
@@ -240,51 +277,19 @@ final class FileInfo implements Serializable {
         return true;
     }
 
-    /**
-     * Returns an iterator over the piece-informations of this instance.
-     * 
-     * @return An iterator over the piece-informations of this instance.
-     */
-    Iterator<PieceInfo> getPieceInfoIterator() {
-        class PieceInfoIterator implements Iterator<PieceInfo> {
-            /**
-             * The index of the next piece to be returned.
-             */
-            private long index = 0;
-
-            @Override
-            public boolean hasNext() {
-                return index <= lastIndex;
-            }
-
-            @Override
-            public PieceInfo next() {
-                return new PieceInfo(FileInfo.this, index++);
-            }
-
-            @Override
-            public void remove() {
-                throw new UnsupportedOperationException();
-            }
-        }
-
-        return new PieceInfoIterator();
-    }
-
-    /**
-     * Returns the absolute abstract pathname of this instance's file resolved
-     * against a given directory.
-     * 
-     * @param dirPath
-     *            The directory against which to resolve the pathname.
-     */
-    File getFile(final File dirPath) {
-        return fileId.getFile(dirPath);
-    }
-
     @Override
     public String toString() {
         return getClass().getSimpleName() + "{filedId=" + fileId
                 + ", fileSize=" + fileSize + ", pieceSize=" + pieceSize + "}";
+    }
+
+    private Object readResolve() throws InvalidObjectException {
+        try {
+            return new FileInfo(fileId, fileSize, pieceSize);
+        }
+        catch (final Exception e) {
+            throw (InvalidObjectException) new InvalidObjectException(
+                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        }
     }
 }

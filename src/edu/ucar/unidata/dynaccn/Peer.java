@@ -6,15 +6,19 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.RandomAccessFile;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.SynchronousQueue;
 
 /**
  * Exchanges data with its remote counterpart.
@@ -39,9 +43,17 @@ final class Peer implements Callable<Void> {
      */
     private final Connection                      connection;
     /**
-     * Pathname of the file directory.
+     * Pathname of the directory containing files to be sent.
      */
-    private final File                            dirPath;
+    private final File                            outDir;
+    /**
+     * Pathname of the directory into which to put received files.
+     */
+    private final File                            inDir;
+    /**
+     * Request queue.
+     */
+    private final BlockingQueue<PieceInfo>        requestQueue      = new SynchronousQueue<PieceInfo>();
 
     /**
      * The futures of the various tasks.
@@ -55,20 +67,25 @@ final class Peer implements Callable<Void> {
      * 
      * @param connection
      *            The connection to the remote peer.
-     * @param dirPath
-     *            Pathname of the file directory.
+     * @param outDir
+     *            Pathname of the directory containing files to be sent.
+     * @param inDir
+     *            Pathname of the directory into which to put received files.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code connection == null}.
+     *             if {@code connection == null || outDir == null || inDir ==
+     *             null}.
      */
-    Peer(final Connection connection, final File dirPath) throws IOException {
-        if (null == connection) {
+    Peer(final Connection connection, final File outDir, final File inDir)
+            throws IOException {
+        if (null == connection || null == outDir || null == inDir) {
             throw new NullPointerException();
         }
 
         this.connection = connection;
-        this.dirPath = dirPath;
+        this.outDir = outDir;
+        this.inDir = inDir;
 
         // requestSenderFuture =
         completionService.submit(new RequestSender(this));
@@ -76,7 +93,7 @@ final class Peer implements Callable<Void> {
         completionService.submit(new RequestReceiver(this));
 
         // noticeSenderFuture =
-        completionService.submit(new NoticeSender(this, dirPath));
+        completionService.submit(new NoticeSender(this, outDir));
         // noticeReceiverFuture =
         completionService.submit(new NoticeReceiver(this));
     }
@@ -94,8 +111,8 @@ final class Peer implements Callable<Void> {
         }
         catch (final CancellationException e) {
             /*
-             * Can't happen because the cancellation only occurs in the previous
-             * exception.
+             * Can't happen because cancellation only occurs in the previous
+             * exception-handler.
              */
         }
 
@@ -154,7 +171,62 @@ final class Peer implements Callable<Void> {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void createEmptyFile(final FileInfo fileInfo) throws IOException {
-        fileInfo.getFile(dirPath).createNewFile();
+    void createFile(final FileInfo fileInfo) throws IOException {
+        fileInfo.getFile(inDir).createNewFile();
+    }
+
+    /**
+     * Saves a piece of data in the file.
+     * 
+     * @param piece
+     *            The piece to be saved.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    void save(final Piece piece) throws IOException {
+        final File path = piece.getFile(inDir);
+
+        if (!path.exists()) {
+            throw new FileNotFoundException("File doesn't exist: \"" + path
+                    + "\"");
+        }
+
+        final RandomAccessFile file = new RandomAccessFile(
+                piece.getFile(inDir), "rwd");
+
+        try {
+            file.seek(piece.getOffset());
+            file.write(piece.getData());
+        }
+        finally {
+            file.close();
+        }
+    }
+
+    /**
+     * Processes information about an available piece of data at the remote
+     * peer.
+     * 
+     * @param pieceInfo
+     *            Information about the available piece of data at the remote
+     *            peer.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    void process(final PieceInfo pieceInfo) throws InterruptedException {
+        requestQueue.put(pieceInfo);
+    }
+
+    /**
+     * Returns information on the next wanted piece of data.
+     * 
+     * @return Information on the next wanted piece of data.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    PieceInfo getNextWantedPiece() throws InterruptedException {
+        return requestQueue.take();
     }
 }

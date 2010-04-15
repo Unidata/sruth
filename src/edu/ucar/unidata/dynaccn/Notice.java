@@ -23,8 +23,10 @@ abstract class Notice implements Serializable {
      *            The local peer.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
-    abstract void process(Peer peer) throws IOException;
+    abstract void process(Peer peer) throws IOException, InterruptedException;
 
     @Override
     public abstract String toString();

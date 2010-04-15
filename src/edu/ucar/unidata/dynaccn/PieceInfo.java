@@ -5,6 +5,8 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.File;
+import java.io.InvalidObjectException;
 import java.io.Serializable;
 
 /**
@@ -83,5 +85,37 @@ final class PieceInfo implements Serializable {
     public String toString() {
         return getClass().getSimpleName() + "{fileInfo=" + fileInfo
                 + ", index=" + index + "}";
+    }
+
+    /**
+     * Returns the absolute abstract pathname of this instance resolved against
+     * a directory.
+     * 
+     * @param dirPath
+     *            The abstract pathname of the directory to resolve against.
+     * @return The abstract absolute pathname of the result.
+     */
+    File getFile(final File dirPath) {
+        return fileInfo.getFile(dirPath);
+    }
+
+    /**
+     * Returns the number of bytes from the beginning of the file to the start
+     * of this piece.
+     * 
+     * @return The offset, in bytes, to the start of this piece.
+     */
+    long getOffset() {
+        return fileInfo.getOffset(index);
+    }
+
+    private Object readResolve() throws InvalidObjectException {
+        try {
+            return new PieceInfo(fileInfo, index);
+        }
+        catch (final Exception e) {
+            throw (InvalidObjectException) new InvalidObjectException(
+                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        }
     }
 }
