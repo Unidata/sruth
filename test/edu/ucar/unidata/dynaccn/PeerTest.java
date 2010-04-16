@@ -46,12 +46,24 @@ public class PeerTest {
     @Before
     public void setUp() throws Exception {
         system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
-        system(new String[] { "mkdir", "-p", "/tmp/server/out",
+        system(new String[] { "mkdir", "-p", "/tmp/server/out/subdir",
                 "/tmp/server/in" });
+        system(new String[] { "mkdir", "-p", "/tmp/client/out/subdir",
+                "/tmp/client/in" });
         system(new String[] { "mkdir", "-p", "/tmp/client/out",
                 "/tmp/client/in" });
-        system(new String[] { "sh", "-c", "date > /tmp/server/out/server-file" });
-        system(new String[] { "sh", "-c", "date > /tmp/client/out/client-file" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/server/out/server-file-1" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/server/out/server-file-2" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/server/out/subdir/server-subfile" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/client/out/client-file-1" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/client/out/client-file-2" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/client/out/subdir/client-subfile" });
     }
 
     @After

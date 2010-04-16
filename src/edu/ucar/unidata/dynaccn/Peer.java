@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.RandomAccessFile;
+import java.util.Iterator;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -43,7 +44,7 @@ final class Peer implements Callable<Void> {
      */
     private final Connection                      connection;
     /**
-     * Pathname of the directory containing files to be sent.
+     * Pathname of the directory containing the files to be sent.
      */
     private final File                            outDir;
     /**
@@ -53,7 +54,15 @@ final class Peer implements Callable<Void> {
     /**
      * Request queue.
      */
-    private final BlockingQueue<PieceInfo>        requestQueue      = new SynchronousQueue<PieceInfo>();
+    private final BlockingQueue<PieceInfo>        noticeQueue       = new SynchronousQueue<PieceInfo>();
+    /**
+     * Data-piece queue.
+     */
+    private final BlockingQueue<Piece>            requestQueue      = new SynchronousQueue<Piece>();
+    /**
+     * Iterator over the files to send to the remote peer.
+     */
+    final Iterator<Notice>                        noticeIterator;
 
     /**
      * The futures of the various tasks.
@@ -86,6 +95,7 @@ final class Peer implements Callable<Void> {
         this.connection = connection;
         this.outDir = outDir;
         this.inDir = inDir;
+        noticeIterator = new NoticeIterator(outDir, outDir);
 
         // requestSenderFuture =
         completionService.submit(new RequestSender(this));
@@ -96,6 +106,9 @@ final class Peer implements Callable<Void> {
         completionService.submit(new NoticeSender(this, outDir));
         // noticeReceiverFuture =
         completionService.submit(new NoticeReceiver(this));
+
+        completionService.submit(new PieceSender(this));
+        completionService.submit(new PieceReceiver(this));
     }
 
     @Override
@@ -164,6 +177,28 @@ final class Peer implements Callable<Void> {
     }
 
     /**
+     * Returns the object input stream for data-pieces.
+     * 
+     * @return The object input stream for data-pieces.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    ObjectInputStream getDataInputStream() throws IOException {
+        return connection.getDataInputStream();
+    }
+
+    /**
+     * Returns the object output stream for data-pieces.
+     * 
+     * @return The object output stream for data-pieces.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    ObjectOutputStream getDataOutputStream() throws IOException {
+        return connection.getDataOutputStream();
+    }
+
+    /**
      * Creates an empty file based on information about the file.
      * 
      * @param fileInfo
@@ -172,11 +207,87 @@ final class Peer implements Callable<Void> {
      *             if an I/O error occurs.
      */
     void createFile(final FileInfo fileInfo) throws IOException {
-        fileInfo.getFile(inDir).createNewFile();
+        final File file = fileInfo.getFile(inDir);
+        final File parent = file.getParentFile();
+
+        parent.mkdirs();
+        file.createNewFile();
     }
 
     /**
-     * Saves a piece of data in the file.
+     * Processes information about an available piece of data at the remote
+     * peer.
+     * 
+     * @param pieceInfo
+     *            Information about the available piece of data at the remote
+     *            peer.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    void processNotice(final PieceInfo pieceInfo) throws InterruptedException {
+        noticeQueue.put(pieceInfo);
+    }
+
+    /**
+     * Processes a request for a piece of data from the remote peer.
+     * 
+     * @param pieceInfo
+     *            Information about the piece of data requested by the remote
+     *            peer.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    void processRequest(final PieceInfo pieceInfo) throws InterruptedException,
+            IOException {
+        final File path = pieceInfo.getFile(outDir);
+
+        if (!path.exists()) {
+            throw new FileNotFoundException("File doesn't exist: \"" + path
+                    + "\"");
+        }
+
+        final RandomAccessFile file = new RandomAccessFile(path, "r");
+        final byte[] data = new byte[pieceInfo.getSize()];
+
+        try {
+            file.seek(pieceInfo.getOffset());
+            file.read(data);
+        }
+        finally {
+            file.close();
+        }
+
+        requestQueue.put(new Piece(pieceInfo, data));
+    }
+
+    /**
+     * Returns information on the next wanted piece of data.
+     * 
+     * @return Information on the next wanted piece of data.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    PieceInfo getNextRequest() throws InterruptedException {
+        return noticeQueue.take();
+    }
+
+    /**
+     * Returns the next piece of data to send to the remote peer.
+     * 
+     * @return The next piece of data to send.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    Piece getNextPiece() throws InterruptedException, IOException {
+        return requestQueue.take();
+    }
+
+    /**
+     * Saves a piece of data in the relevant file.
      * 
      * @param piece
      *            The piece to be saved.
@@ -193,8 +304,7 @@ final class Peer implements Callable<Void> {
                     + "\"");
         }
 
-        final RandomAccessFile file = new RandomAccessFile(
-                piece.getFile(inDir), "rwd");
+        final RandomAccessFile file = new RandomAccessFile(path, "rwd");
 
         try {
             file.seek(piece.getOffset());
@@ -206,27 +316,138 @@ final class Peer implements Callable<Void> {
     }
 
     /**
-     * Processes information about an available piece of data at the remote
-     * peer.
+     * Returns the next notice to send to the remote peer.
      * 
-     * @param pieceInfo
-     *            Information about the available piece of data at the remote
-     *            peer.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
+     * @return The next notice to send to the remote peer.
      */
-    void process(final PieceInfo pieceInfo) throws InterruptedException {
-        requestQueue.put(pieceInfo);
+    Notice getNextNotice() {
+        return noticeIterator.hasNext()
+                ? noticeIterator.next()
+                : null;
     }
 
     /**
-     * Returns information on the next wanted piece of data.
+     * Iterates over the pieces of regular files in a directory. Doesn't
+     * recurse.
      * 
-     * @return Information on the next wanted piece of data.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
+     * Instances are thread-compatible but not thread-safe.
+     * 
+     * @author Steven R. Emmerson
      */
-    PieceInfo getNextWantedPiece() throws InterruptedException {
-        return requestQueue.take();
+    private static class NoticeIterator implements Iterator<Notice> {
+        /**
+         * The canonical size, in bytes, of a piece of data (131072).
+         */
+        private final int           PIECE_SIZE = 0x20000;
+        /**
+         * The list of files in the directory.
+         */
+        private final File[]        files;
+        /**
+         * The index of the next pathname to use.
+         */
+        private int                 index;
+        /**
+         * Iterator over the pieces of data in a file.
+         */
+        private Iterator<PieceInfo> pieceIterator;
+        /**
+         * Iterator over notices from a sub-directory.
+         */
+        private NoticeIterator      subIterator;
+        /**
+         * The pathname of the root of the directory tree.
+         */
+        private final File          root;
+        /**
+         * The next notice to return.
+         */
+        private Notice              notice;
+
+        /**
+         * Constructs from the pathname of the directory that contains the files
+         * and the rootPath of the directory tree.
+         * 
+         * @param dir
+         *            The pathname of the directory that contains the files.
+         * @param root
+         *            The pathname of the root of the directory tree.
+         * @throws NullPointerException
+         *             if {@code root == null}.
+         */
+        NoticeIterator(final File dir, final File root) {
+            if (null == root) {
+                throw new NullPointerException();
+            }
+            this.root = root;
+            files = dir.listFiles();
+            setNextNotice();
+        }
+
+        /**
+         * Sets the next notice to be returned. Sets it to {@code null} if there
+         * are no more notices.
+         */
+        void setNextNotice() {
+            if (null != pieceIterator && pieceIterator.hasNext()) {
+                notice = new PieceNotice(pieceIterator.next());
+                return;
+            }
+
+            if (null != subIterator && subIterator.hasNext()) {
+                notice = subIterator.next();
+                return;
+            }
+
+            while (files.length > index) {
+                final File absFile = files[index++];
+
+                if (absFile.isDirectory()) {
+                    subIterator = new NoticeIterator(absFile, root);
+
+                    if (subIterator.hasNext()) {
+                        notice = subIterator.next();
+                        return;
+                    }
+                }
+                else {
+                    final String absPath = absFile.getPath();
+
+                    if (!absPath.startsWith(root.getPath())) {
+                        throw new IllegalStateException("root="
+                                + root.getPath() + "\"; absPath=\"" + absPath
+                                + "\"");
+                    }
+
+                    final File relFile = new File(absPath.substring(root
+                            .getPath().length() + 1));
+                    final FileInfo fileInfo = new FileInfo(new FileId(relFile),
+                            absFile.length(), PIECE_SIZE);
+
+                    notice = new FileNotice(fileInfo);
+                    pieceIterator = fileInfo.getPieceInfoIterator();
+                    return;
+                }
+            }
+
+            notice = null;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return null != notice;
+        }
+
+        @Override
+        public Notice next() {
+            final Notice temp = notice;
+            setNextNotice();
+            return temp;
+        }
+
+        @Override
+        public void remove() {
+            throw new UnsupportedOperationException();
+        }
     }
 }

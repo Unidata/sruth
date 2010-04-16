@@ -109,6 +109,15 @@ final class PieceInfo implements Serializable {
         return fileInfo.getOffset(index);
     }
 
+    /**
+     * Returns the size of this piece of data in bytes.
+     * 
+     * @return The size, in bytes, of this piece of data.
+     */
+    int getSize() {
+        return fileInfo.getSize(index);
+    }
+
     private Object readResolve() throws InvalidObjectException {
         try {
             return new PieceInfo(fileInfo, index);

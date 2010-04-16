@@ -136,7 +136,7 @@ final class FileInfo implements Serializable {
      * @return The associated pathname.
      */
     File getPath() {
-        return fileId.getPath();
+        return fileId.getFile();
     }
 
     /**
@@ -153,6 +153,15 @@ final class FileInfo implements Serializable {
         return lastIndex == index
                 ? lastSize()
                 : pieceSize;
+    }
+
+    /**
+     * Returns the number of data-pieces in this instance.
+     * 
+     * @return The number of data-pieces.
+     */
+    long getPieceCount() {
+        return lastIndex + 1;
     }
 
     /**

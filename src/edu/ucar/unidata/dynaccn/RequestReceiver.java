@@ -17,10 +17,12 @@ import java.io.ObjectInputStream;
  */
 final class RequestReceiver extends Receiver<Request> {
     /**
-     * Constructs the local peer.
+     * Constructs from the local peer.
      * 
      * @param peer
      *            The local peer.
+     * @throws NullPointerException
+     *             if {@code peer == null}.
      */
     RequestReceiver(final Peer peer) {
         super(peer, Request.class);
@@ -33,8 +35,10 @@ final class RequestReceiver extends Receiver<Request> {
     }
 
     @Override
-    protected boolean process(final Request request) {
+    protected boolean process(final Request request)
+            throws InterruptedException, IOException {
         System.out.println("Received request: " + request);
+        request.process(peer);
         return true;
     }
 }

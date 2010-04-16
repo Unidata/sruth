@@ -22,43 +22,54 @@ final class FileId implements Serializable {
      */
     private static final long serialVersionUID = 1L;
     /**
-     * The pathname of the file.
+     * The abstract relative pathname of the file.
      */
-    private final File        path;
+    private final File        relFile;
 
     /**
-     * Constructs from the pathname of the file.
+     * Constructs from the relative pathname of the file.
      * 
-     * @param path
-     *            The pathname of the file.
+     * @param relFile
+     *            The relative pathname of the file.
+     * @throws IllegalArgumentException
+     *             if {@code relFile.isAbsolute()}.
      * @throws NullPointerException
-     *             if {@code path == null}.
+     *             if {@code relFile == null}.
      */
-    FileId(final File path) {
-        if (null == path) {
-            throw new NullPointerException();
+    FileId(final File relFile) {
+        if (relFile.isAbsolute()) {
+            throw new IllegalArgumentException();
         }
-        this.path = path;
+        this.relFile = relFile;
     }
 
     /**
-     * Returns the pathname associated with this instance.
+     * Returns the abstract relative pathname associated with this instance.
      * 
-     * @return The associated pathname.
+     * @return The associated abstract relative pathname.
      */
-    File getPath() {
-        return path;
+    File getFile() {
+        return relFile;
     }
 
     /**
-     * Returns the absolute abstract pathname of this instance's file resolved
-     * against a given directory.
+     * Returns the abstract absolute pathname of this instance's file resolved
+     * against the abstract absolute pathname of a given directory.
      * 
-     * @param dirPath
-     *            The directory against which to resolve the pathname.
+     * @param dir
+     *            The abstract absolute pathname of the directory against which
+     *            to resolve the abstract relative pathname associated with this
+     *            instance.
+     * @throws IllegalArgumentException
+     *             if {@code !dirPath.isAbsolute()}.
+     * @throws NullPointerException
+     *             if {@code dirPath == null}.
      */
-    File getFile(final File dirPath) {
-        return new File(dirPath, path.getPath());
+    File getFile(final File dir) {
+        if (!dir.isAbsolute()) {
+            throw new IllegalArgumentException();
+        }
+        return new File(dir, relFile.getPath());
     }
 
     /*
@@ -78,12 +89,12 @@ final class FileId implements Serializable {
             return false;
         }
         final FileId other = (FileId) obj;
-        if (path == null) {
-            if (other.path != null) {
+        if (relFile == null) {
+            if (other.relFile != null) {
                 return false;
             }
         }
-        else if (!path.equals(other.path)) {
+        else if (!relFile.equals(other.relFile)) {
             return false;
         }
         return true;
@@ -98,20 +109,20 @@ final class FileId implements Serializable {
     public int hashCode() {
         final int prime = 31;
         int result = 1;
-        result = prime * result + ((path == null)
+        result = prime * result + ((relFile == null)
                 ? 0
-                : path.hashCode());
+                : relFile.hashCode());
         return result;
     }
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{path=" + path + "}";
+        return getClass().getSimpleName() + "{relFile=" + relFile + "}";
     }
 
     private Object readResolve() throws InvalidObjectException {
         try {
-            return new FileId(path);
+            return new FileId(relFile);
         }
         catch (final Exception e) {
             throw (InvalidObjectException) new InvalidObjectException(

@@ -3,6 +3,7 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
 
@@ -39,9 +40,23 @@ final class Request implements Serializable {
         this.pieceInfo = pieceInfo;
     }
 
+    /**
+     * Processes the associated piece-information via the local peer.
+     * 
+     * @param peer
+     *            The local peer.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    void process(final Peer peer) throws InterruptedException, IOException {
+        peer.processRequest(pieceInfo);
+    }
+
     @Override
     public String toString() {
-        return getClass().getSimpleName();
+        return getClass().getSimpleName() + "{pieceInfo=" + pieceInfo + "}";
     }
 
     private Object readResolve() throws InvalidObjectException {

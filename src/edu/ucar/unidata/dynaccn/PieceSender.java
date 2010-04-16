@@ -9,33 +9,31 @@ import java.io.IOException;
 import java.io.ObjectOutputStream;
 
 /**
- * Sends requests for data to the remote peer.
+ * Sends pieces of data to the remote peer.
  * 
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-final class RequestSender extends Sender {
+final class PieceSender extends Sender {
     /**
      * Constructs from the local peer.
      * 
      * @param peer
      *            The local peer.
      */
-    RequestSender(final Peer peer) {
+    PieceSender(final Peer peer) {
         super(peer);
     }
 
     @Override
     public Void call() throws IOException, InterruptedException {
-        final ObjectOutputStream stream = peer.getRequestOutputStream();
+        final ObjectOutputStream stream = peer.getDataOutputStream();
 
-        for (PieceInfo pieceInfo = peer.getNextRequest(); null != pieceInfo; pieceInfo = peer
-                .getNextRequest()) {
-            final Request request = new Request(pieceInfo);
-
-            System.out.println("Sending request: " + request);
-            stream.writeObject(request);
+        for (Piece piece = peer.getNextPiece(); null != piece; piece = peer
+                .getNextPiece()) {
+            System.out.println("Sending piece: " + piece);
+            stream.writeObject(piece);
             stream.flush();
         }
 

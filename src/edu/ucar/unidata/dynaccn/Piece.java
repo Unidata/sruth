@@ -100,6 +100,11 @@ final class Piece implements Serializable {
         return pieceInfo.getOffset();
     }
 
+    @Override
+    public String toString() {
+        return getClass().getSimpleName() + "{pieceInfo=" + pieceInfo + "}";
+    }
+
     private Object readResolve() throws InvalidObjectException {
         try {
             return new Piece(pieceInfo, data);

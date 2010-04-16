@@ -43,7 +43,7 @@ final class PieceNotice extends Notice {
 
     @Override
     void process(final Peer peer) throws InterruptedException {
-        peer.process(pieceInfo);
+        peer.processNotice(pieceInfo);
     }
 
     @Override

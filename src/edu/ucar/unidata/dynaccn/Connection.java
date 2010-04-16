@@ -22,7 +22,7 @@ final class Connection {
      */
     private static final int REQUEST      = 0;
     private static final int NOTICE       = 1;
-    // private static final int DATA = 2;
+    private static final int DATA         = 2;
     /**
      * The sockets that comprise the connection.
      */
@@ -160,5 +160,27 @@ final class Connection {
      */
     ObjectOutputStream getNoticeOutputStream() throws IOException {
         return wrapOutput(sockets[NOTICE]);
+    }
+
+    /**
+     * Returns the stream associated with incoming pieces of data.
+     * 
+     * @return The input data-piece stream.
+     * @throws IOException
+     *             if the input data-piece stream can't be obtained.
+     */
+    ObjectInputStream getDataInputStream() throws IOException {
+        return wrapInput(sockets[DATA]);
+    }
+
+    /**
+     * Returns the stream associated with outgoing pieces of data.
+     * 
+     * @return The output data-piece stream.
+     * @throws IOException
+     *             if the output data-piece stream can't be obtained.
+     */
+    ObjectOutputStream getDataOutputStream() throws IOException {
+        return wrapOutput(sockets[DATA]);
     }
 }

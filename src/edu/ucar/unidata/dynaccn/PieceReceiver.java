@@ -9,13 +9,13 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 
 /**
- * Receives requests for data and acts upon them.
+ * Receives pieces of data and acts upon them.
  * 
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-final class NoticeReceiver extends Receiver<Notice> {
+final class PieceReceiver extends Receiver<Piece> {
     /**
      * Constructs from the local peer.
      * 
@@ -24,21 +24,23 @@ final class NoticeReceiver extends Receiver<Notice> {
      * @throws NullPointerException
      *             if {@code peer == null}.
      */
-    NoticeReceiver(final Peer peer) {
-        super(peer, Notice.class);
+    PieceReceiver(final Peer peer) {
+        super(peer, Piece.class);
     }
 
     @Override
     protected ObjectInputStream getInputStream(final Peer peer)
             throws IOException {
-        return peer.getNoticeInputStream();
+        return peer.getDataInputStream();
     }
 
     @Override
-    protected boolean process(final Notice notice) throws IOException,
+    protected boolean process(final Piece piece) throws IOException,
             InterruptedException {
-        System.out.println("Received notice: " + notice);
-        notice.process(peer);
-        return !(notice instanceof DoneNotice);
+        System.out.println("Received piece: " + piece);
+
+        peer.save(piece);
+
+        return true;
     }
 }
