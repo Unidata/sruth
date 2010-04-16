@@ -72,6 +72,20 @@ final class FileId implements Serializable {
         return new File(dir, relFile.getPath());
     }
 
+    /**
+     * Returns the value of a given attribute.
+     * 
+     * @param attribute
+     *            The attribute.
+     * @return The value of the attribute in this instance or {@code null} if
+     *         this instance doesn't have the attribute.
+     */
+    AttributeValue getAttributeValue(final Attribute attribute) {
+        return attribute.getName().equals("name")
+                ? new AttributeValue(relFile.getPath())
+                : null;
+    }
+
     /*
      * (non-Javadoc)
      * 

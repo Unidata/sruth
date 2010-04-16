@@ -301,4 +301,16 @@ final class FileInfo implements Serializable {
                     "Read invalid " + getClass().getSimpleName()).initCause(e);
         }
     }
+
+    /**
+     * Returns the value of a given attribute.
+     * 
+     * @param attribute
+     *            The attribute.
+     * @return The value of the attribute in this instance or {@code null} if
+     *         this instance doesn't have the attribute.
+     */
+    AttributeValue getAttributeValue(final Attribute attribute) {
+        return fileId.getAttributeValue(attribute);
+    }
 }
