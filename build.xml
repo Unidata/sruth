@@ -14,7 +14,7 @@
 		<junit fork="on" haltonfailure="on">
 			<classpath path="${bin-dir}:${junit-jar}"/>
 			<formatter type="xml"/>
-			<test name="edu.ucar.unidata.dynaccn.ClientTest"
+			<test name="edu.ucar.unidata.dynaccn.PeerTest"
 				todir="test-reports"/>
 		</junit>
     </target>

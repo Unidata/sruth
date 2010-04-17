@@ -1,5 +1,6 @@
 package edu.ucar.unidata.dynaccn;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.concurrent.ExecutionException;
@@ -74,12 +75,19 @@ public class PeerTest {
     public void testClient() throws IOException, InterruptedException,
             ExecutionException {
         serverService.submit(new Server("/tmp/server/out", "/tmp/server/in"));
-        clientService.submit(new Client(InetAddress.getLocalHost(),
-                "/tmp/client/out", "/tmp/client/in"));
-        final Future<Void> future = clientService.take();
-        Assert.assertNotNull(future);
+        final Future<Void> future = clientService.submit(new Client(InetAddress
+                .getLocalHost(), "/tmp/client/out", "/tmp/client/in"));
+        Thread.sleep(2000);
+        future.cancel(true);
         Assert.assertTrue(future.isDone());
-        Assert.assertFalse(future.isCancelled());
-        Assert.assertNull(future.get());
+        Assert.assertTrue(future.isCancelled());
+        Assert.assertTrue(new File("/tmp/client/in/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/in/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/in/subdir/server-subfile")
+                .exists());
+        Assert.assertTrue(new File("/tmp/server/in/client-file-1").exists());
+        Assert.assertTrue(new File("/tmp/server/in/client-file-2").exists());
+        Assert.assertTrue(new File("/tmp/server/in/subdir/client-subfile")
+                .exists());
     }
 }
