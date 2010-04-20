@@ -36,13 +36,9 @@ final class Server implements Callable<Void> {
      */
     final ServerSocket[]                       serverSockets = new ServerSocket[Connection.SOCKET_COUNT];
     /**
-     * Pathname of the directory containing files to be sent.
+     * Pathname of the root of the file hiearchy.
      */
-    private final File                         outDir;
-    /**
-     * Pathname of the directory in which to put received files.
-     */
-    private final File                         inDir;
+    private final File                         dir;
     /**
      * The predicate for selecting locally-desired data.
      */
@@ -52,27 +48,22 @@ final class Server implements Callable<Void> {
      * Constructs from nothing. The resulting instance will listen on all
      * available interfaces.
      * 
-     * @param outDir
-     *            Pathname of the directory containing files to be sent.
-     * @param inDir
-     *            Pathname of the directory in which to put received files.
+     * @param dir
+     *            Pathname of the root of the file hierarchy.
      * @param predicate
      *            Predicate for selecting locally-desired data.
      * 
      * @throws IOException
      *             if an I/O error occurs while creating the server sockets.
      * @throws NullPointerException
-     *             if {@code outDir == null || inDir == null || predicate ==
-     *             null}.
+     *             if {@code dir == null || predicate == null}.
      */
-    Server(final String outDir, final String inDir, final Predicate predicate)
-            throws IOException {
+    Server(final String dir, final Predicate predicate) throws IOException {
         if (null == predicate) {
             throw new NullPointerException();
         }
 
-        this.inDir = new File(inDir);
-        this.outDir = new File(outDir);
+        this.dir = new File(dir);
         this.predicate = predicate;
 
         for (int i = 0; i < serverSockets.length; ++i) {
@@ -178,7 +169,7 @@ final class Server implements Callable<Void> {
     private Void service(final Connection connection) throws IOException,
             ClassNotFoundException, InterruptedException, ExecutionException {
         try {
-            return new Peer(connection, outDir, inDir, predicate).call();
+            return new Peer(connection, dir, predicate).call();
         }
         finally {
             connection.close();

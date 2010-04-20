@@ -24,43 +24,40 @@ final class DiskFile {
     /**
      * The set of instances.
      */
-    private static final ConcurrentMap<FileInfo, DiskFile> diskFiles = new ConcurrentHashMap<FileInfo, DiskFile>();
+    private static final ConcurrentMap<File, DiskFile> diskFiles = new ConcurrentHashMap<File, DiskFile>();
     /**
      * The random-access-file.
      */
-    private final RandomAccessFile                         raf;
+    private final RandomAccessFile                     raf;
     /**
      * The set of existing pieces.
      */
-    private final BitSet                                   indexes;
+    private final BitSet                               indexes;
     /**
      * The number of remaining data-pieces to be written.
      */
-    private int                                            pieceCount;
+    private int                                        pieceCount;
 
     /**
-     * Constructs from file-information.
+     * Constructs from a pathname and the number of pieces in the file.
      * 
-     * @param dir
-     *            The pathname of the directory.
-     * @param fileInfo
-     *            Information on the file.
+     * @param path
+     *            The pathname of the file.
+     * @param pieceCount
+     *            The number of pieces in the file.
      * @throws FileNotFoundException
      *             if the file doesn't exist and can't be created.
-     * @throws IllegalArgumentException
-     *             if {@code !dir.isAbsolute()}.
      * @throws NullPointerException
-     *             if {@code dir == null || fileInfo == null}.
+     *             if {@code path == null}.
      */
-    private DiskFile(final File dir, final FileInfo fileInfo)
+    private DiskFile(final File path, final int pieceCount)
             throws FileNotFoundException {
-        final File path = fileInfo.getFile(dir);
         final File parent = path.getParentFile();
 
         parent.mkdirs();
 
         raf = new RandomAccessFile(path, "rwd");
-        pieceCount = fileInfo.getPieceCount();
+        this.pieceCount = pieceCount;
         indexes = new BitSet(pieceCount > 0
                 ? pieceCount - 1
                 : 0);
@@ -85,12 +82,12 @@ final class DiskFile {
      */
     private static DiskFile getInstance(final File dir, final FileInfo fileInfo)
             throws IOException {
-        DiskFile diskFile = diskFiles.get(fileInfo);
+        final File path = fileInfo.getFile(dir);
+        DiskFile diskFile = diskFiles.get(path);
 
         if (null == diskFile) {
-            diskFile = new DiskFile(dir, fileInfo);
-            final DiskFile prevDiskFile = diskFiles.putIfAbsent(fileInfo,
-                    diskFile);
+            diskFile = new DiskFile(path, fileInfo.getPieceCount());
+            final DiskFile prevDiskFile = diskFiles.putIfAbsent(path, diskFile);
 
             if (null != prevDiskFile) {
                 diskFile.close();

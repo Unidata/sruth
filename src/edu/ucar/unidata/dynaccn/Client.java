@@ -22,15 +22,11 @@ final class Client implements Callable<Void> {
      */
     private final Connection connection = new Connection();
     /**
-     * Pathname of the directory containing the files to be sent.
+     * Pathname of the root of the file hierarchy.
      */
-    private final File       outDir;
+    private final File       dir;
     /**
      * Pathname of the directory into which to put received files.
-     */
-    private final File       inDir;
-    /**
-     * The predicate for selecting locally-desired data.
      */
     private final Predicate  predicate;
 
@@ -41,27 +37,24 @@ final class Client implements Callable<Void> {
      * 
      * @param inetAddress
      *            The Internet address of the remote server.
-     * @param outDir
-     *            Pathname of the directory containing files to be sent.
-     * @param inDir
-     *            Pathname of the directory into which to put received files.
+     * @param dir
+     *            Pathname of the root of the file hierarchy.
      * @param predicate
      *            The predicate for selecting locally-desired data.
      * @throws IOException
      *             if an I/O error occurs while attempting to connect to the
      *             remote server.
      * @throws NullPointerException
-     *             if {@code inetAddress == null || outDir == null || inDir ==
-     *             null || predicate == null}.
+     *             if {@code inetAddress == null || dir == null || predicate ==
+     *             null}.
      */
-    Client(final InetAddress inetAddress, final String outDir,
-            final String inDir, final Predicate predicate) throws IOException {
+    Client(final InetAddress inetAddress, final String dir,
+            final Predicate predicate) throws IOException {
         if (null == predicate) {
             throw new NullPointerException();
         }
 
-        this.outDir = new File(outDir);
-        this.inDir = new File(inDir);
+        this.dir = new File(dir);
         this.predicate = predicate;
 
         for (int i = 0; i < Connection.SOCKET_COUNT; i++) {
@@ -82,7 +75,7 @@ final class Client implements Callable<Void> {
     public Void call() throws IOException, InterruptedException,
             ExecutionException {
         try {
-            return new Peer(connection, outDir, inDir, predicate).call();
+            return new Peer(connection, dir, predicate).call();
         }
         finally {
             connection.close();

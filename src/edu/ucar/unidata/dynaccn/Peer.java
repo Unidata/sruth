@@ -42,13 +42,9 @@ final class Peer implements Callable<Void> {
      */
     private final Connection                      connection;
     /**
-     * Pathname of the directory containing the files to be sent.
+     * Pathname of the root of the file hierarchy.
      */
-    private final File                            outDir;
-    /**
-     * Pathname of the directory into which to put received files.
-     */
-    private final File                            inDir;
+    private final File                            dir;
     /**
      * Request queue. Contains specifications of data-pieces to request from the
      * remote peer.
@@ -79,29 +75,25 @@ final class Peer implements Callable<Void> {
      * 
      * @param connection
      *            The connection to the remote peer.
-     * @param outDir
-     *            Pathname of the directory containing files to be sent.
-     * @param inDir
-     *            Pathname of the directory into which to put received files.
+     * @param dir
+     *            Pathname of the root of the file hierarchy.
      * @param predicate
      *            Predicate for selecting locally-desired data.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code connection == null || outDir == null || inDir ==
-     *             null || predicate == null}.
+     *             if {@code connection == null || dir == null || predicate ==
+     *             null}.
      */
-    Peer(final Connection connection, final File outDir, final File inDir,
-            final Predicate predicate) throws IOException {
-        if (null == connection || null == outDir || null == inDir
-                || null == predicate) {
+    Peer(final Connection connection, final File dir, final Predicate predicate)
+            throws IOException {
+        if (null == connection || null == dir || null == predicate) {
             throw new NullPointerException();
         }
 
         this.connection = connection;
-        this.outDir = outDir;
-        this.inDir = inDir;
-        noticeIterator = new NoticeIterator(outDir, outDir);
+        this.dir = dir;
+        noticeIterator = new NoticeIterator(dir, dir);
         this.predicate = predicate;
 
         // requestSenderFuture =
@@ -110,7 +102,7 @@ final class Peer implements Callable<Void> {
         completionService.submit(new RequestReceiver(this));
 
         // noticeSenderFuture =
-        completionService.submit(new NoticeSender(this, outDir));
+        completionService.submit(new NoticeSender(this, dir));
         // noticeReceiverFuture =
         completionService.submit(new NoticeReceiver(this));
 
@@ -231,7 +223,7 @@ final class Peer implements Callable<Void> {
      */
     void processNotice(final FileInfo fileInfo) throws IOException {
         if (predicate.satisfiedBy(fileInfo)) {
-            DiskFile.create(inDir, fileInfo);
+            DiskFile.create(dir, fileInfo);
         }
     }
 
@@ -274,7 +266,7 @@ final class Peer implements Callable<Void> {
      */
     void processRequest(final PieceInfo pieceInfo) throws InterruptedException,
             IOException {
-        pieceQueue.put(DiskFile.getPiece(outDir, pieceInfo));
+        pieceQueue.put(DiskFile.getPiece(dir, pieceInfo));
     }
 
     /**
@@ -303,7 +295,7 @@ final class Peer implements Callable<Void> {
      *             if an I/O error occurs.
      */
     boolean processData(final Piece piece) throws IOException {
-        if (DiskFile.putPiece(inDir, piece)) {
+        if (DiskFile.putPiece(dir, piece)) {
             predicate.removeIfPossible(piece.getFileInfo());
         }
 

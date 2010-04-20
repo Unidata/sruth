@@ -48,24 +48,16 @@ public class PeerTest {
     @Before
     public void setUp() throws Exception {
         system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
-        system(new String[] { "mkdir", "-p", "/tmp/server/out/subdir",
-                "/tmp/server/in" });
-        system(new String[] { "mkdir", "-p", "/tmp/client/out/subdir",
-                "/tmp/client/in" });
-        system(new String[] { "mkdir", "-p", "/tmp/client/out",
-                "/tmp/client/in" });
+        system(new String[] { "mkdir", "-p", "/tmp/server/subdir" });
+        system(new String[] { "mkdir", "-p", "/tmp/client/subdir" });
+        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-1" });
+        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-2" });
         system(new String[] { "sh", "-c",
-                "date > /tmp/server/out/server-file-1" });
+                "date > /tmp/server/subdir/server-subfile" });
+        system(new String[] { "sh", "-c", "date > /tmp/client/client-file-1" });
+        system(new String[] { "sh", "-c", "date > /tmp/client/client-file-2" });
         system(new String[] { "sh", "-c",
-                "date > /tmp/server/out/server-file-2" });
-        system(new String[] { "sh", "-c",
-                "date > /tmp/server/out/subdir/server-subfile" });
-        system(new String[] { "sh", "-c",
-                "date > /tmp/client/out/client-file-1" });
-        system(new String[] { "sh", "-c",
-                "date > /tmp/client/out/client-file-2" });
-        system(new String[] { "sh", "-c",
-                "date > /tmp/client/out/subdir/client-subfile" });
+                "date > /tmp/client/subdir/client-subfile" });
     }
 
     @After
@@ -80,14 +72,13 @@ public class PeerTest {
         Filter filter = new Filter(new Constraint[] { constraint });
         Predicate predicate = new Predicate(new Filter[] { filter });
         final Future<Void> serverFuture = serverService.submit(new Server(
-                "/tmp/server/out", "/tmp/server/in", predicate));
+                "/tmp/server", predicate));
 
         constraint = attribute.notEqualTo("server-file-2");
         filter = new Filter(new Constraint[] { constraint });
         predicate = new Predicate(new Filter[] { filter });
         final Future<Void> clientFuture = clientService.submit(new Client(
-                InetAddress.getLocalHost(), "/tmp/client/out",
-                "/tmp/client/in", predicate));
+                InetAddress.getLocalHost(), "/tmp/client", predicate));
 
         // clientFuture.get();
         Thread.sleep(2000);
@@ -109,21 +100,19 @@ public class PeerTest {
         catch (final CancellationException e) {
         }
 
-        Assert.assertTrue(new File("/tmp/client/in/server-file-1").exists());
-        Assert
-                .assertTrue(new File("/tmp/client/in/server-file-1").length() > 0);
-        Assert.assertFalse(new File("/tmp/client/in/server-file-2").exists());
-        Assert.assertTrue(new File("/tmp/client/in/subdir/server-subfile")
+        Assert.assertTrue(new File("/tmp/client/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/server-file-1").length() > 0);
+        Assert.assertFalse(new File("/tmp/client/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/subdir/server-subfile")
                 .exists());
-        Assert.assertTrue(new File("/tmp/client/in/subdir/server-subfile")
+        Assert.assertTrue(new File("/tmp/client/subdir/server-subfile")
                 .length() > 0);
-        Assert.assertTrue(new File("/tmp/server/in/client-file-1").exists());
-        Assert
-                .assertTrue(new File("/tmp/server/in/client-file-1").length() > 0);
-        Assert.assertFalse(new File("/tmp/server/in/client-file-2").exists());
-        Assert.assertTrue(new File("/tmp/server/in/subdir/client-subfile")
+        Assert.assertTrue(new File("/tmp/server/client-file-1").exists());
+        Assert.assertTrue(new File("/tmp/server/client-file-1").length() > 0);
+        Assert.assertFalse(new File("/tmp/server/client-file-2").exists());
+        Assert.assertTrue(new File("/tmp/server/subdir/client-subfile")
                 .exists());
-        Assert.assertTrue(new File("/tmp/server/in/subdir/client-subfile")
+        Assert.assertTrue(new File("/tmp/server/subdir/client-subfile")
                 .length() > 0);
     }
 
@@ -135,14 +124,13 @@ public class PeerTest {
         Filter filter = new Filter(new Constraint[] { constraint });
         Predicate predicate = new Predicate(new Filter[] { filter });
         final Future<Void> serverFuture = serverService.submit(new Server(
-                "/tmp/server/out", "/tmp/server/in", predicate));
+                "/tmp/server", predicate));
 
         constraint = attribute.equalTo("server-file-2");
         filter = new Filter(new Constraint[] { constraint });
         predicate = new Predicate(new Filter[] { filter });
         final Future<Void> clientFuture = clientService.submit(new Client(
-                InetAddress.getLocalHost(), "/tmp/client/out",
-                "/tmp/client/in", predicate));
+                InetAddress.getLocalHost(), "/tmp/client", predicate));
 
         clientFuture.get();
         Assert.assertTrue(clientFuture.isDone());
@@ -155,11 +143,10 @@ public class PeerTest {
         catch (final CancellationException e) {
         }
 
-        Assert.assertFalse(new File("/tmp/client/in/server-file-1").exists());
-        Assert.assertTrue(new File("/tmp/client/in/server-file-2").exists());
-        Assert
-                .assertTrue(new File("/tmp/client/in/server-file-2").length() > 0);
-        Assert.assertFalse(new File("/tmp/client/in/subdir/server-subfile")
+        Assert.assertFalse(new File("/tmp/client/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/server-file-2").length() > 0);
+        Assert.assertFalse(new File("/tmp/client/subdir/server-subfile")
                 .exists());
     }
 }
