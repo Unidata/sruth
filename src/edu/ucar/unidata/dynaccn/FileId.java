@@ -8,6 +8,8 @@ package edu.ucar.unidata.dynaccn;
 import java.io.File;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.Map;
 
 /**
  * An identifier for a file.
@@ -80,9 +82,10 @@ final class FileId implements Serializable {
      * @return The value of the attribute in this instance or {@code null} if
      *         this instance doesn't have the attribute.
      */
-    AttributeValue getAttributeValue(final Attribute attribute) {
-        return attribute.getName().equals("name")
-                ? new AttributeValue(relFile.getPath())
+    Object getAttributeValue(final Attribute attribute) {
+        return (attribute.getType().equals(String.class) && attribute.getName()
+                .equals("name"))
+                ? relFile.getPath()
                 : null;
     }
 
@@ -142,5 +145,15 @@ final class FileId implements Serializable {
             throw (InvalidObjectException) new InvalidObjectException(
                     "Read invalid " + getClass().getSimpleName()).initCause(e);
         }
+    }
+
+    /**
+     * Returns the map of attributes and their values.
+     * 
+     * @return The map of attributes and their values.
+     */
+    Map<Attribute, Object> getAttributeMap() {
+        return Collections.singletonMap(new Attribute("name"), (Object) relFile
+                .getPath());
     }
 }

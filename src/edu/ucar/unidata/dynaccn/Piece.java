@@ -65,7 +65,7 @@ final class Piece implements Serializable {
      * 
      * @return The piece-index of this instance.
      */
-    long getIndex() {
+    int getIndex() {
         return pieceInfo.getIndex();
     }
 
@@ -76,6 +76,15 @@ final class Piece implements Serializable {
      */
     byte[] getData() {
         return data;
+    }
+
+    /**
+     * Returns information on the file that contains this piece of data.
+     * 
+     * @return Information on the containing file.
+     */
+    FileInfo getFileInfo() {
+        return pieceInfo.getFileInfo();
     }
 
     /**

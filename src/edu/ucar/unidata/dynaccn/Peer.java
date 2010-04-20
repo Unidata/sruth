@@ -6,11 +6,9 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.RandomAccessFile;
 import java.util.Iterator;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
@@ -52,17 +50,22 @@ final class Peer implements Callable<Void> {
      */
     private final File                            inDir;
     /**
-     * Request queue.
+     * Request queue. Contains specifications of data-pieces to request from the
+     * remote peer.
      */
-    private final BlockingQueue<PieceInfo>        noticeQueue       = new SynchronousQueue<PieceInfo>();
+    private final BlockingQueue<PieceInfo>        requestQueue      = new SynchronousQueue<PieceInfo>();
     /**
-     * Data-piece queue.
+     * Piece queue. Contains pieces of data to be sent to the remote peer.
      */
-    private final BlockingQueue<Piece>            requestQueue      = new SynchronousQueue<Piece>();
+    private final BlockingQueue<Piece>            pieceQueue        = new SynchronousQueue<Piece>();
     /**
      * Iterator over the files to send to the remote peer.
      */
-    final Iterator<Notice>                        noticeIterator;
+    private final Iterator<Notice>                noticeIterator;
+    /**
+     * The predicate for selecting locally-desired data.
+     */
+    private final Predicate                       predicate;
 
     /**
      * The futures of the various tasks.
@@ -80,15 +83,18 @@ final class Peer implements Callable<Void> {
      *            Pathname of the directory containing files to be sent.
      * @param inDir
      *            Pathname of the directory into which to put received files.
+     * @param predicate
+     *            Predicate for selecting locally-desired data.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
      *             if {@code connection == null || outDir == null || inDir ==
-     *             null}.
+     *             null || predicate == null}.
      */
-    Peer(final Connection connection, final File outDir, final File inDir)
-            throws IOException {
-        if (null == connection || null == outDir || null == inDir) {
+    Peer(final Connection connection, final File outDir, final File inDir,
+            final Predicate predicate) throws IOException {
+        if (null == connection || null == outDir || null == inDir
+                || null == predicate) {
             throw new NullPointerException();
         }
 
@@ -96,6 +102,7 @@ final class Peer implements Callable<Void> {
         this.outDir = outDir;
         this.inDir = inDir;
         noticeIterator = new NoticeIterator(outDir, outDir);
+        this.predicate = predicate;
 
         // requestSenderFuture =
         completionService.submit(new RequestSender(this));
@@ -116,6 +123,11 @@ final class Peer implements Callable<Void> {
         try {
             for (int i = 0; i < 4; ++i) {
                 completionService.take().get();
+
+                if (predicate.isEmpty()) {
+                    executorService.shutdownNow();
+                    break;
+                }
             }
         }
         catch (final ExecutionException e) {
@@ -199,33 +211,58 @@ final class Peer implements Callable<Void> {
     }
 
     /**
-     * Creates an empty file based on information about the file.
+     * Returns the next notice to send to the remote peer.
+     * 
+     * @return The next notice to send to the remote peer.
+     */
+    Notice getNextNotice() {
+        return noticeIterator.hasNext()
+                ? noticeIterator.next()
+                : null;
+    }
+
+    /**
+     * Processes a notice about a file that's available from the remote peer.
      * 
      * @param fileInfo
      *            Information about the file.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void createFile(final FileInfo fileInfo) throws IOException {
-        final File file = fileInfo.getFile(inDir);
-        final File parent = file.getParentFile();
+    void processNotice(final FileInfo fileInfo) throws IOException {
+        if (predicate.satisfiedBy(fileInfo)) {
+            final File file = fileInfo.getFile(inDir);
+            final File parent = file.getParentFile();
 
-        parent.mkdirs();
-        file.createNewFile();
+            parent.mkdirs();
+            file.createNewFile();
+        }
     }
 
     /**
-     * Processes information about an available piece of data at the remote
+     * Processes a notice about a piece of data that's available from the remote
      * peer.
      * 
      * @param pieceInfo
-     *            Information about the available piece of data at the remote
-     *            peer.
+     *            Information about the piece of data at the remote peer.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      */
     void processNotice(final PieceInfo pieceInfo) throws InterruptedException {
-        noticeQueue.put(pieceInfo);
+        if (predicate.satisfiedBy(pieceInfo.getFileInfo())) {
+            requestQueue.put(pieceInfo);
+        }
+    }
+
+    /**
+     * Returns the next request for a piece of data to send to the remote peer.
+     * 
+     * @return Information on the next wanted piece of data.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    PieceInfo getNextRequest() throws InterruptedException {
+        return requestQueue.take();
     }
 
     /**
@@ -241,36 +278,7 @@ final class Peer implements Callable<Void> {
      */
     void processRequest(final PieceInfo pieceInfo) throws InterruptedException,
             IOException {
-        final File path = pieceInfo.getFile(outDir);
-
-        if (!path.exists()) {
-            throw new FileNotFoundException("File doesn't exist: \"" + path
-                    + "\"");
-        }
-
-        final RandomAccessFile file = new RandomAccessFile(path, "r");
-        final byte[] data = new byte[pieceInfo.getSize()];
-
-        try {
-            file.seek(pieceInfo.getOffset());
-            file.read(data);
-        }
-        finally {
-            file.close();
-        }
-
-        requestQueue.put(new Piece(pieceInfo, data));
-    }
-
-    /**
-     * Returns information on the next wanted piece of data.
-     * 
-     * @return Information on the next wanted piece of data.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     */
-    PieceInfo getNextRequest() throws InterruptedException {
-        return noticeQueue.take();
+        pieceQueue.put(DiskFile.getPiece(outDir, pieceInfo));
     }
 
     /**
@@ -283,47 +291,27 @@ final class Peer implements Callable<Void> {
      *             if an I/O error occurs.
      */
     Piece getNextPiece() throws InterruptedException, IOException {
-        return requestQueue.take();
+        return pieceQueue.take();
     }
 
     /**
-     * Saves a piece of data in the relevant file.
+     * Processes a piece of data from the remote peer.
      * 
      * @param piece
-     *            The piece to be saved.
+     *            The piece of data from the remote peer.
+     * @return {@code true} if and only if all the desired data has been
+     *         received.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void save(final Piece piece) throws IOException {
-        final File path = piece.getFile(inDir);
-
-        if (!path.exists()) {
-            throw new FileNotFoundException("File doesn't exist: \"" + path
-                    + "\"");
+    boolean processData(final Piece piece) throws IOException {
+        if (DiskFile.putPiece(inDir, piece)) {
+            predicate.removeIfPossible(piece.getFileInfo());
         }
 
-        final RandomAccessFile file = new RandomAccessFile(path, "rwd");
-
-        try {
-            file.seek(piece.getOffset());
-            file.write(piece.getData());
-        }
-        finally {
-            file.close();
-        }
-    }
-
-    /**
-     * Returns the next notice to send to the remote peer.
-     * 
-     * @return The next notice to send to the remote peer.
-     */
-    Notice getNextNotice() {
-        return noticeIterator.hasNext()
-                ? noticeIterator.next()
-                : null;
+        return predicate.isEmpty();
     }
 
     /**

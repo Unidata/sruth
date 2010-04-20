@@ -39,8 +39,6 @@ final class PieceReceiver extends Receiver<Piece> {
             InterruptedException {
         System.out.println("Received piece: " + piece);
 
-        peer.save(piece);
-
-        return true;
+        return !peer.processData(piece);
     }
 }

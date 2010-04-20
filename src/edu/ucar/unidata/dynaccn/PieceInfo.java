@@ -28,7 +28,7 @@ final class PieceInfo implements Serializable {
     /**
      * The piece index.
      */
-    private final long        index;
+    private final int         index;
 
     /**
      * Constructs from a file identifier and a piece index.
@@ -42,7 +42,7 @@ final class PieceInfo implements Serializable {
      * @throws NullPointerException
      *             if {@code fileInfo == null}.
      */
-    PieceInfo(final FileInfo fileInfo, final long index) {
+    PieceInfo(final FileInfo fileInfo, final int index) {
         fileInfo.vet(index);
 
         this.fileInfo = fileInfo;
@@ -77,7 +77,7 @@ final class PieceInfo implements Serializable {
      * 
      * @return The piece-index of this instance.
      */
-    long getIndex() {
+    int getIndex() {
         return index;
     }
 

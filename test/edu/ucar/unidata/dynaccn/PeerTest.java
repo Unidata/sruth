@@ -3,6 +3,7 @@ package edu.ucar.unidata.dynaccn;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
@@ -72,22 +73,89 @@ public class PeerTest {
     }
 
     @Test
-    public void testClient() throws IOException, InterruptedException,
+    public void testPeers() throws IOException, InterruptedException,
             ExecutionException {
-        serverService.submit(new Server("/tmp/server/out", "/tmp/server/in"));
-        final Future<Void> future = clientService.submit(new Client(InetAddress
-                .getLocalHost(), "/tmp/client/out", "/tmp/client/in"));
+        final Attribute attribute = new Attribute("name");
+        Constraint constraint = attribute.notEqualTo("client-file-2");
+        Filter filter = new Filter(new Constraint[] { constraint });
+        Predicate predicate = new Predicate(new Filter[] { filter });
+        final Future<Void> serverFuture = serverService.submit(new Server(
+                "/tmp/server/out", "/tmp/server/in", predicate));
+
+        constraint = attribute.notEqualTo("server-file-2");
+        filter = new Filter(new Constraint[] { constraint });
+        predicate = new Predicate(new Filter[] { filter });
+        final Future<Void> clientFuture = clientService.submit(new Client(
+                InetAddress.getLocalHost(), "/tmp/client/out",
+                "/tmp/client/in", predicate));
+
+        // clientFuture.get();
         Thread.sleep(2000);
-        future.cancel(true);
-        Assert.assertTrue(future.isDone());
-        Assert.assertTrue(future.isCancelled());
+        clientFuture.cancel(true);
+        Assert.assertTrue(clientFuture.isDone());
+        try {
+            clientFuture.get();
+        }
+        catch (final CancellationException e) {
+        }
+        catch (final ExecutionException e) {
+            throw e;
+        }
+        serverFuture.cancel(true);
+        Assert.assertTrue(serverFuture.isDone());
+        try {
+            serverFuture.get();
+        }
+        catch (final CancellationException e) {
+        }
+        catch (final ExecutionException e) {
+            throw e;
+        }
+
         Assert.assertTrue(new File("/tmp/client/in/server-file-1").exists());
-        Assert.assertTrue(new File("/tmp/client/in/server-file-2").exists());
+        Assert.assertFalse(new File("/tmp/client/in/server-file-2").exists());
         Assert.assertTrue(new File("/tmp/client/in/subdir/server-subfile")
                 .exists());
         Assert.assertTrue(new File("/tmp/server/in/client-file-1").exists());
-        Assert.assertTrue(new File("/tmp/server/in/client-file-2").exists());
+        Assert.assertTrue(!new File("/tmp/server/in/client-file-2").exists());
         Assert.assertTrue(new File("/tmp/server/in/subdir/client-subfile")
+                .exists());
+    }
+
+    @Test
+    public void testTermination() throws IOException, InterruptedException,
+            ExecutionException {
+        final Attribute attribute = new Attribute("name");
+        Constraint constraint = attribute.notEqualTo("client-file-2");
+        Filter filter = new Filter(new Constraint[] { constraint });
+        Predicate predicate = new Predicate(new Filter[] { filter });
+        final Future<Void> serverFuture = serverService.submit(new Server(
+                "/tmp/server/out", "/tmp/server/in", predicate));
+
+        constraint = attribute.equalTo("server-file-2");
+        filter = new Filter(new Constraint[] { constraint });
+        predicate = new Predicate(new Filter[] { filter });
+        final Future<Void> clientFuture = clientService.submit(new Client(
+                InetAddress.getLocalHost(), "/tmp/client/out",
+                "/tmp/client/in", predicate));
+
+        clientFuture.get();
+        Assert.assertTrue(clientFuture.isDone());
+        Assert.assertFalse(clientFuture.isCancelled());
+        serverFuture.cancel(true);
+        Assert.assertTrue(serverFuture.isDone());
+        try {
+            serverFuture.get();
+        }
+        catch (final CancellationException e) {
+        }
+        catch (final ExecutionException e) {
+            throw e;
+        }
+
+        Assert.assertFalse(new File("/tmp/client/in/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/in/server-file-2").exists());
+        Assert.assertFalse(new File("/tmp/client/in/subdir/server-subfile")
                 .exists());
     }
 }

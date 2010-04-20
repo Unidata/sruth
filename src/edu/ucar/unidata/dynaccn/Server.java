@@ -43,6 +43,10 @@ final class Server implements Callable<Void> {
      * Pathname of the directory in which to put received files.
      */
     private final File                         inDir;
+    /**
+     * The predicate for selecting locally-desired data.
+     */
+    private final Predicate                    predicate;
 
     /**
      * Constructs from nothing. The resulting instance will listen on all
@@ -52,15 +56,24 @@ final class Server implements Callable<Void> {
      *            Pathname of the directory containing files to be sent.
      * @param inDir
      *            Pathname of the directory in which to put received files.
+     * @param predicate
+     *            Predicate for selecting locally-desired data.
      * 
      * @throws IOException
      *             if an I/O error occurs while creating the server sockets.
      * @throws NullPointerException
-     *             if {@code outDir == null || indir == null}.
+     *             if {@code outDir == null || inDir == null || predicate ==
+     *             null}.
      */
-    Server(final String outDir, final String inDir) throws IOException {
+    Server(final String outDir, final String inDir, final Predicate predicate)
+            throws IOException {
+        if (null == predicate) {
+            throw new NullPointerException();
+        }
+
         this.inDir = new File(inDir);
         this.outDir = new File(outDir);
+        this.predicate = predicate;
 
         for (int i = 0; i < serverSockets.length; ++i) {
             final int port = Server.START_PORT + i;
@@ -80,8 +93,15 @@ final class Server implements Callable<Void> {
 
     @Override
     public Void call() throws Exception {
-        for (;;) {
-            accept();
+        try {
+            for (;;) {
+                accept();
+            }
+        }
+        finally {
+            for (final ServerSocket socket : serverSockets) {
+                socket.close();
+            }
         }
     }
 
@@ -157,6 +177,11 @@ final class Server implements Callable<Void> {
      */
     private Void service(final Connection connection) throws IOException,
             ClassNotFoundException, InterruptedException, ExecutionException {
-        return new Peer(connection, outDir, inDir).call();
+        try {
+            return new Peer(connection, outDir, inDir, predicate).call();
+        }
+        finally {
+            connection.close();
+        }
     }
 }

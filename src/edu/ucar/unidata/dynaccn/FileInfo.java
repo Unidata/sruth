@@ -9,6 +9,7 @@ import java.io.File;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.util.Iterator;
+import java.util.Map;
 
 /**
  * Information about a file.
@@ -21,23 +22,23 @@ final class FileInfo implements Serializable {
     /**
      * The serial version identifier.
      */
-    private static final long    serialVersionUID = 1L;
+    private static final long   serialVersionUID = 1L;
     /**
      * The file identifier.
      */
-    private final FileId         fileId;
+    private final FileId        fileId;
     /**
      * The size of the file in bytes.
      */
-    private final long           fileSize;
+    private final long          fileSize;
     /**
      * The size of piece of the file in bytes.
      */
-    private final int            pieceSize;
+    private final int           pieceSize;
     /**
      * The last valid piece-index.
      */
-    private final transient long lastIndex;
+    private final transient int lastIndex;
 
     /**
      * Constructs from information on the file.
@@ -71,7 +72,7 @@ final class FileInfo implements Serializable {
                 throw new IllegalArgumentException("Invalid piece-size: "
                         + pieceSize);
             }
-            lastIndex = (fileSize - 1) / pieceSize;
+            lastIndex = (int) ((fileSize - 1) / pieceSize);
         }
         this.fileId = fileId;
         this.fileSize = fileSize;
@@ -160,7 +161,7 @@ final class FileInfo implements Serializable {
      * 
      * @return The number of data-pieces.
      */
-    long getPieceCount() {
+    int getPieceCount() {
         return lastIndex + 1;
     }
 
@@ -203,7 +204,7 @@ final class FileInfo implements Serializable {
             /**
              * The index of the next piece to be returned.
              */
-            private long index = 0;
+            private int index = 0;
 
             @Override
             public boolean hasNext() {
@@ -310,7 +311,16 @@ final class FileInfo implements Serializable {
      * @return The value of the attribute in this instance or {@code null} if
      *         this instance doesn't have the attribute.
      */
-    AttributeValue getAttributeValue(final Attribute attribute) {
+    Object getAttributeValue(final Attribute attribute) {
         return fileId.getAttributeValue(attribute);
+    }
+
+    /**
+     * Returns the map of attributes and their values.
+     * 
+     * @return The map of attributes and their values.
+     */
+    Map<Attribute, Object> getAttributeMap() {
+        return fileId.getAttributeMap();
     }
 }

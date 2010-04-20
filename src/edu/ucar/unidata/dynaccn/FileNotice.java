@@ -44,7 +44,7 @@ final class FileNotice extends Notice {
 
     @Override
     void process(final Peer peer) throws IOException {
-        peer.createFile(fileInfo);
+        peer.processNotice(fileInfo);
     }
 
     /*

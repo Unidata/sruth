@@ -5,10 +5,13 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.util.Set;
+import java.util.TreeSet;
+
 /**
  * A disjunction of filters for selecting data for a peer.
  * 
- * Instances are immutable.
+ * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
@@ -16,7 +19,7 @@ final class Predicate {
     /**
      * The filters.
      */
-    private final Filter[] filters;
+    private final Set<Filter> filters = new TreeSet<Filter>();
 
     /**
      * Constructs from an array of filters.
@@ -31,7 +34,9 @@ final class Predicate {
             throw new NullPointerException();
         }
 
-        this.filters = filters;
+        for (final Filter filter : filters) {
+            this.filters.add(filter);
+        }
     }
 
     /**
@@ -43,12 +48,40 @@ final class Predicate {
      * @throws NullPointerException
      *             if {@code fileInfo == null}.
      */
-    boolean satisfiedBy(final FileInfo fileInfo) {
+    synchronized boolean satisfiedBy(final FileInfo fileInfo) {
         for (final Filter filter : filters) {
             if (filter.satisfiedBy(fileInfo)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Removes a specification of a file from this instance, if possible. If a
+     * filter of this predicate is satisfied by the given file specification and
+     * only by that specification, then that filter will be removed from this
+     * instance.
+     * 
+     * @param fileInfo
+     *            Information on the file to be removed.
+     * @see {@link Filter#exactlySpecifies(FileInfo)}
+     */
+    synchronized void removeIfPossible(final FileInfo fileInfo) {
+        for (final Filter filter : filters) {
+            if (filter.exactlySpecifies(fileInfo)) {
+                filters.remove(filter);
+                break;
+            }
+        }
+    }
+
+    /**
+     * Indicates if this instance contains no filters.
+     * 
+     * @return {@code true} if and only if this instance contains no filters.
+     */
+    synchronized boolean isEmpty() {
+        return filters.isEmpty();
     }
 }

@@ -29,6 +29,10 @@ final class Client implements Callable<Void> {
      * Pathname of the directory into which to put received files.
      */
     private final File       inDir;
+    /**
+     * The predicate for selecting locally-desired data.
+     */
+    private final Predicate  predicate;
 
     /**
      * Constructs from the Internet address of the remote server. Executes
@@ -41,17 +45,24 @@ final class Client implements Callable<Void> {
      *            Pathname of the directory containing files to be sent.
      * @param inDir
      *            Pathname of the directory into which to put received files.
+     * @param predicate
+     *            The predicate for selecting locally-desired data.
      * @throws IOException
      *             if an I/O error occurs while attempting to connect to the
      *             remote server.
      * @throws NullPointerException
      *             if {@code inetAddress == null || outDir == null || inDir ==
-     *             null}.
+     *             null || predicate == null}.
      */
     Client(final InetAddress inetAddress, final String outDir,
-            final String inDir) throws IOException {
+            final String inDir, final Predicate predicate) throws IOException {
+        if (null == predicate) {
+            throw new NullPointerException();
+        }
+
         this.outDir = new File(outDir);
         this.inDir = new File(inDir);
+        this.predicate = predicate;
 
         for (int i = 0; i < Connection.SOCKET_COUNT; i++) {
             final int port = Server.START_PORT + i;
@@ -70,6 +81,11 @@ final class Client implements Callable<Void> {
     @Override
     public Void call() throws IOException, InterruptedException,
             ExecutionException {
-        return new Peer(connection, outDir, inDir).call();
+        try {
+            return new Peer(connection, outDir, inDir, predicate).call();
+        }
+        finally {
+            connection.close();
+        }
     }
 }
