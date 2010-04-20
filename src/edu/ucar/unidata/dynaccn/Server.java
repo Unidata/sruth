@@ -3,6 +3,7 @@ package edu.ucar.unidata.dynaccn;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
@@ -70,7 +71,12 @@ final class Server implements Callable<Void> {
             final int port = Server.START_PORT + i;
 
             try {
-                serverSockets[i] = new ServerSocket(port, BACKLOG);
+                final ServerSocket socket = new ServerSocket();
+
+                socket.setReuseAddress(true);
+                socket.bind(new InetSocketAddress(port), BACKLOG);
+
+                serverSockets[i] = socket;
             }
             catch (final IOException e) {
                 while (--i >= 0) {
@@ -91,7 +97,12 @@ final class Server implements Callable<Void> {
         }
         finally {
             for (final ServerSocket socket : serverSockets) {
-                socket.close();
+                try {
+                    socket.close();
+                }
+                catch (final IOException e) {
+                    // ignored
+                }
             }
         }
     }
@@ -102,24 +113,18 @@ final class Server implements Callable<Void> {
      * 
      * @throws ClassNotFoundException
      *             If the {@link RequestReceiver} receives an invalid object.
+     * @throws ExecutionException
+     *             if servicing the connection is terminated due to an exception
+     *             thrown by one of the server's threads.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      * @throws IOException
      *             If an I/O error occurs in the {@link RequestReceiver}.
      */
-    private void accept() throws Exception {
+    private void accept() throws IOException, ClassNotFoundException,
+            InterruptedException, ExecutionException {
         for (int i = 0; i < serverSockets.length; ++i) {
-            try {
-                add(serverSockets[i].accept());
-            }
-            catch (final IOException e) {
-                for (int j = 0; j < serverSockets.length; ++j) {
-                    try {
-                        serverSockets[j].close();
-                    }
-                    catch (final IOException e1) {
-                    }
-                }
-                throw e;
-            }
+            add(serverSockets[i].accept());
         }
     }
 
@@ -130,10 +135,16 @@ final class Server implements Callable<Void> {
      *            The socket to be added.
      * @throws ClassNotFoundException
      *             If the {@link RequestReceiver} receives an invalid object.
+     * @throws ExecutionException
+     *             if servicing the connection is terminated due to an exception
+     *             thrown by one of the server's threads.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      * @throws IOException
      *             If an I/O error occurs in the {@link RequestReceiver}.
      */
-    private synchronized void add(final Socket socket) throws Exception {
+    private synchronized void add(final Socket socket) throws IOException,
+            ClassNotFoundException, InterruptedException, ExecutionException {
         assert null != socket;
         assert socket.isConnected();
 
@@ -160,11 +171,13 @@ final class Server implements Callable<Void> {
      *            The connection to be serviced.
      * @throws ClassNotFoundException
      *             If the {@link RequestReceiver} receives an invalid object.
-     * @throws IOException
-     *             If an I/O error occurs in the {@link RequestReceiver}.
      * @throws ExecutionException
      *             if servicing the connection is terminated due to an exception
      *             thrown by one of the server's threads.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     * @throws IOException
+     *             If an I/O error occurs in the {@link RequestReceiver}.
      */
     private Void service(final Connection connection) throws IOException,
             ClassNotFoundException, InterruptedException, ExecutionException {
