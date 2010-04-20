@@ -108,18 +108,23 @@ public class PeerTest {
         }
         catch (final CancellationException e) {
         }
-        catch (final ExecutionException e) {
-            throw e;
-        }
 
         Assert.assertTrue(new File("/tmp/client/in/server-file-1").exists());
+        Assert
+                .assertTrue(new File("/tmp/client/in/server-file-1").length() > 0);
         Assert.assertFalse(new File("/tmp/client/in/server-file-2").exists());
         Assert.assertTrue(new File("/tmp/client/in/subdir/server-subfile")
                 .exists());
+        Assert.assertTrue(new File("/tmp/client/in/subdir/server-subfile")
+                .length() > 0);
         Assert.assertTrue(new File("/tmp/server/in/client-file-1").exists());
-        Assert.assertTrue(!new File("/tmp/server/in/client-file-2").exists());
+        Assert
+                .assertTrue(new File("/tmp/server/in/client-file-1").length() > 0);
+        Assert.assertFalse(new File("/tmp/server/in/client-file-2").exists());
         Assert.assertTrue(new File("/tmp/server/in/subdir/client-subfile")
                 .exists());
+        Assert.assertTrue(new File("/tmp/server/in/subdir/client-subfile")
+                .length() > 0);
     }
 
     @Test
@@ -149,12 +154,11 @@ public class PeerTest {
         }
         catch (final CancellationException e) {
         }
-        catch (final ExecutionException e) {
-            throw e;
-        }
 
         Assert.assertFalse(new File("/tmp/client/in/server-file-1").exists());
         Assert.assertTrue(new File("/tmp/client/in/server-file-2").exists());
+        Assert
+                .assertTrue(new File("/tmp/client/in/server-file-2").length() > 0);
         Assert.assertFalse(new File("/tmp/client/in/subdir/server-subfile")
                 .exists());
     }

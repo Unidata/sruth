@@ -47,14 +47,20 @@ final class DiskFile {
      *            Information on the file.
      * @throws FileNotFoundException
      *             if the file doesn't exist and can't be created.
+     * @throws IllegalArgumentException
+     *             if {@code !dir.isAbsolute()}.
      * @throws NullPointerException
-     *             if {@code fileInfo == null}.
+     *             if {@code dir == null || fileInfo == null}.
      */
     private DiskFile(final File dir, final FileInfo fileInfo)
             throws FileNotFoundException {
-        raf = new RandomAccessFile(fileInfo.getFile(dir), "rwd");
-        pieceCount = fileInfo.getPieceCount();
+        final File path = fileInfo.getFile(dir);
+        final File parent = path.getParentFile();
 
+        parent.mkdirs();
+
+        raf = new RandomAccessFile(path, "rwd");
+        pieceCount = fileInfo.getPieceCount();
         indexes = new BitSet(pieceCount > 0
                 ? pieceCount - 1
                 : 0);
@@ -70,22 +76,48 @@ final class DiskFile {
      * @return The associated instance.
      * @param forWriting
      *            Whether or not the file should be opened for writing.
+     * @throws IllegalArgumentException
+     *             if {@code !dir.isAbsolute()}.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code fileInfo == null}.
+     *             if {@code dir == null || fileInfo == null}.
      */
     private static DiskFile getInstance(final File dir, final FileInfo fileInfo)
             throws IOException {
-        DiskFile diskFile = new DiskFile(dir, fileInfo);
-        final DiskFile prevDiskFile = diskFiles.putIfAbsent(fileInfo, diskFile);
+        DiskFile diskFile = diskFiles.get(fileInfo);
 
-        if (null != prevDiskFile) {
-            diskFile.close();
-            diskFile = prevDiskFile;
+        if (null == diskFile) {
+            diskFile = new DiskFile(dir, fileInfo);
+            final DiskFile prevDiskFile = diskFiles.putIfAbsent(fileInfo,
+                    diskFile);
+
+            if (null != prevDiskFile) {
+                diskFile.close();
+                diskFile = prevDiskFile;
+            }
         }
 
         return diskFile;
+    }
+
+    /**
+     * Ensures that an on-disk file exists.
+     * 
+     * @param dir
+     *            Pathname of the output directory.
+     * @param fileInfo
+     *            Information on the file.
+     * @throws IllegalArgumentException
+     *             if {@code !dir.isAbsolute()}.
+     * @throws IOException
+     *             in an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code dir == null || fileInfo == null}.
+     */
+    public static void create(final File dir, final FileInfo fileInfo)
+            throws IOException {
+        getInstance(dir, fileInfo);
     }
 
     /**
@@ -103,7 +135,9 @@ final class DiskFile {
      */
     static boolean putPiece(final File dir, final Piece piece)
             throws IOException {
-        return getInstance(dir, piece.getFileInfo()).putPiece(piece);
+        final DiskFile diskFile = getInstance(dir, piece.getFileInfo());
+
+        return diskFile.putPiece(piece);
     }
 
     /**
@@ -127,6 +161,7 @@ final class DiskFile {
      * 
      * @param piece
      *            The piece of data.
+     * @return {@code true} if an only if the file is complete.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException

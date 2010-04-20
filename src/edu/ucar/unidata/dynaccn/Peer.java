@@ -231,11 +231,7 @@ final class Peer implements Callable<Void> {
      */
     void processNotice(final FileInfo fileInfo) throws IOException {
         if (predicate.satisfiedBy(fileInfo)) {
-            final File file = fileInfo.getFile(inDir);
-            final File parent = file.getParentFile();
-
-            parent.mkdirs();
-            file.createNewFile();
+            DiskFile.create(inDir, fileInfo);
         }
     }
 

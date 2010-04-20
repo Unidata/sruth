@@ -231,6 +231,12 @@ final class FileInfo implements Serializable {
      * 
      * @param dirPath
      *            The directory against which to resolve the pathname.
+     * @return The absolute abstract pathname of this instance based on the
+     *         given directory.
+     * @throws IllegalArgumentException
+     *             if {@code !dirPath.isAbsolute()}.
+     * @throws NullPointerException
+     *             if {@code dirPath == null}.
      */
     File getFile(final File dirPath) {
         return fileId.getFile(dirPath);

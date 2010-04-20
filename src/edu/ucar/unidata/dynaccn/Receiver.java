@@ -1,5 +1,6 @@
 package edu.ucar.unidata.dynaccn;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.concurrent.Callable;
@@ -54,8 +55,13 @@ public abstract class Receiver<T> implements Callable<Void> {
             InterruptedException {
         final ObjectInputStream objStream = getInputStream(peer);
 
-        while (process(type.cast(objStream.readObject()))) {
-            ;
+        try {
+            while (process(type.cast(objStream.readObject()))) {
+                ;
+            }
+        }
+        catch (final EOFException e) {
+            // ignored
         }
 
         return null;
