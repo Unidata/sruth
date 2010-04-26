@@ -7,7 +7,9 @@
 	<target name="compile">
 		<mkdir dir="${bin-dir}"/>
 		<javac srcdir="src" destdir="${bin-dir}"/>
-		<javac srcdir="test" destdir="${bin-dir}" classpath="${junit-jar}"/>
+		<javac srcdir="test" destdir="${bin-dir}"
+                    excludes="**/MultiClientTest.java"
+                    classpath="${junit-jar}"/>
     </target>
 	
 	<target name="check" description="Check the project" depends="compile">
