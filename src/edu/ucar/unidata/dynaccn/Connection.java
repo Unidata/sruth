@@ -1,18 +1,18 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 
 /**
- * A connection to a remote entity (server or client).
+ * A connection to a remote peer.
  * 
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-final class Connection {
+abstract class Connection {
     /**
      * The number of sockets that constitute a connection.
      */
@@ -20,8 +20,8 @@ final class Connection {
     /**
      * The indexes of the various sockets.
      */
-    private static final int REQUEST      = 0;
-    private static final int NOTICE       = 1;
+    private static final int NOTICE       = 0;
+    private static final int REQUEST      = 1;
     private static final int DATA         = 2;
     /**
      * The sockets that comprise the connection.
@@ -37,43 +37,42 @@ final class Connection {
      * 
      * @param socket
      *            The socket to be added.
+     * @return {@code true} if and only if this instance is complete (i.e., has
+     *         all the necessary sockets).
      * @throws IOException
-     *             if an I/O error occurs while processing the socket.
+     *             if an I/O error occurs.
      * @throws IndexOutOfBoundsException
      *             if the set of sockets is already complete.
      * @throws NullPointerException
      *             if {@code socket} is {@code null}.
      */
-    synchronized void add(final Socket socket) throws IOException {
+    final synchronized boolean add(final Socket socket) throws IOException {
         if (null == socket) {
             throw new NullPointerException();
         }
-        sockets[count++] = socket;
-    }
 
-    /**
-     * Indicates if this instance is complete (i.e., has all the necessary
-     * sockets).
-     * 
-     * @return {@code true} if and only if this instance is complete.
-     */
-    synchronized boolean isComplete() {
+        sockets[count++] = socket;
+
+        for (int i = count - 1; 0 < i; --i) {
+            if (getServerPort(sockets[i]) < getServerPort(sockets[i - 1])) {
+                final Socket sock = sockets[i];
+
+                sockets[i] = sockets[i - 1];
+                sockets[i - 1] = sock;
+            }
+        }
+
         return SOCKET_COUNT == count;
     }
 
     /**
-     * Sends a request to the remote entity.
+     * Returns the server port number of a socket.
      * 
-     * @param request
-     *            The request to be sent.
-     * @throws IOException
-     *             if an I/O error occurs while sending the request.
-     * @throws NullPointerException
-     *             if {@code request} is {@code null}.
+     * @param socket
+     *            The socket
+     * @return The port number of the socket on the server.
      */
-    void write(final Request request) throws IOException {
-        // TODO
-    }
+    protected abstract int getServerPort(Socket socket);
 
     /**
      * Closes all sockets in the set.
@@ -81,7 +80,7 @@ final class Connection {
     synchronized void close() {
         for (final Socket socket : sockets) {
             try {
-                if (null != socket && socket.isConnected()) {
+                if (null != socket && !socket.isClosed()) {
                     socket.close();
                 }
             }
@@ -91,96 +90,77 @@ final class Connection {
     }
 
     /**
-     * Returns an {@link ObjectInputStream} that wraps a socket.
+     * Returns the notice input stream.
      * 
-     * @param socket
-     *            The socket to wrap.
+     * @return The notice input stream.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private static ObjectInputStream wrapInput(final Socket socket)
-            throws IOException {
-        return new ObjectInputStream(socket.getInputStream());
+    synchronized final InputStream getNoticeInputStream() throws IOException {
+        return sockets[NOTICE].getInputStream();
     }
 
     /**
-     * Returns an {@link ObjectOutputStream} that wraps a socket.
+     * Returns the request input stream.
      * 
-     * @param socket
-     *            The socket to wrap.
+     * @return The request input stream.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private static ObjectOutputStream wrapOutput(final Socket socket)
-            throws IOException {
-        return new ObjectOutputStream(socket.getOutputStream());
+    synchronized final InputStream getRequestInputStream() throws IOException {
+        return sockets[REQUEST].getInputStream();
     }
 
     /**
-     * Returns the stream associated with incoming requests for data.
+     * Returns the data input stream.
      * 
-     * @return The input request stream.
-     * @throws IOException
-     *             if the input request stream can't be obtained.
-     */
-    ObjectInputStream getRequestInputStream() throws IOException {
-        return wrapInput(sockets[REQUEST]);
-    }
-
-    /**
-     * Returns the stream associated with outgoing requests for data.
-     * 
-     * @return The output request stream.
-     * @throws IOException
-     *             if the stream can't be obtained.
-     */
-    ObjectOutputStream getRequestOutputStream() throws IOException {
-        return wrapOutput(sockets[REQUEST]);
-    }
-
-    /**
-     * Returns the stream associated with incoming notices of data.
-     * 
-     * @return The input notice stream.
-     * @throws IOException
-     *             if the input notice stream can't be obtained.
-     */
-    ObjectInputStream getNoticeInputStream() throws IOException {
-        return wrapInput(sockets[NOTICE]);
-    }
-
-    /**
-     * Returns the stream associated with outgoing notices of data.
-     * 
-     * @return The output notice stream.
+     * @return The data input stream.
      * @throws IOException
      *             if an I/O error occurs.
-     * @throws IOException
-     *             if the stream can't be obtained.
      */
-    ObjectOutputStream getNoticeOutputStream() throws IOException {
-        return wrapOutput(sockets[NOTICE]);
+    synchronized final InputStream getDataInputStream() throws IOException {
+        return sockets[DATA].getInputStream();
     }
 
     /**
-     * Returns the stream associated with incoming pieces of data.
+     * Returns the notice output stream.
      * 
-     * @return The input data-piece stream.
+     * @return The notice output stream.
      * @throws IOException
-     *             if the input data-piece stream can't be obtained.
+     *             if an I/O error occurs.
      */
-    ObjectInputStream getDataInputStream() throws IOException {
-        return wrapInput(sockets[DATA]);
+    synchronized final OutputStream getNoticeOutputStream() throws IOException {
+        return sockets[NOTICE].getOutputStream();
     }
 
     /**
-     * Returns the stream associated with outgoing pieces of data.
+     * Returns the request output stream.
      * 
-     * @return The output data-piece stream.
+     * @return The request output stream.
      * @throws IOException
-     *             if the output data-piece stream can't be obtained.
+     *             if an I/O error occurs.
      */
-    ObjectOutputStream getDataOutputStream() throws IOException {
-        return wrapOutput(sockets[DATA]);
+    synchronized final OutputStream getRequestOutputStream() throws IOException {
+        return sockets[REQUEST].getOutputStream();
+    }
+
+    /**
+     * Returns the data output stream.
+     * 
+     * @return The data output stream.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    synchronized final OutputStream getDataOutputStream() throws IOException {
+        return sockets[DATA].getOutputStream();
+    }
+
+    @Override
+    public synchronized String toString() {
+        return getClass().getSimpleName() + "{" + sockets[0].getLocalPort()
+                + "<=>" + sockets[0].getPort() + ", "
+                + sockets[1].getLocalPort() + "<=>" + sockets[1].getPort()
+                + ", " + sockets[2].getLocalPort() + "<=>"
+                + sockets[2].getPort() + "}";
     }
 }

@@ -158,19 +158,19 @@ final class DiskFile {
      * 
      * @param piece
      *            The piece of data.
-     * @return {@code true} if an only if the file is complete.
+     * @return {@code true} if and only if the file is complete.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
      *             if {@code piece == null}.
      */
     private synchronized boolean putPiece(final Piece piece) throws IOException {
-        raf.seek(piece.getOffset());
-        raf.write(piece.getData());
-
         final int index = piece.getIndex();
 
         if (!indexes.get(index)) {
+            raf.seek(piece.getOffset());
+            raf.write(piece.getData());
+
             indexes.set(index);
             pieceCount--;
         }

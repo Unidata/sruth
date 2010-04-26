@@ -5,6 +5,9 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.InvalidObjectException;
+import java.io.Serializable;
+
 /**
  * A constraint on a string attribute.
  * 
@@ -12,7 +15,12 @@ package edu.ucar.unidata.dynaccn;
  * 
  * @author Steven R. Emmerson
  */
-abstract class Constraint implements Comparable<Constraint> {
+abstract class Constraint implements Comparable<Constraint>, Serializable {
+    /**
+     * The serial version ID.
+     */
+    private static final long serialVersionUID = 1L;
+
     /**
      * An equality constraint on a string attribute.
      * 
@@ -20,7 +28,12 @@ abstract class Constraint implements Comparable<Constraint> {
      * 
      * @author Steven R. Emmerson
      */
-    private static class EqualTo extends Constraint {
+    private static final class EqualTo extends Constraint {
+        /**
+         * The serial version ID.
+         */
+        private static final long serialVersionUID = 1L;
+
         /**
          * Constructs from a string attribute and a value.
          * 
@@ -40,6 +53,17 @@ abstract class Constraint implements Comparable<Constraint> {
         boolean exactlySpecifies(final Object value) {
             return this.value.equals(value);
         }
+
+        private Object readResolve() throws InvalidObjectException {
+            try {
+                return new EqualTo(attribute, value);
+            }
+            catch (final Exception e) {
+                throw (InvalidObjectException) new InvalidObjectException(
+                        "Read invalid " + getClass().getSimpleName())
+                        .initCause(e);
+            }
+        }
     }
 
     /**
@@ -49,7 +73,12 @@ abstract class Constraint implements Comparable<Constraint> {
      * 
      * @author Steven R. Emmerson
      */
-    private static class NotEqualTo extends Constraint {
+    private static final class NotEqualTo extends Constraint {
+        /**
+         * The serial version ID.
+         */
+        private static final long serialVersionUID = 1L;
+
         /**
          * Constructs from a string attribute and a value.
          * 
@@ -68,6 +97,17 @@ abstract class Constraint implements Comparable<Constraint> {
         @Override
         boolean exactlySpecifies(final Object value) {
             return false;
+        }
+
+        private Object readResolve() throws InvalidObjectException {
+            try {
+                return new NotEqualTo(attribute, value);
+            }
+            catch (final Exception e) {
+                throw (InvalidObjectException) new InvalidObjectException(
+                        "Read invalid " + getClass().getSimpleName())
+                        .initCause(e);
+            }
         }
     }
 

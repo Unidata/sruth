@@ -5,6 +5,8 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.Serializable;
+
 /**
  * A file attribute comprising a name and a string type.
  * 
@@ -12,11 +14,15 @@ package edu.ucar.unidata.dynaccn;
  * 
  * @author Steven R. Emmerson
  */
-final class Attribute implements Comparable<Attribute> {
+final class Attribute implements Comparable<Attribute>, Serializable {
+    /**
+     * The serial version ID.
+     */
+    private static final long serialVersionUID = 1L;
     /**
      * The name of the attribute.
      */
-    private final String name;
+    private final String      name;
 
     /**
      * Constructs from the name of the attribute.
@@ -108,5 +114,9 @@ final class Attribute implements Comparable<Attribute> {
         }
         final Attribute other = (Attribute) obj;
         return 0 == compareTo(other);
+    }
+
+    private Object readResolve() {
+        return new Attribute(name);
     }
 }

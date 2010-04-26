@@ -5,6 +5,8 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.InvalidObjectException;
+import java.io.Serializable;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -15,11 +17,73 @@ import java.util.TreeSet;
  * 
  * @author Steven R. Emmerson
  */
-final class Predicate {
+class Predicate implements Serializable {
+    /**
+     * The serial version ID.
+     */
+    private static final long serialVersionUID = 1L;
+    /**
+     * The instance that's satisfied by everything.
+     */
+    static final Predicate    EVERYTHING       = new Predicate(new Filter[0]) {
+                                                   /**
+                                                    * The serial version ID.
+                                                    */
+                                                   private static final long serialVersionUID = 1L;
+
+                                                   @Override
+                                                   synchronized boolean satisfiedBy(
+                                                           final FileInfo fileInfo) {
+                                                       return true;
+                                                   }
+
+                                                   @Override
+                                                   synchronized boolean isEmpty() {
+                                                       return false;
+                                                   }
+
+                                                   @Override
+                                                   public String toString() {
+                                                       return "EVERYTHING";
+                                                   }
+
+                                                   private Object readResolve() {
+                                                       return EVERYTHING;
+                                                   }
+                                               };
+    /**
+     * The instance that's satisfied by nothing.
+     */
+    static final Predicate    NOTHING          = new Predicate(new Filter[0]) {
+                                                   /**
+                                                    * The serial version ID.
+                                                    */
+                                                   private static final long serialVersionUID = 1L;
+
+                                                   @Override
+                                                   synchronized boolean satisfiedBy(
+                                                           final FileInfo fileInfo) {
+                                                       return false;
+                                                   }
+
+                                                   @Override
+                                                   synchronized boolean isEmpty() {
+                                                       return true;
+                                                   }
+
+                                                   @Override
+                                                   public String toString() {
+                                                       return "NOTHING";
+                                                   }
+
+                                                   private Object readResolve() {
+                                                       return NOTHING;
+                                                   }
+                                               };
     /**
      * The filters.
      */
-    private final Set<Filter> filters = new TreeSet<Filter>();
+    private final Set<Filter> filters          = new TreeSet<Filter>();
 
     /**
      * Constructs from an array of filters.
@@ -83,5 +147,20 @@ final class Predicate {
      */
     synchronized boolean isEmpty() {
         return filters.isEmpty();
+    }
+
+    @Override
+    public String toString() {
+        return getClass().getSimpleName() + "{filters=" + filters + "}";
+    }
+
+    private Object readResolve() throws InvalidObjectException {
+        try {
+            return new Predicate(filters.toArray(new Filter[filters.size()]));
+        }
+        catch (final Exception e) {
+            throw (InvalidObjectException) new InvalidObjectException(
+                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        }
     }
 }

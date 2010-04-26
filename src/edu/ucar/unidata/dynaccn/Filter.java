@@ -5,6 +5,7 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.Serializable;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -17,11 +18,65 @@ import java.util.TreeSet;
  * 
  * @author Steven R. Emmerson
  */
-final class Filter implements Comparable<Filter> {
+class Filter implements Comparable<Filter>, Serializable {
+    /**
+     * The serial version ID.
+     */
+    private static final long     serialVersionUID = 1L;
+    /**
+     * The filter that is satisfied by everything.
+     */
+    static final Filter           EVERYTHING       = new Filter(
+                                                           new Constraint[0]) {
+                                                       /**
+                                                        * The serial version ID.
+                                                        */
+                                                       private static final long serialVersionUID = 1L;
+
+                                                       @Override
+                                                       public String toString() {
+                                                           return "EVERYTHING";
+                                                       }
+
+                                                       private Object readResolve() {
+                                                           return EVERYTHING;
+                                                       }
+                                                   };
+    /**
+     * The filter that is satisfied by nothing.
+     */
+    static final Filter           NOTHING          = new Filter(
+                                                           new Constraint[0]) {
+                                                       /**
+                                                        * The serial version ID.
+                                                        */
+                                                       private static final long serialVersionUID = 1L;
+
+                                                       @Override
+                                                       boolean satisfiedBy(
+                                                               final FileInfo fileInfo) {
+                                                           return false;
+                                                       }
+
+                                                       @Override
+                                                       boolean exactlySpecifies(
+                                                               final FileInfo fileInfo) {
+                                                           return false;
+                                                       }
+
+                                                       @Override
+                                                       public String toString() {
+                                                           return "NOTHING";
+                                                       }
+
+                                                       private Object readResolve() {
+                                                           return NOTHING;
+                                                       }
+                                                   };
     /**
      * The constraints.
      */
-    private final Set<Constraint> constraints = new TreeSet<Constraint>();
+    private final Set<Constraint> constraints      = new TreeSet<Constraint>();
 
     /**
      * Constructs from an array of constraints.
@@ -138,5 +193,10 @@ final class Filter implements Comparable<Filter> {
         }
         final Filter other = (Filter) obj;
         return 0 == compareTo(other);
+    }
+
+    private Object readResolve() {
+        return new Filter(constraints
+                .toArray(new Constraint[constraints.size()]));
     }
 }
