@@ -53,7 +53,7 @@ final class Peer implements Callable<Void> {
     /**
      * Pathname of the root of the file hierarchy.
      */
-    private final File                            dir;
+    private final File                            rootDir;
     /**
      * Request queue. Contains specifications of data-pieces to request from the
      * remote peer.
@@ -91,25 +91,25 @@ final class Peer implements Callable<Void> {
      * 
      * @param connection
      *            The connection to the remote peer.
-     * @param dir
+     * @param rootDir
      *            Pathname of the root of the file hierarchy.
      * @param predicate
      *            Predicate for selecting locally-desired data.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code connection == null || dir == null || predicate ==
-     *             null}.
+     *             if {@code connection == null || rootDir == null || predicate
+     *             == null}.
      */
-    Peer(final Connection connection, final File dir, final Predicate predicate)
-            throws IOException {
-        if (null == connection || null == dir || predicate == null) {
+    Peer(final Connection connection, final File rootDir,
+            final Predicate predicate) throws IOException {
+        if (null == connection || null == rootDir || predicate == null) {
             throw new NullPointerException();
         }
 
         this.connection = connection;
-        this.dir = dir;
-        noticeIterator = new NoticeIterator(dir, dir);
+        this.rootDir = rootDir;
+        noticeIterator = new NoticeIterator(rootDir, rootDir);
         this.predicate = predicate;
     }
 
@@ -182,129 +182,6 @@ final class Peer implements Callable<Void> {
         }
 
         return null;
-    }
-
-    /**
-     * Processes a specification of desired-data from the remote peer.
-     * 
-     * @param predicate
-     *            The specification of data desired by the remote peer.
-     */
-    public void processRemotelyDesiredDataSpecification(
-            final Predicate predicate) {
-        remotePredicateQueue.add(predicate);
-    }
-
-    /**
-     * Returns the next notice to send to the remote peer.
-     * 
-     * @return The next notice to send to the remote peer.
-     */
-    Notice getNextNotice() {
-        final Predicate predicate = remotePredicate.get();
-        while (noticeIterator.hasNext()) {
-            final Notice notice = noticeIterator.next();
-            if (predicate.satisfiedBy(notice.getFileInfo())) {
-                return notice;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Processes a notice about a file that's available from the remote peer.
-     * 
-     * @param fileInfo
-     *            Information about the file.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    void processNotice(final FileInfo fileInfo) throws IOException {
-        if (predicate.satisfiedBy(fileInfo)) {
-            DiskFile.create(dir, fileInfo);
-        }
-    }
-
-    /**
-     * Processes a notice about a piece of data that's available from the remote
-     * peer.
-     * 
-     * @param pieceInfo
-     *            Information about the piece of data at the remote peer.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     */
-    void processNotice(final PieceInfo pieceInfo) throws InterruptedException {
-        if (predicate.satisfiedBy(pieceInfo.getFileInfo())) {
-            requestQueue.put(new PieceRequest(pieceInfo));
-        }
-    }
-
-    /**
-     * Returns the next request for a piece of data to send to the remote peer.
-     * 
-     * @return Information on the next wanted piece of data.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     */
-    Request getNextRequest() throws InterruptedException {
-        return requestQueue.take();
-    }
-
-    /**
-     * Processes a request for a piece of data from the remote peer.
-     * 
-     * @param pieceInfo
-     *            Information about the piece of data requested by the remote
-     *            peer.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    void processRequest(final PieceInfo pieceInfo) throws InterruptedException,
-            IOException {
-        pieceQueue.put(DiskFile.getPiece(dir, pieceInfo));
-    }
-
-    /**
-     * Returns the next piece of data to send to the remote peer.
-     * 
-     * @return The next piece of data to send.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    Piece getNextPiece() throws InterruptedException, IOException {
-        return pieceQueue.take();
-    }
-
-    /**
-     * Processes a piece of data from the remote peer.
-     * 
-     * @param piece
-     *            The piece of data from the remote peer.
-     * @return {@code true} if and only more data is desired.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    boolean processData(final Piece piece) throws IOException {
-        if (!predicate.satisfiedBy(piece.getFileInfo())) {
-            // Server-created peers always do this
-            return true; // continue
-        }
-
-        if (DiskFile.putPiece(dir, piece)) {
-            predicate.removeIfPossible(piece.getFileInfo());
-        }
-
-        if (predicate.isEmpty()) {
-            done.set(true);
-            return false; // terminate
-        }
-
-        return true; // continue
     }
 
     /**
@@ -604,7 +481,7 @@ final class Peer implements Callable<Void> {
                 // Server-created peers always do this
                 return true; // continue
             }
-            if (DiskFile.putPiece(dir, piece)) {
+            if (DiskFile.putPiece(rootDir, piece)) {
                 predicate.removeIfPossible(piece.getFileInfo());
             }
             if (predicate.isEmpty()) {
@@ -861,7 +738,7 @@ final class Peer implements Callable<Void> {
          */
         @Override
         void process(final Peer peer) throws InterruptedException, IOException {
-            peer.processRequest(pieceInfo);
+            peer.pieceQueue.put(DiskFile.getPiece(peer.rootDir, pieceInfo));
         }
 
         @Override
@@ -913,7 +790,7 @@ final class Peer implements Callable<Void> {
 
         @Override
         void process(final Peer peer) throws InterruptedException, IOException {
-            peer.processRemotelyDesiredDataSpecification(predicate);
+            peer.remotePredicateQueue.add(predicate);
         }
 
         @Override
@@ -1000,7 +877,9 @@ final class Peer implements Callable<Void> {
 
         @Override
         void process(final Peer peer) throws IOException {
-            peer.processNotice(fileInfo);
+            if (peer.predicate.satisfiedBy(fileInfo)) {
+                DiskFile.create(peer.rootDir, fileInfo);
+            }
         }
 
         /*
@@ -1067,7 +946,9 @@ final class Peer implements Callable<Void> {
 
         @Override
         void process(final Peer peer) throws InterruptedException {
-            peer.processNotice(pieceInfo);
+            if (peer.predicate.satisfiedBy(pieceInfo.getFileInfo())) {
+                peer.requestQueue.put(new PieceRequest(pieceInfo));
+            }
         }
 
         @Override
