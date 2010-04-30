@@ -8,7 +8,6 @@
 		<mkdir dir="${bin-dir}"/>
 		<javac srcdir="src" destdir="${bin-dir}"/>
 		<javac srcdir="test" destdir="${bin-dir}"
-                    excludes="**/MultiClientTest.java"
                     classpath="${junit-jar}"/>
     </target>
 	
