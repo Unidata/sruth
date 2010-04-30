@@ -2,7 +2,6 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.InetAddress;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -22,6 +21,39 @@ public class ClientTest {
      */
     private static ExecutorService executorService = Executors
                                                            .newCachedThreadPool();
+
+    private static void system(final String[] cmd) throws IOException,
+            InterruptedException {
+        final Process process = Runtime.getRuntime().exec(cmd, null, null);
+        Assert.assertNotNull(process);
+        Assert.assertEquals(0, process.waitFor());
+    }
+
+    @BeforeClass
+    public static void setUpBeforeClass() throws Exception {
+        system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
+        system(new String[] { "mkdir", "-p", "/tmp/server/subdir" });
+        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-1" });
+        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-2" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/server/subdir/server-subfile" });
+    }
+
+    @AfterClass
+    public static void tearDownAfterClass() throws Exception {
+        system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
+    }
+
+    @Before
+    public void setUp() throws Exception {
+        system(new String[] { "rm", "-rf", "/tmp/client" });
+        system(new String[] { "mkdir", "-p", "/tmp/client" });
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        system(new String[] { "rm", "-rf", "/tmp/client" });
+    }
 
     /**
      * Starts a task.
@@ -47,48 +79,21 @@ public class ClientTest {
         }
     }
 
-    private static void system(final String[] cmd) throws IOException,
-            InterruptedException {
-        final Process process = Runtime.getRuntime().exec(cmd, null, null);
-        Assert.assertNotNull(process);
-        Assert.assertEquals(0, process.waitFor());
-    }
-
-    @BeforeClass
-    public static void setUpBeforeClass() throws Exception {
-    }
-
-    @AfterClass
-    public static void tearDownAfterClass() throws Exception {
-    }
-
-    @Before
-    public void setUp() throws Exception {
-        system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
-        system(new String[] { "mkdir", "-p", "/tmp/server/subdir",
-                "/tmp/client" });
-        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-1" });
-        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-2" });
-        system(new String[] { "sh", "-c",
-                "date > /tmp/server/subdir/server-subfile" });
-    }
-
-    @After
-    public void tearDown() throws Exception {
-    }
-
     @Test
     public void testTermination() throws IOException, InterruptedException,
             ExecutionException {
-        final Server server = new Server("/tmp/server");
+        ClearingHouse clearingHouse = new ClearingHouse(
+                new File("/tmp/server"), Predicate.NOTHING);
+        final Server server = new Server(clearingHouse);
         final Future<Void> serverFuture = start(server);
+        final ServerInfo serverInfo = server.getServerInfo();
 
         final Attribute attribute = new Attribute("name");
         final Constraint constraint = attribute.equalTo("server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
-        final Client client = new Client(InetAddress.getLocalHost(),
-                "/tmp/client", predicate);
+        clearingHouse = new ClearingHouse(new File("/tmp/client"), predicate);
+        final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
         clientFuture.get();
@@ -102,20 +107,23 @@ public class ClientTest {
     }
 
     @Test
-    public void testPeers() throws IOException, InterruptedException,
+    public void testNonTermination() throws IOException, InterruptedException,
             ExecutionException {
-        final Server server = new Server("/tmp/server");
+        ClearingHouse clearingHouse = new ClearingHouse(
+                new File("/tmp/server"), Predicate.NOTHING);
+        final Server server = new Server(clearingHouse);
         final Future<Void> serverFuture = start(server);
+        final ServerInfo serverInfo = server.getServerInfo();
 
         final Attribute attribute = new Attribute("name");
         final Constraint constraint = attribute.notEqualTo("server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
-        final Client client = new Client(InetAddress.getLocalHost(),
-                "/tmp/client", predicate);
+        clearingHouse = new ClearingHouse(new File("/tmp/client"), predicate);
+        final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
-        Thread.sleep(2500);
+        Thread.sleep(200);
         stop(clientFuture);
         stop(serverFuture);
 

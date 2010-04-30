@@ -41,6 +41,9 @@ abstract class Connection {
      *         all the necessary sockets).
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws IllegalArgumentException
+     *             if the remote IP address of the socket doesn't equal that of
+     *             the previously-added sockets.
      * @throws IndexOutOfBoundsException
      *             if the set of sockets is already complete.
      * @throws NullPointerException
@@ -49,6 +52,14 @@ abstract class Connection {
     final synchronized boolean add(final Socket socket) throws IOException {
         if (null == socket) {
             throw new NullPointerException();
+        }
+
+        if (0 < count) {
+            if (!socket.getInetAddress().equals(sockets[0].getInetAddress())) {
+                throw new IllegalArgumentException(socket.getInetAddress()
+                        .toString()
+                        + " != " + sockets[0].getInetAddress().toString());
+            }
         }
 
         sockets[count++] = socket;
@@ -155,12 +166,75 @@ abstract class Connection {
         return sockets[DATA].getOutputStream();
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + count;
+        if (0 < count) {
+            result = prime * result + sockets[0].getInetAddress().hashCode();
+        }
+        for (int i = 0; i < count; ++i) {
+            result = prime * result + sockets[i].getLocalPort()
+                    + sockets[i].getPort();
+        }
+        return result;
+    }
+
+    /**
+     * Indicates if this instance is considered equal to an object. Two
+     * instances are equal if and only if they have the same set of local and
+     * remote ports and remote IP address.
+     * 
+     * @param obj
+     *            The object for testing.
+     * @return {@code true} if and only this instance is considered equal to
+     *         {@code obj}.
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final Connection other = (Connection) obj;
+        if (count != other.count) {
+            return false;
+        }
+        if (0 < count) {
+            if (!sockets[0].getInetAddress().equals(
+                    other.sockets[0].getInetAddress())) {
+                return false;
+            }
+        }
+        for (int i = 0; i < count; ++i) {
+            if (sockets[i].getLocalPort() != other.sockets[i].getLocalPort()) {
+                return false;
+            }
+            if (sockets[i].getPort() != other.sockets[i].getPort()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     @Override
     public synchronized String toString() {
-        return getClass().getSimpleName() + "{" + sockets[0].getLocalPort()
-                + "<=>" + sockets[0].getPort() + ", "
-                + sockets[1].getLocalPort() + "<=>" + sockets[1].getPort()
-                + ", " + sockets[2].getLocalPort() + "<=>"
-                + sockets[2].getPort() + "}";
+        return getClass().getSimpleName() + "{remote="
+                + sockets[0].getInetAddress() + ", "
+                + sockets[0].getLocalPort() + "<=>" + sockets[0].getPort()
+                + ", " + sockets[1].getLocalPort() + "<=>"
+                + sockets[1].getPort() + ", " + sockets[2].getLocalPort()
+                + "<=>" + sockets[2].getPort() + "}";
     }
 }

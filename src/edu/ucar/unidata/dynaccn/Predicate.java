@@ -38,7 +38,12 @@ class Predicate implements Serializable {
                                                    }
 
                                                    @Override
-                                                   synchronized boolean isEmpty() {
+                                                   synchronized void removeIfPossible(
+                                                           final FileInfo fileInfo) {
+                                                   }
+
+                                                   @Override
+                                                   synchronized boolean satisfiedByNothing() {
                                                        return false;
                                                    }
 
@@ -67,7 +72,12 @@ class Predicate implements Serializable {
                                                    }
 
                                                    @Override
-                                                   synchronized boolean isEmpty() {
+                                                   synchronized void removeIfPossible(
+                                                           final FileInfo fileInfo) {
+                                                   }
+
+                                                   @Override
+                                                   synchronized boolean satisfiedByNothing() {
                                                        return true;
                                                    }
 
@@ -122,6 +132,20 @@ class Predicate implements Serializable {
     }
 
     /**
+     * Indicates if a piece of data satisfies this predicate.
+     * 
+     * @param pieceInfo
+     *            Information on the piece of data.
+     * @return {@code true} if and only if the piece of data satisfies this
+     *         predicate.
+     * @throws NullPointerException
+     *             if {@code pieceInfo == null}.
+     */
+    synchronized boolean satisfiedBy(final PieceInfo pieceInfo) {
+        return satisfiedBy(pieceInfo.getFileInfo());
+    }
+
+    /**
      * Removes a specification of a file from this instance, if possible. If a
      * filter of this predicate is satisfied by the given file specification and
      * only by that specification, then that filter will be removed from this
@@ -145,7 +169,7 @@ class Predicate implements Serializable {
      * 
      * @return {@code true} if and only if this instance contains no filters.
      */
-    synchronized boolean isEmpty() {
+    synchronized boolean satisfiedByNothing() {
         return filters.isEmpty();
     }
 

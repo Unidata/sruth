@@ -4,9 +4,10 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.File;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -22,40 +23,32 @@ final class Client implements Callable<Void> {
      */
     private final ClientConnection connection = new ClientConnection();
     /**
-     * Pathname of the root of the file hierarchy.
+     * The data clearing-house.
      */
-    private final File             dir;
+    private final ClearingHouse    clearingHouse;
     /**
-     * Predicate for selecting locally-desired data.
+     * Information on the remote server.
      */
-    private final Predicate        predicate;
-    /**
-     * Internet address of the server.
-     */
-    private final InetAddress      inetAddress;
+    private final ServerInfo       serverInfo;
 
     /**
      * Constructs from the Internet address of the remote server.
      * 
-     * @param inetAddress
-     *            The Internet address of the remote server.
-     * @param dir
-     *            Pathname of the root of the file hierarchy.
-     * @param predicate
-     *            The predicate for selecting locally-desired data.
+     * @param serverInfo
+     *            Information on the remote server.
+     * @param clearingHouse
+     *            The clearing-house to use.
      * @throws NullPointerException
-     *             if {@code inetAddress == null || dir == null || predicate ==
-     *             null}.
+     *             if {@code serverInfo == null || clearingHouse == null}.
      */
-    Client(final InetAddress inetAddress, final String dir,
-            final Predicate predicate) throws IOException {
-        if (null == predicate || null == inetAddress) {
+    Client(final ServerInfo serverInfo, final ClearingHouse clearingHouse)
+            throws IOException {
+        if (null == clearingHouse || null == serverInfo) {
             throw new NullPointerException();
         }
 
-        this.dir = new File(dir);
-        this.predicate = predicate;
-        this.inetAddress = inetAddress;
+        this.clearingHouse = clearingHouse;
+        this.serverInfo = serverInfo;
     }
 
     /**
@@ -75,12 +68,43 @@ final class Client implements Callable<Void> {
     @Override
     public Void call() throws IOException, InterruptedException,
             ExecutionException {
-        for (int i = 0; i < Connection.SOCKET_COUNT; i++) {
-            connection.add(new Socket(inetAddress, Server.START_PORT + i));
+        final int[] serverPorts = serverInfo.getPorts();
+        final InetAddress serverAddress = serverInfo.getInetAddress();
+        final Socket[] sockets = new Socket[serverPorts.length];
+        /*
+         * Create this client's sockets and get their port numbers.
+         */
+        for (int i = 0; i < sockets.length; i++) {
+            sockets[i] = new Socket(); // unbound socket
+            sockets[i].bind(null); // obtains ephemeral port
+        }
+        /*
+         * For each socket:
+         */
+        for (int i = 0; i < sockets.length; i++) {
+            /*
+             * Connect the socket to the server.
+             */
+            sockets[i].connect(new InetSocketAddress(serverAddress,
+                    serverPorts[i]));
+            /*
+             * Write this client's port numbers on the socket to help identify
+             * this client.
+             */
+            final DataOutputStream dos = new DataOutputStream(sockets[i]
+                    .getOutputStream());
+            for (final Socket socket : sockets) {
+                dos.writeInt(socket.getLocalPort());
+            }
+            dos.flush();
+            /*
+             * Add this socket to the connection.
+             */
+            connection.add(sockets[i]);
         }
         try {
             System.out.println("Client: " + connection);
-            return new Peer(connection, dir, predicate).call();
+            return new Peer(clearingHouse, connection).call();
         }
         finally {
             connection.close();

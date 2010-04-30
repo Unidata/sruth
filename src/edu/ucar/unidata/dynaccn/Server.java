@@ -1,12 +1,14 @@
 package edu.ucar.unidata.dynaccn;
 
-import java.io.File;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -18,7 +20,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Handles connections by clients. Starts its own thread.
+ * Handles connections by clients.
  * 
  * Instances are thread-safe.
  * 
@@ -26,155 +28,60 @@ import java.util.concurrent.Future;
  */
 final class Server implements Callable<Void> {
     /**
-     * Listens to a port for incoming connections.
-     * 
-     * Instances are thread-compatible but not thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private class Listener implements Callable<Void> {
-        /**
-         * The server socket.
-         */
-        private final ServerSocket serverSocket;
-
-        /**
-         * Constructs from the number of the port on which to listen.
-         * 
-         * @param port
-         *            The port number. If less than or equal to zero, then an
-         *            unused port will be chosen by the system.
-         * @throws IOException
-         *             if an I/O error occurs
-         */
-        Listener(final int port) throws IOException {
-            serverSocket = new ServerSocket();
-            try {
-                serverSocket.setReuseAddress(true);
-                serverSocket.bind(new InetSocketAddress(port));
-            }
-            catch (final SocketException e) {
-                try {
-                    serverSocket.close();
-                }
-                catch (final Exception e2) {
-                    // ignored
-                }
-                throw e;
-            }
-            catch (final IOException e) {
-                try {
-                    serverSocket.close();
-                }
-                catch (final Exception e2) {
-                    // ignored
-                }
-                throw e;
-            }
-        }
-
-        /**
-         * Doesn't return normally. Closes the server socket.
-         * 
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        @Override
-        public Void call() throws IOException {
-            try {
-                for (;;) {
-                    final Socket socket = serverSocket.accept();
-                    try {
-                        final InetAddress inetAddr = socket.getInetAddress();
-                        Connection connection = new ServerConnection();
-                        final Connection prevConnection = connections
-                                .putIfAbsent(inetAddr, connection);
-                        if (null != prevConnection) {
-                            connection = prevConnection;
-                        }
-                        if (connection.add(socket)) {
-                            System.out.println("Server: " + connection);
-                            peerExecutor.submit(new Peer(connection, dir,
-                                    Predicate.NOTHING));
-                        }
-                    }
-                    catch (final IOException e) {
-                        socket.close();
-                        throw e;
-                    }
-                }
-            }
-            finally {
-                try {
-                    serverSocket.close();
-                }
-                catch (final IOException e) {
-                    // ignored
-                }
-            }
-        }
-
-        /**
-         * Closes this instance.
-         * 
-         * @throws IOException
-         *             if an error occurs while closing the socket.
-         */
-        void close() throws IOException {
-            serverSocket.close();
-        }
-    }
-
-    /**
      * The port listeners.
      */
-    private final Listener[]                             listeners        = new Listener[Connection.SOCKET_COUNT];
+    private final Listener[]                          listeners        = new Listener[Connection.SOCKET_COUNT];
     /**
      * Executes peers created by this instance.
      */
-    private final ExecutorService                        peerExecutor     = Executors
-                                                                                  .newCachedThreadPool();
+    private final ExecutorService                     peerExecutor     = Executors
+                                                                               .newCachedThreadPool();
     /**
      * Executes port listeners.
      */
-    private final ExecutorService                        listenerExecutor = Executors
-                                                                                  .newFixedThreadPool(listeners.length);
+    private final ExecutorService                     listenerExecutor = Executors
+                                                                               .newFixedThreadPool(listeners.length);
     /**
      * Manages port listeners.
      */
-    private final ExecutorCompletionService<Void>        listenerManager  = new ExecutorCompletionService<Void>(
-                                                                                  listenerExecutor);
+    private final ExecutorCompletionService<Void>     listenerManager  = new ExecutorCompletionService<Void>(
+                                                                               listenerExecutor);
     /**
      * The starting port number.
      */
-    static final int                                     START_PORT       = 3880;
+    static final int                                  START_PORT       = 3880;
     /**
      * The set of client-specific connections.
      */
-    private final ConcurrentMap<InetAddress, Connection> connections      = new ConcurrentHashMap<InetAddress, Connection>();
+    private final ConcurrentMap<ClientId, Connection> connections      = new ConcurrentHashMap<ClientId, Connection>();
     /**
-     * Pathname of the root of the file hierarchy.
+     * The data clearing-house.
      */
-    private final File                                   dir;
+    private final ClearingHouse                       clearingHouse;
 
     /**
-     * Constructs from the root of the file-tree. Immediately starts listening
-     * for connection attempts but doesn't process the attempts until method
-     * {@link #call()} is called.
+     * Constructs from the data clearing-house to use. Immediately starts
+     * listening for connection attempts but doesn't process the attempts until
+     * method {@link #call()} is called.
      * 
      * By default, the resulting instance will listen on all available
      * interfaces.
      * 
-     * @param dir
-     *            Pathname of the root of the file hierarchy.
+     * @param clearingHouse
+     *            The data clearing-house to use.
      * @throws IOException
      *             if a port can't be listened to.
+     * @throws NullPointerException
+     *             if {@code clearingHouse == null}.
      */
-    Server(final String dir) throws IOException {
-        this.dir = new File(dir);
+    Server(final ClearingHouse clearingHouse) throws IOException {
+        if (null == clearingHouse) {
+            throw new NullPointerException();
+        }
+        this.clearingHouse = clearingHouse;
         for (int i = 0; i < listeners.length; i++) {
             try {
-                listeners[i] = new Listener(START_PORT + i);
+                listeners[i] = new Listener();
             }
             catch (final IOException e) {
                 while (--i >= 0) {
@@ -188,6 +95,31 @@ final class Server implements Callable<Void> {
                 throw e;
             }
         }
+    }
+
+    /**
+     * Returns information on the server. This method may be called immediately
+     * after construction of the instance.
+     * 
+     * @return Information on the server.
+     * @throws UnknownHostException
+     *             if the IP address of the local host can't be obtained.
+     */
+    ServerInfo getServerInfo() throws UnknownHostException {
+        return new ServerInfo(InetAddress.getLocalHost(), getPorts());
+    }
+
+    /**
+     * Returns the ports on which this instance is listening.
+     * 
+     * @return The ports on which this instance is listening.
+     */
+    private int[] getPorts() {
+        final int[] ports = new int[listeners.length];
+        for (int i = 0; i < ports.length; i++) {
+            ports[i] = listeners[i].getPort();
+        }
+        return ports;
     }
 
     /**
@@ -237,5 +169,219 @@ final class Server implements Callable<Void> {
             }
         }
         return null;
+    }
+
+    /**
+     * Listens to a port for incoming connections.
+     * 
+     * Instances are thread-compatible but not thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    private class Listener implements Callable<Void> {
+        /**
+         * The server socket.
+         */
+        private final ServerSocket listenerSocket;
+
+        /**
+         * Constructs from nothing. Immediately creates a server-side socket but
+         * doesn't accept a connection until method {@link #call()} is called.
+         * 
+         * @throws IOException
+         *             if the server-side socket couldn't be created.
+         */
+        Listener() throws IOException {
+            listenerSocket = new ServerSocket();
+            try {
+                listenerSocket.setReuseAddress(true);
+                listenerSocket.bind(new InetSocketAddress(0));
+            }
+            catch (final SocketException e) {
+                try {
+                    listenerSocket.close();
+                }
+                catch (final Exception e2) {
+                    // ignored
+                }
+                throw e;
+            }
+            catch (final IOException e) {
+                try {
+                    listenerSocket.close();
+                }
+                catch (final Exception e2) {
+                    // ignored
+                }
+                throw e;
+            }
+        }
+
+        /**
+         * Returns the port on which this instance is listening.
+         */
+        int getPort() {
+            return listenerSocket.getLocalPort();
+        }
+
+        /**
+         * Doesn't return normally. Closes the listener socket.
+         * 
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        @Override
+        public Void call() throws IOException {
+            try {
+                for (;;) {
+                    final Socket socket = listenerSocket.accept();
+                    try {
+                        /*
+                         * Get the port numbers of the client.
+                         */
+                        final DataInputStream dis = new DataInputStream(socket
+                                .getInputStream());
+                        final int[] clientPorts = new int[Connection.SOCKET_COUNT];
+                        for (int i = 0; i < clientPorts.length; i++) {
+                            clientPorts[i] = dis.readInt();
+                        }
+                        /*
+                         * Create a unique client identifier.
+                         */
+                        final ClientId clientId = new ClientId(socket
+                                .getInetAddress(), clientPorts);
+                        /*
+                         * Get the connection with this client.
+                         */
+                        Connection connection = new ServerConnection();
+                        final Connection prevConnection = connections
+                                .putIfAbsent(clientId, connection);
+                        if (null != prevConnection) {
+                            connection = prevConnection;
+                        }
+                        /*
+                         * Add this socket to the connection and start the peer
+                         * if ready.
+                         */
+                        if (connection.add(socket)) {
+                            System.out.println("Server: " + connection);
+                            peerExecutor.submit(new Peer(clearingHouse,
+                                    connection));
+                        }
+                    }
+                    catch (final IOException e) {
+                        socket.close();
+                        throw e;
+                    }
+                }
+            }
+            finally {
+                try {
+                    listenerSocket.close();
+                }
+                catch (final IOException e) {
+                    // ignored
+                }
+            }
+        }
+
+        /**
+         * Closes this instance.
+         * 
+         * @throws IOException
+         *             if an error occurs while closing the socket.
+         */
+        void close() throws IOException {
+            listenerSocket.close();
+        }
+    }
+
+    /**
+     * Identifies a client.
+     * 
+     * Instances are immutable.
+     * 
+     * @author Steven R. Emmerson
+     */
+    private static class ClientId {
+        /**
+         * The Internet address of the host that's executing the client.
+         */
+        private final InetAddress inetAddress;
+        /**
+         * The ports that the client is using.
+         */
+        private final int[]       ports;
+
+        /**
+         * Constructs from the Internet address of the host that's executing the
+         * client and the ports that the client is using.
+         * 
+         * @param inetAddress
+         *            The Internet address of the host running the client.
+         * @param ports
+         *            The ports that the client is using.
+         * @throws NullPointerException
+         *             if {@code inetAddress == null || ports == null}.
+         * @throws IllegalArgumentException
+         *             if {@code ports.length != Connection.SOCKET_COUNT}.
+         */
+        ClientId(final InetAddress inetAddress, final int[] ports) {
+            if (null == inetAddress) {
+                throw new NullPointerException();
+            }
+            if (Connection.SOCKET_COUNT != ports.length) {
+                throw new IllegalArgumentException();
+            }
+            this.inetAddress = inetAddress;
+            this.ports = ports;
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#hashCode()
+         */
+        @Override
+        public int hashCode() {
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + ((inetAddress == null)
+                    ? 0
+                    : inetAddress.hashCode());
+            result = prime * result + Arrays.hashCode(ports);
+            return result;
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#equals(java.lang.Object)
+         */
+        @Override
+        public boolean equals(final Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null) {
+                return false;
+            }
+            if (getClass() != obj.getClass()) {
+                return false;
+            }
+            final ClientId other = (ClientId) obj;
+            if (inetAddress == null) {
+                if (other.inetAddress != null) {
+                    return false;
+                }
+            }
+            else if (!inetAddress.equals(other.inetAddress)) {
+                return false;
+            }
+            if (!Arrays.equals(ports, other.ports)) {
+                return false;
+            }
+            return true;
+        }
     }
 }

@@ -18,6 +18,8 @@
 			<formatter type="xml"/>
 			<test name="edu.ucar.unidata.dynaccn.ClientTest"
 				todir="test-reports"/>
+			<test name="edu.ucar.unidata.dynaccn.MultiClientTest"
+				todir="test-reports"/>
 		</junit>
     </target>
 </project>

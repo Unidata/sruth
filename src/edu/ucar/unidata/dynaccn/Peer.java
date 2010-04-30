@@ -6,17 +6,11 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.EOFException;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InvalidObjectException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
-import java.io.Serializable;
-import java.util.Iterator;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -24,9 +18,7 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Exchanges data with its remote counterpart.
@@ -39,78 +31,54 @@ final class Peer implements Callable<Void> {
     /**
      * The task service used by this instance.
      */
-    private final ExecutorService                 executorService      = Executors
-                                                                               .newCachedThreadPool();
+    private final ExecutorService                 executorService   = Executors
+                                                                            .newCachedThreadPool();
     /**
      * The task completion service used by this instance.
      */
-    private final ExecutorCompletionService<Void> completionService    = new ExecutorCompletionService<Void>(
-                                                                               executorService);
+    private final ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<Void>(
+                                                                            executorService);
+    /**
+     * The clearing-house used by this instance.
+     */
+    private final ClearingHouse                   clearingHouse;
     /**
      * The connection with the remote peer.
      */
     private final Connection                      connection;
     /**
-     * Pathname of the root of the file hierarchy.
-     */
-    private final File                            rootDir;
-    /**
-     * Request queue. Contains specifications of data-pieces to request from the
-     * remote peer.
-     */
-    private final BlockingQueue<Request>          requestQueue         = new ArrayBlockingQueue<Request>(
-                                                                               1);
-    /**
-     * Piece queue. Contains pieces of data to be sent to the remote peer.
-     */
-    private final BlockingQueue<Piece>            pieceQueue           = new SynchronousQueue<Piece>();
-    /**
-     * Iterator over the files to send to the remote peer.
-     */
-    private final Iterator<Notice>                noticeIterator;
-    /**
-     * The predicate for selecting locally-desired data.
-     */
-    private final Predicate                       predicate;
-    /**
      * Whether or not this instance is done.
      */
-    private final AtomicBoolean                   done                 = new AtomicBoolean(
-                                                                               false);
+    private final AtomicBoolean                   done              = new AtomicBoolean(
+                                                                            false);
     /**
-     * Rendezvous-queue for the remotely-desired data.
+     * Whether or not this instance wants some data.
      */
-    private final SynchronousQueue<Predicate>     remotePredicateQueue = new SynchronousQueue<Predicate>();
-    /**
-     * Specification of data desired by the remote peer.
-     */
-    private final AtomicReference<Predicate>      remotePredicate      = new AtomicReference<Predicate>();
+    private final boolean                         wantsData;
 
     /**
-     * Constructs from a connection to a remote peer.
+     * Constructs from a clearing-house to use and a connection to a remote
+     * peer.
      * 
+     * @param clearingHouse
+     *            The clearing-house to use.
      * @param connection
      *            The connection to the remote peer.
-     * @param rootDir
-     *            Pathname of the root of the file hierarchy.
-     * @param predicate
-     *            Predicate for selecting locally-desired data.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code connection == null || rootDir == null || predicate
-     *             == null}.
+     *             if {@code clearingHouse == null || connection == null}.
      */
-    Peer(final Connection connection, final File rootDir,
-            final Predicate predicate) throws IOException {
-        if (null == connection || null == rootDir || predicate == null) {
+    Peer(final ClearingHouse clearingHouse, final Connection connection)
+            throws IOException {
+        if (null == clearingHouse || null == connection) {
             throw new NullPointerException();
         }
 
+        this.clearingHouse = clearingHouse;
         this.connection = connection;
-        this.rootDir = rootDir;
-        noticeIterator = new NoticeIterator(rootDir, rootDir);
-        this.predicate = predicate;
+        wantsData = !Predicate.NOTHING.equals(clearingHouse.getPredicate());
+        clearingHouse.addPeer(this);
     }
 
     /**
@@ -131,19 +99,12 @@ final class Peer implements Callable<Void> {
     public Void call() throws InterruptedException, ExecutionException,
             IOException {
         try {
-            /*
-             * Prime the request-queue with a specification of the desired data.
-             */
-            requestQueue.put(new PredicateRequest(predicate));
-
             completionService.submit(new RequestSender(connection));
             completionService.submit(new RequestReceiver(connection));
 
-            // The notice-sender needs the remote predicate
-            remotePredicate.set(remotePredicateQueue.take());
+            clearingHouse.waitForRemotePredicate(Peer.this);
 
-            completionService.submit(new NoticeSender(connection,
-                    remotePredicate.get()));
+            completionService.submit(new NoticeSender(connection));
             completionService.submit(new NoticeReceiver(connection));
 
             completionService.submit(new PieceSender(connection));
@@ -185,128 +146,105 @@ final class Peer implements Callable<Void> {
     }
 
     /**
-     * Iterates over the pieces of regular files in a directory. Doesn't
-     * recurse.
+     * Processes a notice of a file available at the remote peer.
      * 
-     * Instances are thread-compatible but not thread-safe.
-     * 
-     * @author Steven R. Emmerson
+     * @param fileNotice
+     *            The notice of an available file.
+     * @throws IOException
+     *             if an I/O error occurs.
      */
-    private static class NoticeIterator implements Iterator<Notice> {
-        /**
-         * The canonical size, in bytes, of a piece of data (131072).
-         */
-        private final int           PIECE_SIZE = 0x20000;
-        /**
-         * The list of files in the directory.
-         */
-        private final File[]        files;
-        /**
-         * The index of the next pathname to use.
-         */
-        private int                 index;
-        /**
-         * Iterator over the pieces of data in a file.
-         */
-        private Iterator<PieceInfo> pieceIterator;
-        /**
-         * Iterator over notices from a sub-directory.
-         */
-        private NoticeIterator      subIterator;
-        /**
-         * The pathname of the root of the directory tree.
-         */
-        private final File          root;
-        /**
-         * The next notice to return.
-         */
-        private Notice              notice;
+    void process(final FileNotice fileNotice) throws IOException {
+        clearingHouse.process(fileNotice);
+    }
 
-        /**
-         * Constructs from the pathname of the directory that contains the files
-         * and the rootPath of the directory tree.
-         * 
-         * @param dir
-         *            The pathname of the directory that contains the files.
-         * @param root
-         *            The pathname of the root of the directory tree.
-         * @throws NullPointerException
-         *             if {@code root == null}.
-         */
-        NoticeIterator(final File dir, final File root) {
-            if (null == root) {
-                throw new NullPointerException();
+    /**
+     * Processes a notice of an available piece of data at the remote peer.
+     * 
+     * @param pieceNotice
+     *            Notice of the available piece of data.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    void process(final PieceNotice pieceNotice) throws InterruptedException {
+        clearingHouse.process(Peer.this, pieceNotice);
+    }
+
+    /**
+     * Processes a specification of data desired by the remote peer.
+     * 
+     * @param predicateRequest
+     *            The specification of remotely-desired data.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    void process(final PredicateRequest predicateRequest)
+            throws InterruptedException {
+        clearingHouse.process(Peer.this, predicateRequest);
+    }
+
+    /**
+     * Processes a request for a piece of data.
+     * 
+     * @param pieceRequest
+     *            The request for a piece of data.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     */
+    void process(final PieceRequest pieceRequest) throws InterruptedException,
+            IOException {
+        clearingHouse.process(Peer.this, pieceRequest);
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((connection == null)
+                ? 0
+                : connection.hashCode());
+        return result;
+    }
+
+    /**
+     * Indicates if this instance is considered equal to an object. Two
+     * instances are considered equal if and only if their connections to the
+     * remote peer are equal.
+     * 
+     * @see Connection#equals(java.lang.Object)
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final Peer other = (Peer) obj;
+        if (connection == null) {
+            if (other.connection != null) {
+                return false;
             }
-            this.root = root;
-            files = dir.listFiles();
-            setNextNotice();
         }
-
-        /**
-         * Sets the next notice to be returned. Sets it to {@code null} if there
-         * are no more notices.
-         */
-        void setNextNotice() {
-            if (null != pieceIterator && pieceIterator.hasNext()) {
-                notice = new PieceNotice(pieceIterator.next());
-                return;
-            }
-
-            if (null != subIterator && subIterator.hasNext()) {
-                notice = subIterator.next();
-                return;
-            }
-
-            while (files.length > index) {
-                final File absFile = files[index++];
-
-                if (absFile.isDirectory()) {
-                    subIterator = new NoticeIterator(absFile, root);
-
-                    if (subIterator.hasNext()) {
-                        notice = subIterator.next();
-                        return;
-                    }
-                }
-                else {
-                    final String absPath = absFile.getPath();
-
-                    if (!absPath.startsWith(root.getPath())) {
-                        throw new IllegalStateException("root="
-                                + root.getPath() + "\"; absPath=\"" + absPath
-                                + "\"");
-                    }
-
-                    final File relFile = new File(absPath.substring(root
-                            .getPath().length() + 1));
-                    final FileInfo fileInfo = new FileInfo(new FileId(relFile),
-                            absFile.length(), PIECE_SIZE);
-
-                    notice = new FileNotice(fileInfo);
-                    pieceIterator = fileInfo.getPieceInfoIterator();
-                    return;
-                }
-            }
-
-            notice = null;
+        else if (!connection.equals(other.connection)) {
+            return false;
         }
+        return true;
+    }
 
-        @Override
-        public boolean hasNext() {
-            return null != notice;
-        }
-
-        @Override
-        public Notice next() {
-            final Notice temp = notice;
-            setNextNotice();
-            return temp;
-        }
-
-        @Override
-        public void remove() {
-            throw new UnsupportedOperationException();
-        }
+    @Override
+    public String toString() {
+        return getClass().getSimpleName() + "{connection=" + connection + "}";
     }
 
     /**
@@ -365,7 +303,7 @@ final class Peer implements Callable<Void> {
             try {
                 for (;;) {
                     final Object obj = objectInputStream.readObject();
-                    System.out.println("Receiving: " + obj);
+                    System.out.println("Received: " + obj);
                     if (null != obj) {
                         if (!process(type.cast(obj))) {
                             break;
@@ -476,19 +414,13 @@ final class Peer implements Callable<Void> {
         }
 
         @Override
-        protected boolean process(final Piece piece) throws IOException {
-            if (!predicate.satisfiedBy(piece.getFileInfo())) {
-                // Server-created peers always do this
-                return true; // continue
-            }
-            if (DiskFile.putPiece(rootDir, piece)) {
-                predicate.removeIfPossible(piece.getFileInfo());
-            }
-            if (predicate.isEmpty()) {
+        protected boolean process(final Piece piece) throws IOException,
+                InterruptedException {
+            final boolean keepGoing = !(clearingHouse.process(Peer.this, piece) && wantsData);
+            if (!keepGoing) {
                 done.set(true);
-                return false; // terminate
             }
-            return true; // continue
+            return keepGoing;
         }
     }
 
@@ -537,11 +469,7 @@ final class Peer implements Callable<Void> {
         public final Void call() throws IOException, InterruptedException {
             final ObjectOutputStream objectOutputStream = new ObjectOutputStream(
                     outputStream);
-            for (;;) {
-                final T obj = nextObject();
-                if (null == obj) {
-                    break;
-                }
+            for (T obj = nextObject(); null != obj; obj = nextObject()) {
                 System.out.println("Sending: " + obj);
                 objectOutputStream.writeObject(obj);
                 objectOutputStream.flush();
@@ -588,23 +516,19 @@ final class Peer implements Callable<Void> {
 
         @Override
         public Request nextObject() throws InterruptedException {
-            return requestQueue.take();
+            return clearingHouse.getNextRequest(Peer.this);
         }
     }
 
     /**
      * Sends notices of available data to a remote peer.
      * 
-     * Instances are thread-safe.
+     * Instances are thread-compatible but not thread-safe (due to the use of
+     * the peer's {@link NoticeIterator}).
      * 
      * @author Steven R. Emmerson
      */
     private final class NoticeSender extends Sender<Notice> {
-        /**
-         * Specification of data desired by the remote peer.
-         */
-        private final Predicate predicate;
-
         /**
          * Constructs from the connection to a remote peer and a specification
          * of the data desired by the remote peer.
@@ -617,24 +541,13 @@ final class Peer implements Callable<Void> {
          *             if {peer == null || connection == null || predicate ==
          *             null}.
          */
-        NoticeSender(final Connection connection, final Predicate predicate)
-                throws IOException {
+        NoticeSender(final Connection connection) throws IOException {
             super(connection.getNoticeOutputStream());
-            if (null == predicate) {
-                throw new NullPointerException();
-            }
-            this.predicate = predicate;
         }
 
         @Override
-        protected Notice nextObject() {
-            while (noticeIterator.hasNext()) {
-                final Notice notice = noticeIterator.next();
-                if (predicate.satisfiedBy(notice.getFileInfo())) {
-                    return notice;
-                }
-            }
-            return null;
+        protected Notice nextObject() throws InterruptedException {
+            return clearingHouse.getNextNotice(Peer.this);
         }
     }
 
@@ -662,309 +575,7 @@ final class Peer implements Callable<Void> {
 
         @Override
         protected Piece nextObject() throws InterruptedException, IOException {
-            return pieceQueue.take();
-        }
-    }
-
-    /**
-     * An object on the request-stream.
-     * 
-     * Instances are immutable.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private static abstract class Request implements Serializable {
-        /**
-         * Serial version ID.
-         */
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * Processes the request via the local peer.
-         * 
-         * @param peer
-         *            The local peer.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        abstract void process(final Peer peer) throws InterruptedException,
-                IOException;
-    }
-
-    /**
-     * A request for a piece of data.
-     * 
-     * Instances are immutable.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private static final class PieceRequest extends Request {
-        /**
-         * Serial version ID.
-         */
-        private static final long serialVersionUID = 1L;
-        /**
-         * Information on the piece of data being requested.
-         */
-        private final PieceInfo   pieceInfo;
-
-        /**
-         * Creates a request for a piece of data.
-         * 
-         * @param pieceInfo
-         *            Information on the piece of data to request.
-         * @throws NullPointerException
-         *             if {@code pieceInfo == null}.
-         */
-        PieceRequest(final PieceInfo pieceInfo) {
-            if (null == pieceInfo) {
-                throw new NullPointerException();
-            }
-
-            this.pieceInfo = pieceInfo;
-        }
-
-        /**
-         * Processes the associated piece-information via the local peer.
-         * 
-         * @param peer
-         *            The local peer.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        @Override
-        void process(final Peer peer) throws InterruptedException, IOException {
-            peer.pieceQueue.put(DiskFile.getPiece(peer.rootDir, pieceInfo));
-        }
-
-        @Override
-        public String toString() {
-            return getClass().getSimpleName() + "{pieceInfo=" + pieceInfo + "}";
-        }
-
-        private Object readResolve() throws InvalidObjectException {
-            try {
-                return new PieceRequest(pieceInfo);
-            }
-            catch (final Exception e) {
-                throw (InvalidObjectException) new InvalidObjectException(
-                        "Read invalid " + getClass().getSimpleName())
-                        .initCause(e);
-            }
-        }
-    }
-
-    /**
-     * A request that specifies the desired data.
-     * 
-     * Instances are immutable.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private static final class PredicateRequest extends Request {
-        /**
-         * Serial version ID.
-         */
-        private static final long serialVersionUID = 1L;
-        /**
-         * The specification of desired data.
-         */
-        private final Predicate   predicate;
-
-        /**
-         * Constructs from a specification of desired data.
-         * 
-         * @param predicate
-         *            Specification of desired data.
-         */
-        PredicateRequest(final Predicate predicate) {
-            if (null == predicate) {
-                throw new NullPointerException();
-            }
-            this.predicate = predicate;
-        }
-
-        @Override
-        void process(final Peer peer) throws InterruptedException, IOException {
-            peer.remotePredicateQueue.add(predicate);
-        }
-
-        @Override
-        public String toString() {
-            return getClass().getSimpleName() + "{predicate=" + predicate + "}";
-        }
-    }
-
-    /**
-     * A notice of available data.
-     * 
-     * Instances are immutable.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private static abstract class Notice implements Serializable {
-        /**
-         * The serial version identifier.
-         */
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * Process this instance using the local peer.
-         * 
-         * @param peer
-         *            The local peer.
-         * @throws IOException
-         *             if an I/O error occurs.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         */
-        abstract void process(Peer peer) throws IOException,
-                InterruptedException;
-
-        @Override
-        public abstract String toString();
-
-        /**
-         * Returns the file information associated with this instance.
-         * 
-         * @return The file information associated with this instance.
-         */
-        abstract FileInfo getFileInfo();
-    }
-
-    /**
-     * A notice of an available file.
-     * 
-     * Instances are immutable.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private static final class FileNotice extends Notice {
-        /**
-         * The serial version identifier.
-         */
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * The associated information on the file.
-         */
-        private final FileInfo    fileInfo;
-
-        /**
-         * Constructs from information on the file.
-         * 
-         * @param fileInfo
-         *            Information on the file
-         * @throws NullPointerException
-         *             if {@code fileInfo == null}.
-         */
-        FileNotice(final FileInfo fileInfo) {
-            if (null == fileInfo) {
-                throw new NullPointerException();
-            }
-
-            this.fileInfo = fileInfo;
-        }
-
-        @Override
-        FileInfo getFileInfo() {
-            return fileInfo;
-        }
-
-        @Override
-        void process(final Peer peer) throws IOException {
-            if (peer.predicate.satisfiedBy(fileInfo)) {
-                DiskFile.create(peer.rootDir, fileInfo);
-            }
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see edu.ucar.unidata.dynaccn.Notice#toString()
-         */
-        @Override
-        public String toString() {
-            return this.getClass().getSimpleName() + "{fileInfo=" + fileInfo
-                    + "}";
-        }
-
-        private Object readResolve() throws InvalidObjectException {
-            try {
-                return new FileNotice(fileInfo);
-            }
-            catch (final Exception e) {
-                throw (InvalidObjectException) new InvalidObjectException(
-                        "Read invalid " + getClass().getSimpleName())
-                        .initCause(e);
-            }
-        }
-    }
-
-    /**
-     * A notice of an available piece of data.
-     * 
-     * Instances are immutable.
-     * 
-     * @author Steven R. Emmerson
-     */
-    private static final class PieceNotice extends Notice {
-        /**
-         * The serial version identifier.
-         */
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * Information about the associated file-piece.
-         */
-        private final PieceInfo   pieceInfo;
-
-        /**
-         * Constructs from information about a file-piece.
-         * 
-         * @param pieceInfo
-         *            Information of the file-piece.
-         * @throws NullPointerException
-         *             if {@code pieceInfo == null}.
-         */
-        PieceNotice(final PieceInfo pieceInfo) {
-            if (null == pieceInfo) {
-                throw new NullPointerException();
-            }
-
-            this.pieceInfo = pieceInfo;
-        }
-
-        @Override
-        FileInfo getFileInfo() {
-            return pieceInfo.getFileInfo();
-        }
-
-        @Override
-        void process(final Peer peer) throws InterruptedException {
-            if (peer.predicate.satisfiedBy(pieceInfo.getFileInfo())) {
-                peer.requestQueue.put(new PieceRequest(pieceInfo));
-            }
-        }
-
-        @Override
-        public String toString() {
-            return getClass().getSimpleName() + "{pieceInfo=" + pieceInfo + "}";
-        }
-
-        private Object readResolve() throws InvalidObjectException {
-            try {
-                return new PieceNotice(pieceInfo);
-            }
-            catch (final Exception e) {
-                throw (InvalidObjectException) new InvalidObjectException(
-                        "Read invalid " + getClass().getSimpleName())
-                        .initCause(e);
-            }
+            return clearingHouse.getNextPiece(Peer.this);
         }
     }
 }

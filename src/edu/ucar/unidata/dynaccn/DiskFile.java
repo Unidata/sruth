@@ -64,7 +64,8 @@ final class DiskFile {
     }
 
     /**
-     * Returns the instance associated with a file.
+     * Returns the instance associated with a file. Creates the instance if it
+     * doesn't already exist.
      * 
      * @param dir
      *            Pathname of the directory.
