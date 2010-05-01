@@ -46,13 +46,10 @@ public class ClientTest {
 
     @Before
     public void setUp() throws Exception {
-        system(new String[] { "rm", "-rf", "/tmp/client" });
-        system(new String[] { "mkdir", "-p", "/tmp/client" });
     }
 
     @After
     public void tearDown() throws Exception {
-        system(new String[] { "rm", "-rf", "/tmp/client" });
     }
 
     /**
@@ -82,6 +79,8 @@ public class ClientTest {
     @Test
     public void testTermination() throws IOException, InterruptedException,
             ExecutionException {
+        system(new String[] { "mkdir", "-p", "/tmp/client/term" });
+
         ClearingHouse clearingHouse = new ClearingHouse(
                 new File("/tmp/server"), Predicate.NOTHING);
         final Server server = new Server(clearingHouse);
@@ -92,23 +91,27 @@ public class ClientTest {
         final Constraint constraint = attribute.equalTo("server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
-        clearingHouse = new ClearingHouse(new File("/tmp/client"), predicate);
+        clearingHouse = new ClearingHouse(new File("/tmp/client/term"),
+                predicate);
         final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
         clientFuture.get();
         stop(serverFuture);
 
-        Assert.assertFalse(new File("/tmp/client/server-file-1").exists());
-        Assert.assertTrue(new File("/tmp/client/server-file-2").exists());
-        Assert.assertTrue(new File("/tmp/client/server-file-2").length() > 0);
-        Assert.assertFalse(new File("/tmp/client/subdir/server-subfile")
+        Assert.assertFalse(new File("/tmp/client/term/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/term/server-file-2").exists());
+        Assert
+                .assertTrue(new File("/tmp/client/term/server-file-2").length() > 0);
+        Assert.assertFalse(new File("/tmp/client/term/subdir/server-subfile")
                 .exists());
     }
 
     @Test
     public void testNonTermination() throws IOException, InterruptedException,
             ExecutionException {
+        system(new String[] { "mkdir", "-p", "/tmp/client/nonterm" });
+
         ClearingHouse clearingHouse = new ClearingHouse(
                 new File("/tmp/server"), Predicate.NOTHING);
         final Server server = new Server(clearingHouse);
@@ -119,7 +122,8 @@ public class ClientTest {
         final Constraint constraint = attribute.notEqualTo("server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
-        clearingHouse = new ClearingHouse(new File("/tmp/client"), predicate);
+        clearingHouse = new ClearingHouse(new File("/tmp/client/nonterm"),
+                predicate);
         final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
@@ -127,27 +131,45 @@ public class ClientTest {
         stop(clientFuture);
         stop(serverFuture);
 
-        Assert.assertTrue(new File("/tmp/client/server-file-1").exists());
-        Assert.assertTrue(new File("/tmp/client/server-file-1").length() > 0);
-        Assert.assertFalse(new File("/tmp/client/server-file-2").exists());
-        Assert.assertTrue(new File("/tmp/client/subdir/server-subfile")
+        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-1")
                 .exists());
-        Assert.assertTrue(new File("/tmp/client/subdir/server-subfile")
+        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-1")
+                .length() > 0);
+        Assert.assertFalse(new File("/tmp/client/nonterm/server-file-2")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/nonterm/subdir/server-subfile")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/nonterm/subdir/server-subfile")
                 .length() > 0);
     }
 
     @Test
     public void testNodes() throws IOException, InterruptedException,
             ExecutionException {
+        system(new String[] { "mkdir", "-p", "/tmp/client/node" });
+
         final Node sourceNode = new Node(new File("/tmp/server"),
                 Predicate.NOTHING);
+        final Future<Void> sourceFuture = start(sourceNode);
 
-        final Attribute attribute = new Attribute("name");
-        final Constraint constraint = attribute.equalTo("server-file-2");
-        final Filter filter = new Filter(new Constraint[] { constraint });
-        final Predicate predicate = new Predicate(new Filter[] { filter });
-        final Node sinkNode = new Node(new File("/tmp/client"), predicate);
-
+        final Node sinkNode = new Node(new File("/tmp/client/node"),
+                Predicate.EVERYTHING);
         sinkNode.add(sourceNode.getServerInfo());
+        final Future<Void> sinkFuture = start(sinkNode);
+
+        Thread.sleep(100);
+        stop(sinkFuture);
+        stop(sourceFuture);
+
+        Assert.assertTrue(new File("/tmp/client/node/server-file-1").exists());
+        Assert
+                .assertTrue(new File("/tmp/client/node/server-file-1").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/server-file-2").exists());
+        Assert
+                .assertTrue(new File("/tmp/client/node/server-file-2").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/subdir/server-subfile")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/node/subdir/server-subfile")
+                .length() > 0);
     }
 }
