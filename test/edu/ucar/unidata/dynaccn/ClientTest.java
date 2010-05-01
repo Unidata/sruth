@@ -135,4 +135,19 @@ public class ClientTest {
         Assert.assertTrue(new File("/tmp/client/subdir/server-subfile")
                 .length() > 0);
     }
+
+    @Test
+    public void testNodes() throws IOException, InterruptedException,
+            ExecutionException {
+        final Node sourceNode = new Node(new File("/tmp/server"),
+                Predicate.NOTHING);
+
+        final Attribute attribute = new Attribute("name");
+        final Constraint constraint = attribute.equalTo("server-file-2");
+        final Filter filter = new Filter(new Constraint[] { constraint });
+        final Predicate predicate = new Predicate(new Filter[] { filter });
+        final Node sinkNode = new Node(new File("/tmp/client"), predicate);
+
+        sinkNode.add(sourceNode.getServerInfo());
+    }
 }
