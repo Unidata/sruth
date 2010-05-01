@@ -32,7 +32,7 @@ final class Client implements Callable<Void> {
     private final ServerInfo       serverInfo;
 
     /**
-     * Constructs from the Internet address of the remote server.
+     * Constructs from information on the remote server.
      * 
      * @param serverInfo
      *            Information on the remote server.
@@ -41,8 +41,7 @@ final class Client implements Callable<Void> {
      * @throws NullPointerException
      *             if {@code serverInfo == null || clearingHouse == null}.
      */
-    Client(final ServerInfo serverInfo, final ClearingHouse clearingHouse)
-            throws IOException {
+    Client(final ServerInfo serverInfo, final ClearingHouse clearingHouse) {
         if (null == clearingHouse || null == serverInfo) {
             throw new NullPointerException();
         }

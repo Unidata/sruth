@@ -48,13 +48,10 @@ final class ClearingHouse {
      *            The root of the file-tree.
      * @param predicate
      *            Specification of locally-desired data.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
      * @throws NullPointerException
      *             if {@code rootDir == null || predicate == null}.
      */
-    ClearingHouse(final File rootDir, final Predicate predicate)
-            throws InterruptedException {
+    ClearingHouse(final File rootDir, final Predicate predicate) {
         if (null == rootDir || null == predicate) {
             throw new NullPointerException();
         }
