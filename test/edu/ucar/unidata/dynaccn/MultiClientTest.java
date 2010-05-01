@@ -119,7 +119,7 @@ public class MultiClientTest {
         final Future<Void> client_1_Future = start(client_1);
         final Future<Void> client_2_Future = start(client_2);
 
-        Thread.sleep(200);
+        Thread.sleep(500);
 
         stop(client_1_Future);
         stop(client_2_Future);
@@ -188,7 +188,7 @@ public class MultiClientTest {
         client = new Client(server_2_Info, clearingHouse);
         final Future<Void> client_2_Future = start(client);
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
 
         stop(client_1_Future);
@@ -281,7 +281,7 @@ public class MultiClientTest {
         final Future<Void> leftClientFuture = start(leftSourceClient);
         final Future<Void> rightClientFuture = start(rightSourceClient);
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
 
         stop(leftPeerClientFuture);
@@ -361,7 +361,7 @@ public class MultiClientTest {
         final Future<Void> sinkNode1Future = start(sinkNode1);
         final Future<Void> sinkNode2Future = start(sinkNode2);
 
-        Thread.sleep(200);
+        Thread.sleep(500);
         // Thread.sleep(Long.MAX_VALUE);
 
         /*

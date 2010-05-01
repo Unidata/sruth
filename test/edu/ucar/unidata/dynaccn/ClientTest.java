@@ -127,7 +127,7 @@ public class ClientTest {
         final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
-        Thread.sleep(200);
+        Thread.sleep(500);
         stop(clientFuture);
         stop(serverFuture);
 
@@ -157,7 +157,7 @@ public class ClientTest {
         sinkNode.add(sourceNode.getServerInfo());
         final Future<Void> sinkFuture = start(sinkNode);
 
-        Thread.sleep(100);
+        Thread.sleep(500);
         stop(sinkFuture);
         stop(sourceFuture);
 
