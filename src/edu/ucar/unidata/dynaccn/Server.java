@@ -9,15 +9,17 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.logging.Logger;
 
 /**
  * Handles connections by clients.
@@ -28,47 +30,58 @@ import java.util.concurrent.Future;
  */
 final class Server implements Callable<Void> {
     /**
+     * The logging service.
+     */
+    private static final Logger                       logger           = Logger
+                                                                               .getLogger(Server.class
+                                                                                       .getName());
+    /**
+     * Executes port listeners.
+     */
+    private static final ExecutorService              listenerExecutor = Executors
+                                                                               .newCachedThreadPool();
+    /**
+     * Executes peers created by this instance.
+     */
+    private static final ExecutorService              peerExecutor     = Executors
+                                                                               .newCachedThreadPool();
+    /**
      * The port listeners.
      */
     private final Listener[]                          listeners        = new Listener[Connection.SOCKET_COUNT];
     /**
-     * Executes peers created by this instance.
+     * The port listener manager.
      */
-    private final ExecutorService                     peerExecutor     = Executors
-                                                                               .newCachedThreadPool();
-    /**
-     * Executes port listeners.
-     */
-    private final ExecutorService                     listenerExecutor = Executors
-                                                                               .newFixedThreadPool(listeners.length);
-    /**
-     * Manages port listeners.
-     */
-    private final ExecutorCompletionService<Void>     listenerManager  = new ExecutorCompletionService<Void>(
+    private final TaskManager<Void>                   listenerManager  = new TaskManager<Void>(
                                                                                listenerExecutor);
     /**
-     * The starting port number.
+     * The peers created by this instance.
      */
-    static final int                                  START_PORT       = 3880;
+    private final List<Peer>                          peers            = new LinkedList<Peer>();
+    /**
+     * The peer futures.
+     */
+    private final List<Future<?>>                     peerFutures      = Collections
+                                                                               .synchronizedList(new LinkedList<Future<?>>());
     /**
      * The set of client-specific connections.
      */
     private final ConcurrentMap<ClientId, Connection> connections      = new ConcurrentHashMap<ClientId, Connection>();
     /**
-     * The data clearing-house.
+     * The data clearing-house to use.
      */
     private final ClearingHouse                       clearingHouse;
 
     /**
-     * Constructs from the data clearing-house to use. Immediately starts
-     * listening for connection attempts but doesn't process the attempts until
-     * method {@link #call()} is called.
+     * Constructs from the clearing-house. Immediately starts listening for
+     * connection attempts but doesn't process the attempts until method
+     * {@link #call()} is called.
      * 
      * By default, the resulting instance will listen on all available
      * interfaces.
      * 
      * @param clearingHouse
-     *            The data clearing-house to use.
+     *            The clearing-house to use.
      * @throws IOException
      *             if a port can't be listened to.
      * @throws NullPointerException
@@ -123,52 +136,44 @@ final class Server implements Callable<Void> {
     }
 
     /**
-     * Executes this instance and waits upon one of the following conditions: 1)
-     * an error occurs; or 2) the current thread is interrupted. In any case,
-     * any and all subtasks will have been terminated upon return.
-     * 
-     * @throws ExecutionException
-     *             if a subtask terminates due to an error.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
+     * Executes this instance and completes normally if and only if the current
+     * thread is interrupted.
      */
     @Override
-    public Void call() throws InterruptedException, ExecutionException {
+    public Void call() {
         try {
             for (final Listener listener : listeners) {
                 listenerManager.submit(listener);
             }
             try {
-                final Future<Void> future = listenerManager.take();
-
-                try {
-                    future.get();
-                    listenerExecutor.shutdownNow();
-                }
-                catch (final ExecutionException e) {
-                    listenerExecutor.shutdownNow();
-                    throw e;
-                }
-                catch (final CancellationException e) {
-                    // Can't happen
-                }
+                listenerManager.waitUpon();
             }
-            catch (final InterruptedException e) {
-                listenerExecutor.shutdownNow();
-                throw e;
+            catch (final InterruptedException ignored) {
+                // Implements thread interruption policy
             }
         }
         finally {
-            for (final Listener listener : listeners) {
-                try {
-                    listener.close();
-                }
-                catch (final IOException e) {
-                    // ignored
-                }
+            listenerManager.cancel();
+            for (final Future<?> future : peerFutures) {
+                future.cancel(true);
             }
         }
         return null;
+    }
+
+    /**
+     * Handles the creation of new local data by notifying all peers of the new
+     * data.
+     * 
+     * @param spec
+     *            Specification of the new local data.
+     */
+    void newData(final PiecesSpec spec) {
+        synchronized (peers) {
+            for (final Peer peer : peers) {
+                peer.newData(spec);
+            }
+        }
     }
 
     /**
@@ -264,9 +269,22 @@ final class Server implements Callable<Void> {
                          * if ready.
                          */
                         if (connection.add(socket)) {
-                            System.out.println("Server: " + connection);
-                            peerExecutor.submit(new Peer(clearingHouse,
-                                    connection));
+                            logger.finer("Server: " + connection);
+                            final Peer peer = new Peer(clearingHouse,
+                                    connection);
+                            synchronized (peers) {
+                                peers.add(peer);
+                            }
+                            peerFutures.add(peerExecutor
+                                    .submit(new FutureTask<Void>(peer) {
+                                        @Override
+                                        protected void done() {
+                                            peerFutures.remove(this);
+                                            synchronized (peers) {
+                                                peers.remove(peer);
+                                            }
+                                        }
+                                    }));
                         }
                     }
                     catch (final IOException e) {

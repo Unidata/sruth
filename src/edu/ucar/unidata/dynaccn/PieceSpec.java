@@ -5,26 +5,22 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.File;
+import java.io.IOException;
 import java.io.InvalidObjectException;
-import java.io.Serializable;
+import java.nio.file.Path;
 
 /**
- * Information about a piece of a file.
+ * A data-specification comprising a single piece of data in a file.
  * 
  * Instances are immutable.
  * 
  * @author Steven R. Emmerson
  */
-final class PieceInfo implements Serializable {
+final class PieceSpec extends PiecesSpec {
     /**
      * The serial version identifier.
      */
     private static final long serialVersionUID = 1L;
-    /**
-     * Information on the file.
-     */
-    private final FileInfo    fileInfo;
     /**
      * The piece index.
      */
@@ -42,10 +38,9 @@ final class PieceInfo implements Serializable {
      * @throws NullPointerException
      *             if {@code fileInfo == null}.
      */
-    PieceInfo(final FileInfo fileInfo, final int index) {
+    PieceSpec(final FileInfo fileInfo, final int index) {
+        super(fileInfo);
         fileInfo.vet(index);
-
-        this.fileInfo = fileInfo;
         this.index = index;
     }
 
@@ -64,15 +59,6 @@ final class PieceInfo implements Serializable {
     }
 
     /**
-     * Returns the file-information associated with this instance.
-     * 
-     * @return The associated file-information.
-     */
-    FileInfo getFileInfo() {
-        return fileInfo;
-    }
-
-    /**
      * Returns the piece-index of this instance.
      * 
      * @return The piece-index of this instance.
@@ -81,22 +67,14 @@ final class PieceInfo implements Serializable {
         return index;
     }
 
-    @Override
-    public String toString() {
-        return getClass().getSimpleName() + "{fileInfo=" + fileInfo
-                + ", index=" + index + "}";
-    }
-
     /**
-     * Returns the absolute abstract pathname of this instance resolved against
-     * a directory.
+     * Returns the relative pathname of this instance.
      * 
-     * @param dirPath
-     *            The abstract pathname of the directory to resolve against.
-     * @return The abstract absolute pathname of the result.
+     * @return This instance's relative pathname.
      */
-    File getFile(final File dirPath) {
-        return fileInfo.getFile(dirPath);
+    @Override
+    Path getPath() {
+        return fileInfo.getPath();
     }
 
     /**
@@ -118,9 +96,40 @@ final class PieceInfo implements Serializable {
         return fileInfo.getSize(index);
     }
 
+    @Override
+    PiecesSpec merge(final PiecesSpec that) {
+        return that.merge(this);
+    }
+
+    @Override
+    PiecesSpec merge(final PieceSpec that) {
+        vetMerger(that);
+        if (index == that.index) {
+            return this;
+        }
+        return new FileSpec(fileInfo).merge(this).merge(that);
+    }
+
+    @Override
+    PiecesSpec merge(final FileSpec that) {
+        return that.merge(this);
+    }
+
+    @Override
+    void processYourself(final SpecProcessor specProcessor)
+            throws InterruptedException, IOException {
+        specProcessor.process(this);
+    }
+
+    @Override
+    public String toString() {
+        return getClass().getSimpleName() + "{fileInfo=" + fileInfo
+                + ", index=" + index + "}";
+    }
+
     private Object readResolve() throws InvalidObjectException {
         try {
-            return new PieceInfo(fileInfo, index);
+            return new PieceSpec(fileInfo, index);
         }
         catch (final Exception e) {
             throw (InvalidObjectException) new InvalidObjectException(

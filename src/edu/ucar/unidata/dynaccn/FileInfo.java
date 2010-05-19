@@ -5,9 +5,9 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.File;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Map;
 
@@ -132,12 +132,12 @@ final class FileInfo implements Serializable {
     }
 
     /**
-     * Returns the pathname associated with this instance.
+     * Returns the relative pathname associated with this instance.
      * 
-     * @return The associated pathname.
+     * @return The associated relative pathname.
      */
-    File getPath() {
-        return fileId.getFile();
+    Path getPath() {
+        return fileId.getPath();
     }
 
     /**
@@ -188,8 +188,8 @@ final class FileInfo implements Serializable {
      * @throws IllegalArgumentException
      *             if {@code info} is incompatible with this instance.
      */
-    void vet(final PieceInfo pieceInfo) {
-        if (!equals(pieceInfo.getFileInfo())) {
+    void vet(final PieceSpec pieceSpec) {
+        if (!equals(pieceSpec.getFileInfo())) {
             throw new IllegalArgumentException();
         }
     }
@@ -199,8 +199,8 @@ final class FileInfo implements Serializable {
      * 
      * @return An iterator over the piece-informations of this instance.
      */
-    Iterator<PieceInfo> getPieceInfoIterator() {
-        class PieceInfoIterator implements Iterator<PieceInfo> {
+    Iterator<PieceSpec> getPieceInfoIterator() {
+        class PieceInfoIterator implements Iterator<PieceSpec> {
             /**
              * The index of the next piece to be returned.
              */
@@ -212,8 +212,8 @@ final class FileInfo implements Serializable {
             }
 
             @Override
-            public PieceInfo next() {
-                return new PieceInfo(FileInfo.this, index++);
+            public PieceSpec next() {
+                return new PieceSpec(FileInfo.this, index++);
             }
 
             @Override
@@ -223,23 +223,6 @@ final class FileInfo implements Serializable {
         }
 
         return new PieceInfoIterator();
-    }
-
-    /**
-     * Returns the absolute abstract pathname of this instance's file resolved
-     * against a given directory.
-     * 
-     * @param dirPath
-     *            The directory against which to resolve the pathname.
-     * @return The absolute abstract pathname of this instance based on the
-     *         given directory.
-     * @throws IllegalArgumentException
-     *             if {@code !dirPath.isAbsolute()}.
-     * @throws NullPointerException
-     *             if {@code dirPath == null}.
-     */
-    File getFile(final File dirPath) {
-        return fileId.getFile(dirPath);
     }
 
     /*

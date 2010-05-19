@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.logging.Logger;
 
 /**
  * Connects to a remote server and exchanges data.
@@ -18,6 +19,11 @@ import java.util.concurrent.ExecutionException;
  * @author Steven R. Emmerson
  */
 final class Client implements Callable<Void> {
+    /**
+     * The logging service.
+     */
+    private static final Logger    logger     = Logger.getLogger(Client.class
+                                                      .getName());
     /**
      * The connection to the remote server.
      */
@@ -90,23 +96,18 @@ final class Client implements Callable<Void> {
              * Write this client's port numbers on the socket to help identify
              * this client.
              */
-            final DataOutputStream dos = new DataOutputStream(sockets[i]
+            final DataOutputStream stream = new DataOutputStream(sockets[i]
                     .getOutputStream());
             for (final Socket socket : sockets) {
-                dos.writeInt(socket.getLocalPort());
+                stream.writeInt(socket.getLocalPort());
             }
-            dos.flush();
+            stream.flush();
             /*
              * Add this socket to the connection.
              */
             connection.add(sockets[i]);
         }
-        try {
-            System.out.println("Client: " + connection);
-            return new Peer(clearingHouse, connection).call();
-        }
-        finally {
-            connection.close();
-        }
+        logger.finer("Client: " + connection);
+        return new Peer(clearingHouse, connection).call();
     }
 }

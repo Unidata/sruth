@@ -5,9 +5,11 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.File;
+import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.Map;
 
@@ -22,27 +24,27 @@ final class FileId implements Serializable {
     /**
      * The serial version identifier.
      */
-    private static final long serialVersionUID = 1L;
+    private static final long       serialVersionUID = 1L;
     /**
-     * The abstract relative pathname of the file.
+     * The relative pathname of the file.
      */
-    private final File        relFile;
+    private volatile transient Path path;
 
     /**
      * Constructs from the relative pathname of the file.
      * 
-     * @param relFile
+     * @param path
      *            The relative pathname of the file.
      * @throws IllegalArgumentException
-     *             if {@code relFile.isAbsolute()}.
+     *             if {@code path.isAbsolute()}.
      * @throws NullPointerException
-     *             if {@code relFile == null}.
+     *             if {@code path == null}.
      */
-    FileId(final File relFile) {
-        if (relFile.isAbsolute()) {
+    FileId(final Path path) {
+        if (path.isAbsolute()) {
             throw new IllegalArgumentException();
         }
-        this.relFile = relFile;
+        this.path = path;
     }
 
     /**
@@ -50,28 +52,17 @@ final class FileId implements Serializable {
      * 
      * @return The associated abstract relative pathname.
      */
-    File getFile() {
-        return relFile;
+    Path getFile() {
+        return path;
     }
 
     /**
-     * Returns the abstract absolute pathname of this instance's file resolved
-     * against the abstract absolute pathname of a given directory.
+     * Returns the relative pathname of this instance's file.
      * 
-     * @param dir
-     *            The abstract absolute pathname of the directory against which
-     *            to resolve the abstract relative pathname associated with this
-     *            instance.
-     * @throws IllegalArgumentException
-     *             if {@code !dirPath.isAbsolute()}.
-     * @throws NullPointerException
-     *             if {@code dirPath == null}.
+     * @return The relative pathname of this instance's file.
      */
-    File getFile(final File dir) {
-        if (!dir.isAbsolute()) {
-            throw new IllegalArgumentException();
-        }
-        return new File(dir, relFile.getPath());
+    Path getPath() {
+        return path;
     }
 
     /**
@@ -85,8 +76,18 @@ final class FileId implements Serializable {
     Object getAttributeValue(final Attribute attribute) {
         return (attribute.getType().equals(String.class) && attribute.getName()
                 .equals("name"))
-                ? relFile.getPath()
+                ? path.toString()
                 : null;
+    }
+
+    /**
+     * Returns the map of attributes and their values.
+     * 
+     * @return The map of attributes and their values.
+     */
+    Map<Attribute, Object> getAttributeMap() {
+        return Collections.singletonMap(new Attribute("name"), (Object) path
+                .toString());
     }
 
     /*
@@ -106,12 +107,12 @@ final class FileId implements Serializable {
             return false;
         }
         final FileId other = (FileId) obj;
-        if (relFile == null) {
-            if (other.relFile != null) {
+        if (path == null) {
+            if (other.path != null) {
                 return false;
             }
         }
-        else if (!relFile.equals(other.relFile)) {
+        else if (!path.equals(other.path)) {
             return false;
         }
         return true;
@@ -126,34 +127,50 @@ final class FileId implements Serializable {
     public int hashCode() {
         final int prime = 31;
         int result = 1;
-        result = prime * result + ((relFile == null)
+        result = prime * result + ((path == null)
                 ? 0
-                : relFile.hashCode());
+                : path.hashCode());
         return result;
     }
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{relFile=" + relFile + "}";
+        return getClass().getSimpleName() + "{path=" + path + "}";
+    }
+
+    /**
+     * Serializes this instance.
+     * 
+     * @serialData The relative pathname is written as a string.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    private void writeObject(final java.io.ObjectOutputStream out)
+            throws IOException {
+        out.defaultWriteObject();
+        out.writeObject(path.toString());
+    }
+
+    /**
+     * Deserializes this instance.
+     * 
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws ClassNotFoundException
+     */
+    private void readObject(final java.io.ObjectInputStream in)
+            throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        path = Paths.get((String) in.readObject());
     }
 
     private Object readResolve() throws InvalidObjectException {
         try {
-            return new FileId(relFile);
+            return new FileId(path);
         }
         catch (final Exception e) {
             throw (InvalidObjectException) new InvalidObjectException(
                     "Read invalid " + getClass().getSimpleName()).initCause(e);
         }
-    }
-
-    /**
-     * Returns the map of attributes and their values.
-     * 
-     * @return The map of attributes and their values.
-     */
-    Map<Attribute, Object> getAttributeMap() {
-        return Collections.singletonMap(new Attribute("name"), (Object) relFile
-                .getPath());
     }
 }

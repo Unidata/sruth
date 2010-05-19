@@ -5,9 +5,9 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.File;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
+import java.nio.file.Path;
 
 /**
  * A piece of a file.
@@ -24,7 +24,7 @@ final class Piece implements Serializable {
     /**
      * Information on the piece.
      */
-    private final PieceInfo   pieceInfo;
+    private final PieceSpec   pieceSpec;
     /**
      * The piece's data.
      */
@@ -33,21 +33,21 @@ final class Piece implements Serializable {
     /**
      * Constructs from information on the piece and the piece's data.
      * 
-     * @param pieceInfo
+     * @param pieceSpec
      *            Information on the piece.
      * @param data
      *            The piece's data. NB: Not copied.
      * @throws IllegalArgumentException
      *             if {@code data} has the wrong number of elements.
      * @throws NullPointerException
-     *             if {@code pieceInfo == null}.
+     *             if {@code pieceSpec == null}.
      * @throws NullPointerException
      *             if {@code data == null}.
      */
-    Piece(final PieceInfo pieceInfo, final byte[] data) {
-        pieceInfo.vet(data);
+    Piece(final PieceSpec pieceSpec, final byte[] data) {
+        pieceSpec.vet(data);
 
-        this.pieceInfo = pieceInfo;
+        this.pieceSpec = pieceSpec;
         this.data = data;
     }
 
@@ -56,8 +56,8 @@ final class Piece implements Serializable {
      * 
      * @return The associated piece-information.
      */
-    PieceInfo getInfo() {
-        return pieceInfo;
+    PieceSpec getInfo() {
+        return pieceSpec;
     }
 
     /**
@@ -66,7 +66,7 @@ final class Piece implements Serializable {
      * @return The piece-index of this instance.
      */
     int getIndex() {
-        return pieceInfo.getIndex();
+        return pieceSpec.getIndex();
     }
 
     /**
@@ -84,19 +84,16 @@ final class Piece implements Serializable {
      * @return Information on the containing file.
      */
     FileInfo getFileInfo() {
-        return pieceInfo.getFileInfo();
+        return pieceSpec.getFileInfo();
     }
 
     /**
-     * Returns the absolute abstract pathname of this instance resolved against
-     * a directory.
+     * Returns the relative pathname of this instance.
      * 
-     * @param dirPath
-     *            The abstract pathname of the directory to resolve against.
-     * @return The abstract absolute pathname of the result.
+     * @return The relative pathname of this instance.
      */
-    File getFile(final File dirPath) {
-        return pieceInfo.getFile(dirPath);
+    Path getPath() {
+        return pieceSpec.getPath();
     }
 
     /**
@@ -106,17 +103,18 @@ final class Piece implements Serializable {
      * @return The offset, in bytes, to the start of this piece.
      */
     long getOffset() {
-        return pieceInfo.getOffset();
+        return pieceSpec.getOffset();
     }
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{pieceInfo=" + pieceInfo + "}";
+        return getClass().getSimpleName() + "{pieceSpec=" + pieceSpec
+                + ", size=" + data.length + "}";
     }
 
     private Object readResolve() throws InvalidObjectException {
         try {
-            return new Piece(pieceInfo, data);
+            return new Piece(pieceSpec, data);
         }
         catch (final Exception e) {
             throw (InvalidObjectException) new InvalidObjectException(

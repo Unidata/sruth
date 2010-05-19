@@ -8,7 +8,7 @@ package edu.ucar.unidata.dynaccn;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.util.Set;
-import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 /**
  * A disjunction of filters for selecting data for a peer.
@@ -49,7 +49,7 @@ class Predicate implements Serializable {
 
                                                    @Override
                                                    public String toString() {
-                                                       return "EVERYTHING";
+                                                       return "Predicate.EVERYTHING";
                                                    }
 
                                                    private Object readResolve() {
@@ -83,7 +83,7 @@ class Predicate implements Serializable {
 
                                                    @Override
                                                    public String toString() {
-                                                       return "NOTHING";
+                                                       return "Predicate.NOTHING";
                                                    }
 
                                                    private Object readResolve() {
@@ -93,7 +93,7 @@ class Predicate implements Serializable {
     /**
      * The filters.
      */
-    private final Set<Filter> filters          = new TreeSet<Filter>();
+    private final Set<Filter> filters          = new ConcurrentSkipListSet<Filter>();
 
     /**
      * Constructs from an array of filters.
@@ -134,15 +134,15 @@ class Predicate implements Serializable {
     /**
      * Indicates if a piece of data satisfies this predicate.
      * 
-     * @param pieceInfo
+     * @param pieceSpec
      *            Information on the piece of data.
      * @return {@code true} if and only if the piece of data satisfies this
      *         predicate.
      * @throws NullPointerException
      *             if {@code pieceInfo == null}.
      */
-    synchronized boolean satisfiedBy(final PieceInfo pieceInfo) {
-        return satisfiedBy(pieceInfo.getFileInfo());
+    synchronized boolean satisfiedBy(final PieceSpec pieceSpec) {
+        return satisfiedBy(pieceSpec.getFileInfo());
     }
 
     /**
@@ -175,7 +175,8 @@ class Predicate implements Serializable {
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{filters=" + filters + "}";
+        return getClass().getSimpleName() + "{filters=(" + filters.size()
+                + " filters)}";
     }
 
     private Object readResolve() throws InvalidObjectException {

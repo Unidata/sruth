@@ -2,11 +2,13 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.logging.Logger;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -16,6 +18,12 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class ClientTest {
+    /**
+     * The logging service.
+     */
+    private static final Logger    logger          = Logger
+                                                           .getLogger(ClientTest.class
+                                                                   .getName());
     /**
      * The executor service.
      */
@@ -79,11 +87,12 @@ public class ClientTest {
     @Test
     public void testTermination() throws IOException, InterruptedException,
             ExecutionException {
+        logger.info("testTermination():");
         system(new String[] { "mkdir", "-p", "/tmp/client/term" });
 
-        ClearingHouse clearingHouse = new ClearingHouse(
-                new File("/tmp/server"), Predicate.NOTHING);
-        final Server server = new Server(clearingHouse);
+        Archive archive = new Archive(Paths.get("/tmp/server"));
+        final Server server = new Server(new ClearingHouse(archive,
+                Predicate.NOTHING));
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
@@ -91,7 +100,8 @@ public class ClientTest {
         final Constraint constraint = attribute.equalTo("server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
-        clearingHouse = new ClearingHouse(new File("/tmp/client/term"),
+        archive = new Archive(Paths.get("/tmp/client/term"));
+        final ClearingHouse clearingHouse = new ClearingHouse(archive,
                 predicate);
         final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
@@ -110,11 +120,13 @@ public class ClientTest {
     @Test
     public void testNonTermination() throws IOException, InterruptedException,
             ExecutionException {
+        logger.info("");
+        logger.info("testNonTermination():");
         system(new String[] { "mkdir", "-p", "/tmp/client/nonterm" });
 
-        ClearingHouse clearingHouse = new ClearingHouse(
-                new File("/tmp/server"), Predicate.NOTHING);
-        final Server server = new Server(clearingHouse);
+        Archive archive = new Archive("/tmp/server");
+        final Server server = new Server(new ClearingHouse(archive,
+                Predicate.NOTHING));
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
@@ -122,12 +134,14 @@ public class ClientTest {
         final Constraint constraint = attribute.notEqualTo("server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
-        clearingHouse = new ClearingHouse(new File("/tmp/client/nonterm"),
+        archive = new Archive("/tmp/client/nonterm");
+        final ClearingHouse clearingHouse = new ClearingHouse(archive,
                 predicate);
         final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
-        Thread.sleep(500);
+        Thread.sleep(200);
+        // Thread.sleep(Long.MAX_VALUE);
         stop(clientFuture);
         stop(serverFuture);
 
@@ -146,18 +160,22 @@ public class ClientTest {
     @Test
     public void testNodes() throws IOException, InterruptedException,
             ExecutionException {
+        logger.info("");
+        logger.info("testNodes():");
         system(new String[] { "mkdir", "-p", "/tmp/client/node" });
 
-        final Node sourceNode = new Node(new File("/tmp/server"),
+        final Node sourceNode = new Node(new Archive(Paths.get("/tmp/server")),
                 Predicate.NOTHING);
         final Future<Void> sourceFuture = start(sourceNode);
+        final ServerInfo serverInfo = sourceNode.getServerInfo();
 
-        final Node sinkNode = new Node(new File("/tmp/client/node"),
-                Predicate.EVERYTHING);
-        sinkNode.add(sourceNode.getServerInfo());
+        final Node sinkNode = new Node(new Archive(Paths
+                .get("/tmp/client/node")), Predicate.EVERYTHING);
+        sinkNode.add(serverInfo);
         final Future<Void> sinkFuture = start(sinkNode);
 
-        Thread.sleep(500);
+        Thread.sleep(200);
+        // Thread.sleep(Long.MAX_VALUE);
         stop(sinkFuture);
         stop(sourceFuture);
 

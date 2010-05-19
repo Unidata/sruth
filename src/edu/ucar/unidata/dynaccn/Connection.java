@@ -101,6 +101,33 @@ abstract class Connection {
     }
 
     /**
+     * Returns the REQUEST socket.
+     * 
+     * @return The REQUEST socket.
+     */
+    Socket getRequestSocket() {
+        return sockets[REQUEST];
+    }
+
+    /**
+     * Returns the NOTICE socket.
+     * 
+     * @return The NOTICE socket.
+     */
+    Socket getNoticeSocket() {
+        return sockets[NOTICE];
+    }
+
+    /**
+     * Returns the DATA socket.
+     * 
+     * @return The DATA socket.
+     */
+    Socket getDataSocket() {
+        return sockets[DATA];
+    }
+
+    /**
      * Returns the notice input stream.
      * 
      * @return The notice input stream.
