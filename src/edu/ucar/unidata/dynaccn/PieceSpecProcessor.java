@@ -12,9 +12,9 @@ import java.io.IOException;
  * 
  * @author Steven R. Emmerson
  */
-interface SpecProcessor {
+interface PieceSpecProcessor {
     /**
-     * Processes a specification of a piece of data using a peer.
+     * Processes a specification of a piece of data.
      * 
      * @param pieceSpec
      *            The specification of the piece of data.

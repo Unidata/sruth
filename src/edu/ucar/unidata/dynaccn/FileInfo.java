@@ -9,7 +9,6 @@ import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.nio.file.Path;
 import java.util.Iterator;
-import java.util.Map;
 
 /**
  * Information about a file.
@@ -80,6 +79,39 @@ final class FileInfo implements Serializable {
     }
 
     /**
+     * Returns the number of attributes in this instance.
+     * 
+     * @return The number of attributes in this instance.
+     */
+    int getAttributeCount() {
+        return fileId.size();
+    }
+
+    /**
+     * Returns the value of a given attribute.
+     * 
+     * @param attribute
+     *            The attribute.
+     * @return The value of the attribute in this instance or {@code null} if
+     *         this instance doesn't have the attribute.
+     */
+    Object getAttributeValue(final Attribute attribute) {
+        return fileId.getAttributeValue(attribute);
+    }
+
+    /**
+     * Indicates if this instance satisfies a constraint.
+     * 
+     * @param constraint
+     *            The constraint to satisfy.
+     * @return {@code true} if and only if this instance satisfies the
+     *         constraint.
+     */
+    boolean satisfies(final Constraint constraint) {
+        return fileId.satisfies(constraint);
+    }
+
+    /**
      * Returns the size, in bytes, of the last file-piece.
      * 
      * @return The size of the last file-piece.
@@ -129,6 +161,15 @@ final class FileInfo implements Serializable {
                     "Invalid data-size.  Should have " + size + " bytes; has "
                             + data.length);
         }
+    }
+
+    /**
+     * Returns the file identifier.
+     * 
+     * @return The file identifier.
+     */
+    FileId getFileId() {
+        return fileId;
     }
 
     /**
@@ -290,26 +331,5 @@ final class FileInfo implements Serializable {
             throw (InvalidObjectException) new InvalidObjectException(
                     "Read invalid " + getClass().getSimpleName()).initCause(e);
         }
-    }
-
-    /**
-     * Returns the value of a given attribute.
-     * 
-     * @param attribute
-     *            The attribute.
-     * @return The value of the attribute in this instance or {@code null} if
-     *         this instance doesn't have the attribute.
-     */
-    Object getAttributeValue(final Attribute attribute) {
-        return fileId.getAttributeValue(attribute);
-    }
-
-    /**
-     * Returns the map of attributes and their values.
-     * 
-     * @return The map of attributes and their values.
-     */
-    Map<Attribute, Object> getAttributeMap() {
-        return fileId.getAttributeMap();
     }
 }

@@ -12,8 +12,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.Socket;
-import java.util.HashMap;
-import java.util.Map;
+import java.net.SocketException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -23,10 +22,12 @@ import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
 
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Communicates with its remote counterpart.
@@ -40,9 +41,8 @@ final class Peer implements Callable<Void> {
     /**
      * The logging service.
      */
-    private static final Logger               logger               = Logger
-                                                                           .getLogger(Peer.class
-                                                                                   .getName());
+    private static final Logger               logger               = LoggerFactory
+                                                                           .getLogger(Peer.class);
     /**
      * The executor service for tasks.
      */
@@ -67,7 +67,7 @@ final class Peer implements Callable<Void> {
     /**
      * Notice queue. Contains notices of data to be sent to the remote peer.
      */
-    private final DataSpecQueue               noticeQueue          = new DataSpecQueue();
+    private final NoticeQueue                 noticeQueue          = new NoticeQueue();
     /**
      * Piece queue. Contains pieces of data to be sent to the remote peer.
      */
@@ -189,10 +189,33 @@ final class Peer implements Callable<Void> {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void newData(final PiecesSpec spec) {
+    void newData(final FilePieceSpecSet spec) {
         if (remotePredicate.satisfiedBy(spec.getFileInfo())) {
             noticeQueue.put(spec);
         }
+    }
+
+    /**
+     * Responds to the removal of a local file or category by notifying the
+     * remote peer.
+     * 
+     * @param fileId
+     *            Identifier of the file or category.
+     */
+    void notifyRemoteOfRemovals(final FileId fileId) {
+        noticeQueue.put(fileId);
+    }
+
+    /**
+     * Removes a file or category.
+     * 
+     * @param fileId
+     *            Specification of the file or category to be removed.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    void remove(final FileId fileId) throws IOException {
+        clearingHouse.remove(fileId);
     }
 
     /**
@@ -204,6 +227,18 @@ final class Peer implements Callable<Void> {
     }
 
     /**
+     * Processes a notice of available data at the remote peer.
+     * 
+     * @param pieceSpec
+     *            Specification of the available data.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    void newRemoteData(final PieceSpec pieceSpec) throws IOException {
+        clearingHouse.process(this, pieceSpec);
+    }
+
+    /**
      * Scans the archive for remotely-desired data and adds it to the notice
      * queue.
      * 
@@ -212,9 +247,9 @@ final class Peer implements Callable<Void> {
     @ThreadSafe
     private final class FileScanner implements Callable<Void> {
         public Void call() throws InterruptedException {
-            clearingHouse.walkArchive(new FileSpecConsumer() {
+            clearingHouse.walkArchive(new PiecesSpecConsumer() {
                 @Override
-                public void consume(final PiecesSpec spec) {
+                public void consume(final FilePieceSpecSet spec) {
                     noticeQueue.put(spec);
                 }
             }, remotePredicate);
@@ -230,7 +265,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private static abstract class Receiver<T> extends SocketUsingTask<Void> {
+    private static abstract class Receiver<T> extends StreamUsingTask<Void> {
         /**
          * The input stream from the remote peer.
          */
@@ -241,10 +276,10 @@ final class Peer implements Callable<Void> {
         private final Class<T>    type;
 
         /**
-         * Constructs from an input stream from the remote peer.
+         * Constructs from a socket connection with the remote peer.
          * 
          * @param socket
-         *            The socket.
+         *            The socket connection with the remote peer.
          * @param type
          *            The type of the received objects.
          * @throws IOException
@@ -254,7 +289,6 @@ final class Peer implements Callable<Void> {
          */
         protected Receiver(final Socket socket, final Class<T> type)
                 throws IOException {
-            super(socket);
             if (null == type) {
                 throw new NullPointerException();
             }
@@ -266,8 +300,9 @@ final class Peer implements Callable<Void> {
         /**
          * Reads objects from the connection with the remote peer and processes
          * them. Will block until the connection is initialized by the remote
-         * peer. Completes normally if and only if 1) an end-of-file is read; or
-         * 2) the subclass indicates that no more processing should occur.
+         * peer. Completes normally if and only if 1) the connection is closed;
+         * or 2) the subclass indicates that no more processing should occur
+         * (because all the desired data has been received, for example).
          * 
          * @throws ClassCastException
          *             if the object has the wrong type.
@@ -283,26 +318,63 @@ final class Peer implements Callable<Void> {
             try {
                 initialize(objectInputStream);
                 for (;;) {
-                    final Object obj = objectInputStream.readUnshared();
-                    if (null != obj) {
-                        if (!process(type.cast(obj))) {
-                            break;
-                        }
+                    final Object obj = readObject(objectInputStream);
+                    if (null == obj) {
+                        break;
+                    }
+                    if (!process(type.cast(obj))) {
+                        break;
                     }
                 }
             }
             catch (final EOFException e) {
                 // ignored
             }
-            catch (final InterruptedException e) {
+            catch (final InterruptedException ignored) {
                 // Implements thread interruption policy
             }
             catch (final IOException e) {
-                if (!Thread.currentThread().isInterrupted()) {
+                if (!isCancelled) {
                     throw e;
                 }
             }
             return null;
+        }
+
+        /**
+         * Returns the next object from an object input stream or {@code null}
+         * if no more objects are forthcoming. This method should be used for
+         * receiving all objects to the remote peer -- including any received by
+         * {@link #initialize(ObjectOutputStream)}.
+         * 
+         * @param ois
+         *            The object input stream.
+         * @return The next object from the object input stream or {@code null}.
+         * @throws ClassCastException
+         *             if the object has the wrong type.
+         * @throws ClassNotFoundException
+         *             if object has unknown type.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        protected final Object readObject(final ObjectInputStream ois)
+                throws IOException, ClassNotFoundException {
+            try {
+                final Object obj = ois.readUnshared();
+                logger.trace("Received {}", obj);
+                return obj;
+            }
+            catch (final SocketException ignored) {
+                /*
+                 * The possible subclasses of the exception are: BindException,
+                 * ConnectException, NoRouteToHostException, and
+                 * PortUnreachableException -- none of which can occur here
+                 * because the connection is established. Consequently, the
+                 * exception is most likely due to the connection being reset
+                 * (i.e., closed) by the remote peer.
+                 */
+                return null;
+            }
         }
 
         /**
@@ -336,6 +408,18 @@ final class Peer implements Callable<Void> {
          */
         protected abstract boolean process(T obj) throws IOException,
                 InterruptedException;
+
+        /**
+         * Closes the input stream.
+         */
+        @Override
+        protected final void close() {
+            try {
+                inputStream.close();
+            }
+            catch (final IOException ignored) {
+            }
+        }
     }
 
     /**
@@ -346,8 +430,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private final class RequestReceiver extends Receiver<SpecThing> implements
-            SpecProcessor {
+    private final class RequestReceiver extends Receiver<PieceSpecSet> {
         /**
          * Constructs from a connection to the remote peer. Will block until the
          * remote peer initializes the relevant object stream.
@@ -360,7 +443,7 @@ final class Peer implements Callable<Void> {
          *             if {connection == null}.
          */
         RequestReceiver(final Connection connection) throws IOException {
-            super(connection.getRequestSocket(), SpecThing.class);
+            super(connection.getRequestSocket(), PieceSpecSet.class);
         }
 
         /**
@@ -380,23 +463,17 @@ final class Peer implements Callable<Void> {
         protected void initialize(final ObjectInputStream ois)
                 throws IOException, InterruptedException,
                 ClassNotFoundException {
-            final Object obj = ois.readObject();
-            logger.finest("Received predicate: " + obj);
+            final Object obj = readObject(ois);
             remotePredicateQueue.put((Predicate) obj);
         }
 
         @Override
-        protected boolean process(final SpecThing request)
+        protected boolean process(final PieceSpecSet request)
                 throws InterruptedException, IOException {
-            logger.finest("Received request: " + request);
-            request.process(this);
+            for (final PieceSpec spec : request) {
+                pieceQueue.put(clearingHouse.getPiece(spec));
+            }
             return true;
-        }
-
-        @Override
-        public void process(final PieceSpec pieceSpec)
-                throws InterruptedException, IOException {
-            pieceQueue.put(clearingHouse.getPiece(pieceSpec));
         }
     }
 
@@ -408,8 +485,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private final class NoticeReceiver extends Receiver<SpecThing> implements
-            SpecProcessor {
+    private final class NoticeReceiver extends Receiver<Notice> {
         /**
          * Constructs from a connection to the remote peer.
          * 
@@ -421,20 +497,14 @@ final class Peer implements Callable<Void> {
          *             if {connection == null}.
          */
         NoticeReceiver(final Connection connection) throws IOException {
-            super(connection.getNoticeSocket(), SpecThing.class);
+            super(connection.getNoticeSocket(), Notice.class);
         }
 
         @Override
-        protected boolean process(final SpecThing notice) throws IOException,
+        protected boolean process(final Notice notice) throws IOException,
                 InterruptedException {
-            logger.finest("Received notice: " + notice);
-            notice.process(this);
+            notice.processYourself(Peer.this);
             return true;
-        }
-
-        @Override
-        public void process(final PieceSpec pieceSpec) throws IOException {
-            clearingHouse.process(Peer.this, pieceSpec);
         }
     }
 
@@ -464,7 +534,6 @@ final class Peer implements Callable<Void> {
         @Override
         protected boolean process(final Piece piece) throws IOException,
                 InterruptedException {
-            logger.finest("Received piece: " + piece);
             final boolean keepGoing = !clearingHouse.process(Peer.this, piece);
             if (!keepGoing) {
                 taskManager.cancel();
@@ -481,7 +550,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private static abstract class Sender<T> extends SocketUsingTask<Void> {
+    private static abstract class Sender<T> extends StreamUsingTask<Void> {
         /**
          * The output stream to the remote peer.
          */
@@ -499,7 +568,6 @@ final class Peer implements Callable<Void> {
          *             if {socket == null}.
          */
         protected Sender(final Socket socket) throws IOException {
-            super(socket);
             this.outputStream = socket.getOutputStream();
         }
 
@@ -519,20 +587,38 @@ final class Peer implements Callable<Void> {
             initialize(objectOutputStream);
             try {
                 for (T obj = nextObject(); null != obj; obj = nextObject()) {
-                    objectOutputStream.writeObject(obj);
-                    objectOutputStream.flush();
-                    objectOutputStream.reset();
+                    writeObject(obj, objectOutputStream);
                 }
             }
             catch (final InterruptedException ignored) {
                 // Implements thread interruption policy
             }
             catch (final IOException e) {
-                if (!Thread.currentThread().isInterrupted()) {
+                if (!isCancelled) {
                     throw e;
                 }
             }
             return null;
+        }
+
+        /**
+         * Writes an object to an object output stream. This method should be
+         * used for sending all objects to the remote peer -- including any sent
+         * by {@link #initialize(ObjectOutputStream)}.
+         * 
+         * @param obj
+         *            The object to be written.
+         * @param oos
+         *            The object output stream.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        protected final void writeObject(final Object obj,
+                final ObjectOutputStream oos) throws IOException {
+            logger.trace("Sending {}", obj);
+            oos.writeObject(obj);
+            oos.flush();
+            oos.reset();
         }
 
         /**
@@ -556,6 +642,18 @@ final class Peer implements Callable<Void> {
          *             if the current thread is interrupted.
          */
         protected abstract T nextObject() throws InterruptedException;
+
+        /**
+         * Closes the output stream.
+         */
+        @Override
+        protected final void close() {
+            try {
+                outputStream.close();
+            }
+            catch (final IOException ignored) {
+            }
+        }
     }
 
     /**
@@ -567,7 +665,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private final class RequestSender extends Sender<SpecThing> {
+    private final class RequestSender extends Sender<PieceSpecSet> {
         /**
          * Constructs from a peer and the connection to the remote peer.
          * 
@@ -585,15 +683,12 @@ final class Peer implements Callable<Void> {
         @Override
         protected void initialize(final ObjectOutputStream oos)
                 throws IOException {
-            logger.finest("Sending predicate: " + localPredicate);
-            oos.writeObject(localPredicate);
-            oos.flush();
+            writeObject(localPredicate, oos);
         }
 
         @Override
-        public SpecThing nextObject() throws InterruptedException {
-            final SpecThing request = requestQueue.take();
-            logger.finest("Sending request: " + request);
+        public PieceSpecSet nextObject() throws InterruptedException {
+            final PieceSpecSet request = requestQueue.take();
             return request;
         }
     }
@@ -606,7 +701,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private final class NoticeSender extends Sender<SpecThing> {
+    private final class NoticeSender extends Sender<Notice> {
         /**
          * Constructs from the connection to a remote peer and a specification
          * of the data desired by the remote peer.
@@ -623,9 +718,8 @@ final class Peer implements Callable<Void> {
         }
 
         @Override
-        protected SpecThing nextObject() throws InterruptedException {
-            final SpecThing notice = noticeQueue.take();
-            logger.finest("Sending notice: " + notice);
+        protected Notice nextObject() throws InterruptedException {
+            final Notice notice = noticeQueue.take();
             return notice;
         }
     }
@@ -656,7 +750,6 @@ final class Peer implements Callable<Void> {
         @Override
         protected Piece nextObject() throws InterruptedException {
             final Piece piece = pieceQueue.take();
-            logger.finest("Sending piece: " + piece);
             return piece;
         }
     }
@@ -678,8 +771,8 @@ final class Peer implements Callable<Void> {
 
         @Override
         protected <T> RunnableFuture<T> newTaskFor(final Callable<T> callable) {
-            if (callable instanceof SocketUsingTask<?>) {
-                return ((SocketUsingTask<T>) callable).newTask();
+            if (callable instanceof StreamUsingTask<?>) {
+                return ((StreamUsingTask<T>) callable).newTask();
             }
             else {
                 return super.newTaskFor(callable);
@@ -696,32 +789,24 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private static abstract class SocketUsingTask<T> implements Callable<T> {
-        private final Socket socket;
-
-        SocketUsingTask(final Socket socket) {
-            if (null == socket) {
-                throw new NullPointerException();
-            }
-            this.socket = socket;
-        }
+    private static abstract class StreamUsingTask<T> implements Callable<T> {
+        protected volatile boolean isCancelled;
 
         RunnableFuture<T> newTask() {
             return new FutureTask<T>(this) {
-                @SuppressWarnings("finally")
                 @Override
                 public boolean cancel(final boolean mayInterruptIfRunning) {
-                    try {
-                        socket.close();
-                    }
-                    catch (final IOException ignored) {
-                    }
-                    finally {
-                        return super.cancel(mayInterruptIfRunning);
-                    }
+                    isCancelled = true;
+                    close();
+                    return super.cancel(mayInterruptIfRunning);
                 }
             };
         }
+
+        /**
+         * Closes the stream.
+         */
+        protected abstract void close();
     }
 
     /**
@@ -734,10 +819,10 @@ final class Peer implements Callable<Void> {
     @ThreadSafe
     private static final class DataSpecQueue {
         /**
-         * The map from file information to data-specification.
+         * The set of piece-specifications.
          */
         @GuardedBy("this")
-        private final Map<FileInfo, PiecesSpec> piecesSpecs = new HashMap<FileInfo, PiecesSpec>();
+        private PieceSpecSet pieceSpecSet;
 
         /**
          * Adds a data-specification.
@@ -745,14 +830,21 @@ final class Peer implements Callable<Void> {
          * @param spec
          *            The specification of the data to be added.
          */
-        synchronized void put(final PiecesSpec spec) {
-            final FileInfo fileInfo = spec.getFileInfo();
-            PiecesSpec entry = piecesSpecs.remove(fileInfo);
-            entry = (null == entry)
+        synchronized void put(final FilePieceSpecSet spec) {
+            pieceSpecSet = (null == pieceSpecSet)
                     ? spec
-                    : entry.merge(spec);
-            piecesSpecs.put(fileInfo, entry);
+                    : pieceSpecSet.merge(spec);
             notify();
+        }
+
+        /**
+         * Indicates if this instance has a specification or not.
+         * 
+         * @return {@code true} if and only if this instance has a
+         *         specification.
+         */
+        synchronized boolean isEmpty() {
+            return pieceSpecSet == null || pieceSpecSet.isEmpty();
         }
 
         /**
@@ -762,14 +854,105 @@ final class Peer implements Callable<Void> {
          * @throws InterruptedException
          *             if the current thread is interrupted.
          */
-        synchronized SpecThing take() throws InterruptedException {
-            while (piecesSpecs.isEmpty()) {
+        synchronized PieceSpecSet take() throws InterruptedException {
+            while (isEmpty()) {
                 wait();
             }
-            final SpecThing specThing = SpecThing.newInstance(piecesSpecs
-                    .values());
-            piecesSpecs.clear();
-            return specThing;
+            return removeAndReturn();
+        }
+
+        /**
+         * Removes and returns the next data-specification of one exists;
+         * otherwise, returns {@code null}.
+         * 
+         * @return The next data-specification of one exists; otherwise, {@code
+         *         null}.
+         */
+        synchronized PieceSpecSet poll() {
+            if (isEmpty()) {
+                return null;
+            }
+            return removeAndReturn();
+        }
+
+        @GuardedBy("this")
+        private PieceSpecSet removeAndReturn() {
+            final PieceSpecSet specs = pieceSpecSet;
+            pieceSpecSet = null;
+            return specs;
+        }
+    }
+
+    /**
+     * A queue of notices.
+     * 
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private static final class NoticeQueue {
+        /**
+         * Was the last notice an addition?
+         */
+        private volatile boolean    wasAddition = false;
+        /**
+         * The queue of additions.
+         */
+        @GuardedBy("this")
+        private final DataSpecQueue additions   = new DataSpecQueue();
+        /**
+         * The queue of removals.
+         */
+        @GuardedBy("this")
+        private FileSetSpec         removals    = new FileSetSpec();
+
+        /**
+         * Adds a notice of new data.
+         * 
+         * @param spec
+         *            The specification of the data to be added.
+         */
+        synchronized void put(final FilePieceSpecSet spec) {
+            additions.put(spec);
+            notify();
+        }
+
+        /**
+         * Adds a notice of removal of a file or category.
+         * 
+         * @param id
+         *            The identifier of the file or category.
+         */
+        synchronized void put(final FileId id) {
+            removals.add(id);
+            notify();
+        }
+
+        /**
+         * Returns the next notice. Blocks until one is available.
+         * 
+         * @return The next notice.
+         * @throws InterruptedException
+         *             if the current thread is interrupted.
+         */
+        synchronized Notice take() throws InterruptedException {
+            Notice notice;
+            while (removals.isEmpty() && additions.isEmpty()) {
+                wait();
+            }
+            if (additions.isEmpty() || (!removals.isEmpty() && wasAddition)) {
+                notice = (1 == removals.size())
+                        ? new RemovedFileNotice(removals.iterator().next())
+                        : new RemovedFilesNotice(removals);
+                removals = new FileSetSpec();
+                wasAddition = false;
+            }
+            else {
+                notice = new AdditionNotice(additions.poll());
+                wasAddition = true;
+            }
+            return notice;
         }
     }
 }

@@ -6,10 +6,16 @@
 package edu.ucar.unidata.dynaccn;
 
 /**
- * A consumer of file-based data specifications.
+ * Messages that are exchanged between peers.
  * 
  * @author Steven R. Emmerson
  */
-interface FileSpecConsumer {
-    void consume(final PiecesSpec spec);
+interface Message {
+    /**
+     * Causes this instance to process itself via a peer.
+     * 
+     * @param peer
+     *            The peer to use for processing.
+     */
+    void processYourself(Peer peer);
 }

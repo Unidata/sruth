@@ -8,7 +8,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.logging.Logger;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -16,14 +15,15 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ClientTest {
     /**
      * The logging service.
      */
-    private static final Logger    logger          = Logger
-                                                           .getLogger(ClientTest.class
-                                                                   .getName());
+    private static final Logger    logger          = LoggerFactory
+                                                           .getLogger(ClientTest.class);
     /**
      * The executor service.
      */
@@ -96,8 +96,9 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Attribute attribute = new Attribute("name");
-        final Constraint constraint = attribute.equalTo("server-file-2");
+        final Attribute attribute = new StringAttribute("name");
+        final Constraint constraint = Constraint.equalTo(attribute,
+                "server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
         archive = new Archive(Paths.get("/tmp/client/term"));
@@ -120,7 +121,6 @@ public class ClientTest {
     @Test
     public void testNonTermination() throws IOException, InterruptedException,
             ExecutionException {
-        logger.info("");
         logger.info("testNonTermination():");
         system(new String[] { "mkdir", "-p", "/tmp/client/nonterm" });
 
@@ -130,8 +130,9 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Attribute attribute = new Attribute("name");
-        final Constraint constraint = attribute.notEqualTo("server-file-2");
+        final Attribute attribute = new StringAttribute("name");
+        final Constraint constraint = Constraint.notEqualTo(attribute,
+                "server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
         final Predicate predicate = new Predicate(new Filter[] { filter });
         archive = new Archive("/tmp/client/nonterm");
@@ -160,7 +161,6 @@ public class ClientTest {
     @Test
     public void testNodes() throws IOException, InterruptedException,
             ExecutionException {
-        logger.info("");
         logger.info("testNodes():");
         system(new String[] { "mkdir", "-p", "/tmp/client/node" });
 

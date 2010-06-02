@@ -40,14 +40,29 @@ abstract class FiniteBitSet implements Serializable {
     }
 
     /**
-     * Returns a new instance.
+     * Returns a new instance. Correctly handles the case where the number of
+     * bits is zero. All bits are unset.
      * 
      * @param size
      *            The number of bits.
      * @return A new instance.
      */
     public static FiniteBitSet newInstance(final int size) {
-        return (0 == size)
+        return newInstance(size, false);
+    }
+
+    /**
+     * Returns a new instance. Correctly handles the case where the number of
+     * bits is zero.
+     * 
+     * @param size
+     *            The number of bits.
+     * @param setAll
+     *            Whether or not to set all bits.
+     * @return A new instance.
+     */
+    static FiniteBitSet newInstance(final int size, final boolean setAll) {
+        return (0 == size || setAll)
                 ? new CompleteBitSet(size)
                 : new PartialBitSet(size);
     }

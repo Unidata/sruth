@@ -11,7 +11,9 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.logging.Logger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Connects to a remote server and exchanges data.
@@ -22,8 +24,8 @@ final class Client implements Callable<Void> {
     /**
      * The logging service.
      */
-    private static final Logger    logger     = Logger.getLogger(Client.class
-                                                      .getName());
+    private static final Logger    logger     = LoggerFactory
+                                                      .getLogger(Client.class);
     /**
      * The connection to the remote server.
      */
@@ -107,7 +109,7 @@ final class Client implements Callable<Void> {
              */
             connection.add(sockets[i]);
         }
-        logger.finer("Client: " + connection);
+        logger.debug("Client: {}", connection);
         return new Peer(clearingHouse, connection).call();
     }
 }

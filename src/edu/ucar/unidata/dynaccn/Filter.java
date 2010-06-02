@@ -7,7 +7,6 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.Serializable;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -107,6 +106,9 @@ class Filter implements Comparable<Filter>, Serializable {
      */
     boolean satisfiedBy(final FileInfo fileInfo) {
         for (final Constraint constraint : constraints) {
+            if (!fileInfo.satisfies(constraint)) {
+                return false;
+            }
             final Object value = fileInfo.getAttributeValue(constraint
                     .getAttribute());
 
@@ -127,15 +129,13 @@ class Filter implements Comparable<Filter>, Serializable {
      *         by, the given file.
      */
     boolean exactlySpecifies(final FileInfo fileInfo) {
-        final Map<Attribute, Object> attrMap = fileInfo.getAttributeMap();
-
-        if (attrMap.size() != constraints.size()) {
+        if (fileInfo.getAttributeCount() != constraints.size()) {
             return false;
         }
 
         for (final Constraint constraint : constraints) {
-            if (!constraint.exactlySpecifies(attrMap.get(constraint
-                    .getAttribute()))) {
+            if (!constraint.exactlySpecifies(fileInfo
+                    .getAttributeValue(constraint.getAttribute()))) {
                 return false;
             }
         }

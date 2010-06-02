@@ -34,6 +34,9 @@ import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.NotThreadSafe;
 import net.jcip.annotations.ThreadSafe;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * An archive of files.
  * 
@@ -59,19 +62,35 @@ final class Archive {
         /**
          * Map from watch-key to pathname.
          */
-        private final Map<WatchKey, Path> dirPaths = new HashMap<WatchKey, Path>();
+        private final Map<WatchKey, Path> dirs = new HashMap<WatchKey, Path>();
+        /**
+         * Map from pathname to watch-key.
+         */
+        private final Map<Path, WatchKey> keys = new HashMap<Path, WatchKey>();
+        /**
+         * The associated server.
+         */
+        private final Server              server;
 
         /**
          * Constructs from a consumer of file-based data-specifications. Doesn't
          * return.
          * 
+         * @param server
+         *            The server.
          * @throws IOException
          *             if an I/O error occurs.
          * @throws InterruptedException
          *             if the current thread is interrupted.
+         * @throws NullPointerException
+         *             if {@code server == null}.
          */
-        FileWatcher(final FileSpecConsumer consumer) throws IOException,
+        FileWatcher(final Server server) throws IOException,
                 InterruptedException {
+            if (null == server) {
+                throw new NullPointerException();
+            }
+            this.server = server;
             watchService = FileSystems.getDefault().newWatchService();
             try {
                 registerAll(rootDir);
@@ -80,37 +99,75 @@ final class Archive {
                     for (final WatchEvent<?> event : key.pollEvents()) {
                         final WatchEvent.Kind<?> kind = event.kind();
                         if (kind == StandardWatchEventKind.OVERFLOW) {
-                            System.err
-                                    .println("Couldn't keep-up watching file-tree rooted at \""
-                                            + rootDir + "\"");
+                            logger
+                                    .error(
+                                            "Couldn't keep-up watching file-tree rooted at \"{}\"",
+                                            rootDir);
                         }
-                        else if (kind == StandardWatchEventKind.ENTRY_CREATE) {
+                        else {
                             final Path name = (Path) event.context();
-                            final Path path = dirPaths.get(key).resolve(name);
-                            if (!Pathname.isHidden(path)) {
-                                final BasicFileAttributes attributes = Attributes
-                                        .readBasicFileAttributes(path);
-                                if (attributes.isDirectory()) {
-                                    registerAll(path);
+                            final Path path = dirs.get(key).resolve(name);
+                            if (!pathname.isHidden(path)) {
+                                if (kind == StandardWatchEventKind.ENTRY_CREATE) {
+                                    newFile(path);
                                 }
-                                else if (attributes.isRegularFile()) {
-                                    final FileInfo fileInfo = new FileInfo(
-                                            new FileId(rootDir.relativize(path)),
-                                            attributes.size(), PIECE_SIZE);
-                                    consumer.consume(PiecesSpec.newInstance(
-                                            fileInfo, true));
+                                else if (kind == StandardWatchEventKind.ENTRY_DELETE) {
+                                    removedFile(path);
                                 }
                             }
                         }
                     }
                     if (!key.reset()) {
-                        dirPaths.remove(key);
+                        final Path dir = dirs.remove(key);
+                        if (null != dir) {
+                            keys.remove(dir);
+                        }
                     }
                 }
             }
             finally {
                 watchService.close();
             }
+        }
+
+        /**
+         * Handles the creation of a new file.
+         * 
+         * @param path
+         *            The pathname of the new file.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private void newFile(final Path path) throws IOException {
+            final BasicFileAttributes attributes = Attributes
+                    .readBasicFileAttributes(path);
+            if (attributes.isDirectory()) {
+                registerAll(path);
+            }
+            else if (attributes.isRegularFile()) {
+                final FileInfo fileInfo = new FileInfo(new FileId(rootDir
+                        .relativize(path)), attributes.size(), PIECE_SIZE);
+                server.newData(FilePieceSpecSet.newInstance(fileInfo, true));
+            }
+        }
+
+        /**
+         * Handles the removal of a file.
+         * 
+         * @param path
+         *            The pathname of the removed file.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private void removedFile(final Path path) throws IOException {
+            final Path relativePath = rootDir.relativize(path);
+            final FileId fileId = new FileId(relativePath);
+            final WatchKey k = keys.remove(path);
+            if (null != k) {
+                dirs.remove(k);
+                k.cancel();
+            }
+            server.removed(fileId);
         }
 
         /**
@@ -123,8 +180,10 @@ final class Archive {
          */
         private void register(final Path dir) throws IOException {
             final WatchKey key = dir.register(watchService,
-                    StandardWatchEventKind.ENTRY_CREATE);
-            dirPaths.put(key, dir);
+                    StandardWatchEventKind.ENTRY_CREATE,
+                    StandardWatchEventKind.ENTRY_DELETE);
+            dirs.put(key, dir);
+            keys.put(dir, key);
         }
 
         /**
@@ -143,7 +202,7 @@ final class Archive {
                     new SimpleFileVisitor<Path>() {
                         @Override
                         public FileVisitResult preVisitDirectory(final Path dir) {
-                            if (Pathname.isHidden(dir)) {
+                            if (pathname.isHidden(dir)) {
                                 return FileVisitResult.SKIP_SUBTREE;
                             }
                             try {
@@ -202,7 +261,7 @@ final class Archive {
                     indexes = new CompleteBitSet(pieceCount);
                 }
                 else {
-                    path = Pathname.hide(path);
+                    path = pathname.hide(path);
                     Files.createDirectories(path.getParent());
                     // DSYNC isn't used because the file is closed when complete
                     channel = path
@@ -220,39 +279,49 @@ final class Archive {
          * 
          * @param piece
          *            The piece of data.
-         * @return {@code true} if and only if the file is complete.
+         * @return {@code true} if and only if the file is complete, in which
+         *         case the file is closed.
+         * @throws FileNotFoundException
+         *             if the file has been deleted.
          * @throws IOException
          *             if an I/O error occurs.
          * @throws NullPointerException
          *             if {@code piece == null}.
          */
         synchronized boolean putPiece(final Piece piece) throws IOException {
-            final int index = piece.getIndex();
-            final boolean isComplete;
-
-            if (indexes.isSet(index)) {
-                isComplete = false;
+            if (!path.exists()) {
+                throw new FileNotFoundException();
             }
             else {
-                channel.position(piece.getOffset());
-                final ByteBuffer buf = ByteBuffer.wrap(piece.getData());
-                while (buf.hasRemaining()) {
-                    channel.write(buf);
+                final int index = piece.getIndex();
+                final boolean isComplete;
+
+                if (indexes.isSet(index)) {
+                    isComplete = false;
+                }
+                else {
+                    channel.position(piece.getOffset());
+                    final ByteBuffer buf = ByteBuffer.wrap(piece.getData());
+                    while (buf.hasRemaining()) {
+                        channel.write(buf);
+                    }
+
+                    indexes = indexes.setBit(index);
+                    isComplete = indexes.areAllSet();
+
+                    if (isComplete) {
+                        channel.close();
+                        final Path newPath = pathname.reveal(path);
+                        Files.createDirectories(newPath.getParent());
+                        path.moveTo(newPath);
+                        channel = newPath
+                                .newByteChannel(StandardOpenOption.READ);
+                        path = newPath;
+                    }
                 }
 
-                indexes = indexes.setBit(index);
-                isComplete = indexes.areAllSet();
-
-                if (isComplete) {
-                    channel.close();
-                    final Path newPath = Pathname.reveal(path);
-                    path.moveTo(newPath);
-                    path = newPath;
-                    channel = path.newByteChannel(StandardOpenOption.READ);
-                }
+                return isComplete;
             }
-
-            return isComplete;
         }
 
         /**
@@ -272,21 +341,28 @@ final class Archive {
          * 
          * @param pieceSpec
          *            Information on the piece of data.
+         * @throws FileNotFoundException
+         *             if the file has been deleted.
          * @throws IOException
          *             if an I/O error occurs.
          */
         synchronized Piece getPiece(final PieceSpec pieceSpec)
                 throws IOException {
-            final byte[] data = new byte[pieceSpec.getSize()];
-            final ByteBuffer buf = ByteBuffer.wrap(data);
+            if (!path.exists()) {
+                throw new FileNotFoundException();
+            }
+            else {
+                final byte[] data = new byte[pieceSpec.getSize()];
+                final ByteBuffer buf = ByteBuffer.wrap(data);
 
-            channel.position(pieceSpec.getOffset());
-            int nread;
-            do {
-                nread = channel.read(buf);
-            } while (nread != -1 && buf.hasRemaining());
+                channel.position(pieceSpec.getOffset());
+                int nread;
+                do {
+                    nread = channel.read(buf);
+                } while (nread != -1 && buf.hasRemaining());
 
-            return new Piece(pieceSpec, data);
+                return new Piece(pieceSpec, data);
+            }
         }
 
         /**
@@ -301,9 +377,84 @@ final class Archive {
     }
 
     /**
+     * Utility class for hiding and revealing files based on pathnames.
+     * 
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    final class Pathname {
+        /**
+         * Indicates whether or not a directory is hidden.
+         * 
+         * @param dir
+         *            Pathname of the directory in question.
+         * @return {@code true} if and only if the directory is hidden.
+         * @throws NullPointerException
+         *             if {@code dir == null}.
+         */
+        boolean isHidden(Path dir) {
+            if (dir.isAbsolute()) {
+                dir = rootDir.relativize(dir);
+            }
+            return (null == dir)
+                    ? false
+                    : dir.startsWith(HIDDEN_DIR);
+        }
+
+        /**
+         * Returns the hidden form of a visible pathname.
+         * 
+         * @param path
+         *            Pathname of the file to be hidden.
+         * @return The hidden pathname.
+         */
+        Path hide(Path path) {
+            if (path.isAbsolute()) {
+                path = rootDir.relativize(path);
+                path = HIDDEN_DIR.resolve(path);
+                return rootDir.resolve(path);
+            }
+            return HIDDEN_DIR.resolve(path);
+        }
+
+        /**
+         * Returns the visible form of a hidden pathname.
+         * 
+         * @param path
+         *            The hidden pathname.
+         * @return The visible pathname.
+         * @throws IllegalArgumentException
+         *             if {@code path} isn't hidden.
+         */
+        Path reveal(Path path) {
+            if (path.isAbsolute()) {
+                path = rootDir.relativize(path);
+                path = path.subpath(1, path.getNameCount());
+                return rootDir.resolve(path);
+            }
+            return path.subpath(1, path.getNameCount());
+        }
+    }
+
+    /**
+     * The logger for this class.
+     */
+    private static final Logger                 logger     = LoggerFactory
+                                                                   .getLogger(Archive.class);
+    /**
+     * The name of the hidden directory that will be ignored for the most part.
+     */
+    private static final Path                   HIDDEN_DIR = Paths
+                                                                   .get(".dynaccn");
+    /**
      * The canonical size, in bytes, of a piece of data (131072).
      */
     private static final int                    PIECE_SIZE = 0x20000;
+    /**
+     * The pathname utility for hidden pathnames.
+     */
+    private final Pathname                      pathname   = new Pathname();
     /**
      * The set of active disk files.
      */
@@ -322,6 +473,9 @@ final class Archive {
      *             if {@code rootDir == null}.
      */
     Archive(final Path rootDir) {
+        if (null == rootDir) {
+            throw new NullPointerException();
+        }
         this.rootDir = rootDir;
     }
 
@@ -388,7 +542,8 @@ final class Archive {
      *             if {@code piece == null}.
      */
     boolean putPiece(final Piece piece) throws IOException {
-        return getDiskFile(piece.getFileInfo()).putPiece(piece);
+        final DiskFile diskFile = getDiskFile(piece.getFileInfo());
+        return diskFile.putPiece(piece);
     }
 
     /**
@@ -430,14 +585,15 @@ final class Archive {
      *            The selection criteria.
      * @return
      */
-    void walkArchive(final FileSpecConsumer consumer, final Predicate predicate) {
+    void walkArchive(final PiecesSpecConsumer consumer,
+            final Predicate predicate) {
         final EnumSet<FileVisitOption> opts = EnumSet.of(
                 FileVisitOption.FOLLOW_LINKS, FileVisitOption.DETECT_CYCLES);
         Files.walkFileTree(rootDir, opts, Integer.MAX_VALUE,
                 new SimpleFileVisitor<Path>() {
                     @Override
                     public FileVisitResult preVisitDirectory(final Path dir) {
-                        return Pathname.isHidden(dir)
+                        return pathname.isHidden(dir)
                                 ? FileVisitResult.SKIP_SUBTREE
                                 : FileVisitResult.CONTINUE;
                     }
@@ -451,7 +607,7 @@ final class Archive {
                             final FileInfo fileInfo = new FileInfo(fileId, attr
                                     .size(), PIECE_SIZE);
                             if (predicate.satisfiedBy(fileInfo)) {
-                                consumer.consume(PiecesSpec.newInstance(
+                                consumer.consume(FilePieceSpecSet.newInstance(
                                         new FileInfo(fileId, attr.size(),
                                                 PIECE_SIZE), true));
                             }
@@ -462,17 +618,104 @@ final class Archive {
     }
 
     /**
-     * Watches the archive for new files. Doesn't watch for files in hidden
-     * directories. Doesn't return.
+     * Watches the archive for new files and removed files and directories.
+     * Ignores hidden directories. Doesn't return.
      * 
-     * @param consumer
-     *            The consumer of file-based data-specifications.
+     * @param server
+     *            The server.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws IOException
      */
-    void watchArchive(final FileSpecConsumer consumer) throws IOException,
+    void watchArchive(final Server server) throws IOException,
             InterruptedException {
-        new FileWatcher(consumer);
+        new FileWatcher(server);
+    }
+
+    /**
+     * Removes a file or category.
+     * 
+     * @param fileId
+     *            Specification of the file or category to be removed.
+     * @throws IOError
+     *             if an I/O error occurs. The error will have as its cause the
+     *             underlying IOException that was thrown.
+     */
+    void remove(final FileId fileId) {
+        Path path = rootDir.resolve(fileId.getPath());
+        remove(path);
+        path = pathname.hide(path);
+        remove(path);
+    }
+
+    /**
+     * Removes a file or directory corresponding to a pathname if it exists. The
+     * file or directory can be a hidden one.
+     * 
+     * @param path
+     *            The pathname of the file or directory.
+     * @throws IOError
+     *             if an I/O error occurs. The error will have as its cause the
+     *             underlying IOException that was thrown.
+     */
+    private void remove(final Path path) {
+        if (path.exists()) {
+            final EnumSet<FileVisitOption> opts = EnumSet
+                    .of(FileVisitOption.FOLLOW_LINKS,
+                            FileVisitOption.DETECT_CYCLES);
+            Files.walkFileTree(path, opts, Integer.MAX_VALUE,
+                    new SimpleFileVisitor<Path>() {
+                        @Override
+                        public FileVisitResult postVisitDirectory(
+                                final Path dir, final IOException e) {
+                            if (null != e) {
+                                throw new IOError(e);
+                            }
+                            try {
+                                dir.delete();
+                            }
+                            catch (final IOException e1) {
+                                throw new IOError(e1);
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFile(final Path path,
+                                final BasicFileAttributes attr) {
+                            if (!attr.isDirectory()) {
+                                try {
+                                    path.delete();
+                                }
+                                catch (final IOException e) {
+                                    throw new IOError(e);
+                                }
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+        }
+    }
+
+    /**
+     * Returns the hidden form of a pathname.
+     * 
+     * @param path
+     *            The pathname whose hidden form is to be returned.
+     * @return The hidden form of {@code path}.
+     */
+    Path hide(final Path path) {
+        return pathname.hide(path);
+    }
+
+    /**
+     * Returns the visible form of a hidden pathname
+     * 
+     * @param path
+     *            The hidden pathname whose visible form is to be returned.
+     * @return The visible form of {@code path}.
+     */
+    Path reveal(final Path path) {
+        return pathname.reveal(path);
     }
 }

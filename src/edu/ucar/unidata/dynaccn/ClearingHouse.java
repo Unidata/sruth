@@ -5,6 +5,7 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.IOError;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedList;
@@ -114,10 +115,12 @@ final class ClearingHouse {
      * @param piece
      *            The piece of data to be disposed of.
      * @return {@code true} if all data has been received.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
      * @throws IllegalStateException
      *             if {@code peer} is unknown.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     * @throws IOException
+     *             if an I/O error occurs.
      */
     boolean process(final Peer peer, final Piece piece) throws IOException,
             InterruptedException {
@@ -158,7 +161,25 @@ final class ClearingHouse {
      * @param predicate
      *            The selection criteria.
      */
-    void walkArchive(final FileSpecConsumer consumer, final Predicate predicate) {
+    void walkArchive(final PiecesSpecConsumer consumer,
+            final Predicate predicate) {
         archive.walkArchive(consumer, predicate);
+    }
+
+    /**
+     * Removes a file or category.
+     * 
+     * @param fileId
+     *            Specification of the file or category to be removed.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    void remove(final FileId fileId) throws IOException {
+        try {
+            archive.remove(fileId);
+        }
+        catch (final IOError e) {
+            throw (IOException) e.getCause();
+        }
     }
 }

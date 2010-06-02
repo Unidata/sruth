@@ -5,9 +5,9 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.nio.file.Path;
+import java.util.Iterator;
 
 /**
  * A data-specification comprising a single piece of data in a file.
@@ -16,7 +16,7 @@ import java.nio.file.Path;
  * 
  * @author Steven R. Emmerson
  */
-final class PieceSpec extends PiecesSpec {
+final class PieceSpec extends FilePieceSpecSet {
     /**
      * The serial version identifier.
      */
@@ -97,28 +97,39 @@ final class PieceSpec extends PiecesSpec {
     }
 
     @Override
-    PiecesSpec merge(final PiecesSpec that) {
-        return that.merge(this);
+    public PieceSpecSet merge(final PieceSpecSet specs) {
+        return specs.merge(this);
     }
 
     @Override
-    PiecesSpec merge(final PieceSpec that) {
-        vetMerger(that);
-        if (index == that.index) {
-            return this;
+    public PieceSpecSet merge(final MultiFilePieceSpecs specs) {
+        return specs.merge(this);
+    }
+
+    @Override
+    public PieceSpecSet merge(final FilePieceSpecs specs) {
+        return specs.merge(this);
+    }
+
+    @Override
+    public PieceSpecSet merge(final PieceSpec that) {
+        if (fileInfo.equals(that.fileInfo)) {
+            if (index == that.index) {
+                return this;
+            }
+            return new FilePieceSpecs(fileInfo).merge(this).merge(that);
         }
-        return new FileSpec(fileInfo).merge(this).merge(that);
+        return new MultiFilePieceSpecs(this).merge(that);
     }
 
     @Override
-    PiecesSpec merge(final FileSpec that) {
-        return that.merge(this);
+    public boolean isEmpty() {
+        return false;
     }
 
     @Override
-    void processYourself(final SpecProcessor specProcessor)
-            throws InterruptedException, IOException {
-        specProcessor.process(this);
+    public Iterator<PieceSpec> iterator() {
+        return new SimpleIterator<PieceSpec>(this);
     }
 
     @Override

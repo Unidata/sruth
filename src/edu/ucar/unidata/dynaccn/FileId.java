@@ -10,31 +10,35 @@ import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
-import java.util.Map;
+import java.util.Iterator;
 
 /**
- * An identifier for a file.
+ * An identifier for a file or category.
  * 
  * Instances are immutable.
  * 
  * @author Steven R. Emmerson
  */
-final class FileId implements Serializable {
+final class FileId implements Comparable<FileId>, Serializable,
+        Iterable<AttributeEntry> {
     /**
      * The serial version identifier.
      */
-    private static final long       serialVersionUID = 1L;
+    private static final long            serialVersionUID = 1L;
+    /**
+     * The map from attributes to values.
+     */
+    private final transient AttributeMap map              = new AttributeMap();
     /**
      * The relative pathname of the file.
      */
-    private volatile transient Path path;
+    private volatile transient Path      path;
 
     /**
-     * Constructs from the relative pathname of the file.
+     * Constructs from the relative pathname of the file or category.
      * 
      * @param path
-     *            The relative pathname of the file.
+     *            The relative pathname of the file or category.
      * @throws IllegalArgumentException
      *             if {@code path.isAbsolute()}.
      * @throws NullPointerException
@@ -45,21 +49,13 @@ final class FileId implements Serializable {
             throw new IllegalArgumentException();
         }
         this.path = path;
+        map.put(new StringAttribute("name"), path.toString());
     }
 
     /**
-     * Returns the abstract relative pathname associated with this instance.
+     * Returns the relative pathname of this instance's file or category.
      * 
-     * @return The associated abstract relative pathname.
-     */
-    Path getFile() {
-        return path;
-    }
-
-    /**
-     * Returns the relative pathname of this instance's file.
-     * 
-     * @return The relative pathname of this instance's file.
+     * @return The relative pathname of this instance's file or category.
      */
     Path getPath() {
         return path;
@@ -74,20 +70,52 @@ final class FileId implements Serializable {
      *         this instance doesn't have the attribute.
      */
     Object getAttributeValue(final Attribute attribute) {
-        return (attribute.getType().equals(String.class) && attribute.getName()
-                .equals("name"))
-                ? path.toString()
-                : null;
+        return map.get(attribute);
     }
 
     /**
-     * Returns the map of attributes and their values.
+     * Returns the number of attributes.
      * 
-     * @return The map of attributes and their values.
+     * @return The number of attributes.
      */
-    Map<Attribute, Object> getAttributeMap() {
-        return Collections.singletonMap(new Attribute("name"), (Object) path
-                .toString());
+    int size() {
+        return map.size();
+    }
+
+    /**
+     * Indicates if this instance satisfies a constraint.
+     * 
+     * @param constraint
+     *            The constraint to satisfy.
+     * @return {@code true} if and only if this instance satisfies the
+     *         constraint.
+     */
+    boolean satisfies(final Constraint constraint) {
+        final Object value = getAttributeValue(constraint.getAttribute());
+        return constraint.satisfiedBy(value);
+    }
+
+    /**
+     * Indicates if this instance contains all the attribute values of another
+     * instance.
+     * 
+     * @param that
+     *            The other instance.
+     * @return {@code true} if and only if this instance contains all the
+     *         attribute values of the other instance.
+     */
+    boolean containsAll(final FileId that) {
+        return map.containsAll(that.map);
+    }
+
+    @Override
+    public Iterator<AttributeEntry> iterator() {
+        return map.iterator();
+    }
+
+    @Override
+    public int compareTo(final FileId that) {
+        return path.compareTo(that.path);
     }
 
     /*
@@ -135,7 +163,7 @@ final class FileId implements Serializable {
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{path=" + path + "}";
+        return path.toString();
     }
 
     /**

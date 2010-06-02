@@ -19,7 +19,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
-import java.util.logging.Logger;
+
+import net.jcip.annotations.GuardedBy;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Handles connections by clients.
@@ -32,9 +36,8 @@ final class Server implements Callable<Void> {
     /**
      * The logging service.
      */
-    private static final Logger                       logger           = Logger
-                                                                               .getLogger(Server.class
-                                                                                       .getName());
+    private static final Logger                       logger           = LoggerFactory
+                                                                               .getLogger(Server.class);
     /**
      * Executes port listeners.
      */
@@ -57,6 +60,7 @@ final class Server implements Callable<Void> {
     /**
      * The peers created by this instance.
      */
+    @GuardedBy("itself")
     private final List<Peer>                          peers            = new LinkedList<Peer>();
     /**
      * The peer futures.
@@ -168,10 +172,25 @@ final class Server implements Callable<Void> {
      * @param spec
      *            Specification of the new local data.
      */
-    void newData(final PiecesSpec spec) {
+    void newData(final FilePieceSpecSet spec) {
         synchronized (peers) {
             for (final Peer peer : peers) {
                 peer.newData(spec);
+            }
+        }
+    }
+
+    /**
+     * Responds to a file or file category being removed by notifying all remote
+     * clients.
+     * 
+     * @param fileId
+     *            Identifier of the file or category.
+     */
+    void removed(final FileId fileId) {
+        synchronized (peers) {
+            for (final Peer peer : peers) {
+                peer.notifyRemoteOfRemovals(fileId);
             }
         }
     }
@@ -269,7 +288,7 @@ final class Server implements Callable<Void> {
                          * if ready.
                          */
                         if (connection.add(socket)) {
-                            logger.finer("Server: " + connection);
+                            logger.debug("Server: {}", connection);
                             final Peer peer = new Peer(clearingHouse,
                                     connection);
                             synchronized (peers) {

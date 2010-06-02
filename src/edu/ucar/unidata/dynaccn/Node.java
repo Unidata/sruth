@@ -24,9 +24,9 @@ import java.util.concurrent.RejectedExecutionException;
  */
 final class Node implements Callable<Void> {
     /**
-     * Notifies the server of newly-created files in the file-tree.
+     * Causes the server to be notified of newly-created files in the file-tree.
      * 
-     * Instances are thread-compatible but not thread-safe.
+     * Instances are thread-safe.
      * 
      * @author Steven R. Emmerson
      */
@@ -34,12 +34,7 @@ final class Node implements Callable<Void> {
         @Override
         public Void call() throws IOException {
             try {
-                archive.watchArchive(new FileSpecConsumer() {
-                    @Override
-                    public void consume(final PiecesSpec spec) {
-                        server.newData(spec);
-                    }
-                });
+                archive.watchArchive(server);
             }
             catch (final InterruptedException ignored) {
                 // Implements thread interruption policy

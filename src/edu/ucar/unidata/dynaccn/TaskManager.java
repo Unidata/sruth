@@ -14,8 +14,9 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Manages tasks.
@@ -28,9 +29,8 @@ final class TaskManager<T> {
     /**
      * The logger to use.
      */
-    private static Logger                      logger  = Logger
-                                                               .getLogger(TaskManager.class
-                                                                       .getName());
+    private static Logger                      logger  = LoggerFactory
+                                                               .getLogger(TaskManager.class);
     /**
      * The executor completion service.
      */
@@ -118,8 +118,7 @@ final class TaskManager<T> {
                 catch (final CancellationException ignored) {
                 }
                 catch (final ExecutionException e) {
-                    logger.log(Level.SEVERE, "Abnormal task completion", e
-                            .getCause());
+                    logger.error("Abnormal task completion", e.getCause());
                     cancel();
                 }
             }

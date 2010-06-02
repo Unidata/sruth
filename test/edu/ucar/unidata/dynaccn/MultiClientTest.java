@@ -350,15 +350,14 @@ public class MultiClientTest {
     @Test
     public void testNodeDelivery() throws IOException, InterruptedException,
             ExecutionException {
-        System.out.println();
         System.out.println("Node Delivery Test:");
         system(new String[] { "mkdir", "-p", "/tmp/client/node/1" });
         system(new String[] { "mkdir", "-p", "/tmp/client/node/2" });
         /*
          * Create the source node.
          */
-        final Node sourceNode = new Node(new Archive("/tmp/server"),
-                Predicate.NOTHING);
+        final Archive serverArchive = new Archive("/tmp/server");
+        final Node sourceNode = new Node(serverArchive, Predicate.NOTHING);
         /*
          * Create the sink nodes.
          */
@@ -419,14 +418,14 @@ public class MultiClientTest {
         /*
          * Test dropping a large file into the source directory.
          */
-        final Path path = Pathname.hide(Paths
+        final Path path = serverArchive.hide(Paths
                 .get("/tmp/server/subdir/server-subfile-2"));
         Files.createDirectories(path.getParent());
         final SeekableByteChannel channel = path.newByteChannel(
                 StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
         channel.write(ByteBuffer.wrap(new byte[1000000]));
         channel.close();
-        path.moveTo(Pathname.reveal(path));
+        path.moveTo(serverArchive.reveal(path));
 
         Thread.sleep(sleepAmount);
 
@@ -445,6 +444,71 @@ public class MultiClientTest {
 
         Thread.sleep(sleepAmount);
         // Thread.sleep(Long.MAX_VALUE);
+
+        /*
+         * Stop the nodes.
+         */
+        stop(sinkNode1Future);
+        stop(sinkNode2Future);
+        stop(sourceNodeFuture);
+    }
+
+    @Test
+    public void testRemoval() throws IOException, InterruptedException,
+            ExecutionException {
+        System.out.println("Node Delivery Test:");
+        system(new String[] { "mkdir", "-p", "/tmp/client/removal/1" });
+        system(new String[] { "mkdir", "-p", "/tmp/client/removal/2" });
+        /*
+         * Create the source node.
+         */
+        final Archive serverArchive = new Archive("/tmp/server");
+        final Node sourceNode = new Node(serverArchive, Predicate.NOTHING);
+        /*
+         * Create the sink nodes.
+         */
+        final Node sinkNode1 = new Node(new Archive("/tmp/client/removal/1"),
+                Predicate.EVERYTHING);
+        final Node sinkNode2 = new Node(new Archive("/tmp/client/removal/2"),
+                Predicate.EVERYTHING);
+        /*
+         * Construct the network topology by hooking the nodes up.
+         */
+        final ServerInfo sourceNodeInfo = sourceNode.getServerInfo();
+        sinkNode1.add(sourceNodeInfo);
+        sinkNode2.add(sourceNodeInfo);
+        sinkNode1.add(sinkNode2.getServerInfo());
+        /*
+         * Start the nodes.
+         */
+        final Future<Void> sourceNodeFuture = start(sourceNode);
+        final Future<Void> sinkNode1Future = start(sinkNode1);
+        final Future<Void> sinkNode2Future = start(sinkNode2);
+
+        Thread.sleep(sleepAmount);
+
+        /*
+         * Remove a file and a directory.
+         */
+        system(new String[] { "rm", "/tmp/server/server-file-1" });
+        system(new String[] { "rm", "-rf", "/tmp/server/subdir" });
+
+        Thread.sleep(sleepAmount);
+        // Thread.sleep(Long.MAX_VALUE);
+
+        /*
+         * Verify removals.
+         */
+        Assert.assertFalse(new File("/tmp/client/removal/1/server-file-1")
+                .exists());
+        Assert.assertFalse(new File("/tmp/client/removal/2/server-file-1")
+                .exists());
+        Assert.assertFalse(new File("/tmp/client/removal/1/subdir").exists());
+        Assert.assertFalse(new File("/tmp/client/removal/2/subdir").exists());
+        Assert.assertFalse(new File("/tmp/client/removal/1/.dynaccn/subdir")
+                .exists());
+        Assert.assertFalse(new File("/tmp/client/removal/2/.dynaccn/subdir")
+                .exists());
 
         /*
          * Stop the nodes.
