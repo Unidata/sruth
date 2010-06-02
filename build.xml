@@ -4,18 +4,18 @@
 	<property name="bin-dir" value="bin"/>
 	<property name="junit-jar" value="/usr/local/junit4.4/junit-4.4.jar"/>
 	<property name="jcip-jar" value="/usr/lib/java/jcip-annotations.jar"/>
+	<property name="slf4j-jar" value="/usr/lib/java/slf4j-api-1.6.0.jar"/>
+	<property name="jars" value="${junit-jar}:${jcip-jar}:${slf4j-jar}"/>
  		
 	<target name="compile">
 		<mkdir dir="${bin-dir}"/>
-		<javac srcdir="src" destdir="${bin-dir}"
-                    classpath="${junit-jar}:${jcip-jar}"/>
-		<javac srcdir="test" destdir="${bin-dir}"
-                    classpath="${junit-jar}:${jcip-jar}"/>
+		<javac srcdir="src" destdir="${bin-dir}" classpath="${jars}"/>
+		<javac srcdir="test" destdir="${bin-dir}" classpath="${jars}"/>
     </target>
 	
 	<target name="check" description="Check the project" depends="compile">
 		<junit fork="on" haltonfailure="on">
-			<classpath path="${bin-dir}:${junit-jar}:${jcip-jar}"/>
+			<classpath path="${bin-dir}:${jars}"/>
 			<formatter type="xml"/>
 			<test name="edu.ucar.unidata.dynaccn.ClientTest"
 				todir="test-reports"/>
