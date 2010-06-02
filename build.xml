@@ -3,12 +3,13 @@
 		
 	<property name="bin-dir" value="bin"/>
 	<property name="junit-jar" value="/usr/local/junit4.4/junit-4.4.jar"/>
+	<property name="jcip-jar" value="/usr/lib/java/jcip-annotations.jar"/>
  		
 	<target name="compile">
 		<mkdir dir="${bin-dir}"/>
 		<javac srcdir="src" destdir="${bin-dir}"/>
 		<javac srcdir="test" destdir="${bin-dir}"
-                    classpath="${junit-jar}"/>
+                    classpath="${junit-jar}:${jcip-jar}"/>
     </target>
 	
 	<target name="check" description="Check the project" depends="compile">
