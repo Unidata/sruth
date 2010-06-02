@@ -14,7 +14,7 @@
 	
 	<target name="check" description="Check the project" depends="compile">
 		<junit fork="on" haltonfailure="on">
-			<classpath path="${bin-dir}:${junit-jar}"/>
+			<classpath path="${bin-dir}:${junit-jar}:${jcip-jar}"/>
 			<formatter type="xml"/>
 			<test name="edu.ucar.unidata.dynaccn.ClientTest"
 				todir="test-reports"/>
