@@ -26,6 +26,11 @@ final class FileId implements Comparable<FileId>, Serializable,
      */
     private static final long            serialVersionUID = 1L;
     /**
+     * The naming schema.
+     */
+    private static final NamingSchema    namingSchema     = NamingSchema
+                                                                  .getInstance();
+    /**
      * The map from attributes to values.
      */
     private final transient AttributeMap map              = new AttributeMap();
@@ -49,7 +54,9 @@ final class FileId implements Comparable<FileId>, Serializable,
             throw new IllegalArgumentException();
         }
         this.path = path;
-        map.put(new StringAttribute("name"), path.toString());
+        for (final AttributeEntry entry : namingSchema.getAttributes(path)) {
+            map.put(entry);
+        }
     }
 
     /**

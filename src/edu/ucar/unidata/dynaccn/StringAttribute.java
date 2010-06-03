@@ -32,7 +32,7 @@ final class StringAttribute extends Attribute {
     }
 
     @Override
-    AttributeEntry getAttributeValue(final String string) {
+    AttributeEntry getAttributeEntry(final String string) {
         return new AttributeEntry(this, string);
     }
 

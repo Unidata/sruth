@@ -162,7 +162,7 @@ final class Peer implements Callable<Void> {
      */
     void notifyRemoteIfDesired(final PieceSpec pieceSpec)
             throws InterruptedException {
-        if (remotePredicate.satisfiedBy(pieceSpec.getFileInfo())) {
+        if (remotePredicate.satisfiedBy(pieceSpec)) {
             noticeQueue.put(pieceSpec);
         }
     }

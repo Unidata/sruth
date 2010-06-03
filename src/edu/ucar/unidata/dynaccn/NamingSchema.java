@@ -33,32 +33,32 @@ final class NamingSchema {
     @GuardedBy("NamingSchema.class")
     private static NamingSchema           INSTANCE;
     /**
-     * The mapping from attribute to pathname component-index.
+     * The mapping from attribute to pathname name-index.
      */
     @GuardedBy("this")
     private final Map<Attribute, Integer> indexes = new HashMap<Attribute, Integer>();
     /**
-     * The mapping from pathname component-index to attribute.
+     * The mapping from pathname name-index to attribute.
      */
     @GuardedBy("this")
-    private final List<Attribute>         attrList;
+    private final Attribute[]             attributes;
 
     /**
-     * Constructs from a list of attributes. The order of attributes in the list
-     * specifies the order of pathname components: the first attribute specifies
-     * the first pathname component, etc..
+     * Constructs from an of attributes. The order of attributes in the array
+     * specifies the order of pathname names: the first attribute specifies the
+     * first pathname name, etc..
      * 
-     * @param attrList
-     *            The list of attributes.
+     * @param attributes
+     *            The array of attributes.
      * @throws NullPointerException
-     *             if {@code Attributes == null}.
+     *             if {@code attributes == null}.
      */
-    private NamingSchema(final List<Attribute> attributes) {
+    private NamingSchema(final Attribute[] attributes) {
         int index = 0;
         for (final Attribute attribute : attributes) {
             indexes.put(attribute, index++);
         }
-        this.attrList = new ArrayList<Attribute>(attributes);
+        this.attributes = attributes.clone();
     }
 
     /**
@@ -75,16 +75,16 @@ final class NamingSchema {
     }
 
     /**
-     * Initializes this class from a list of attributes. The order of attributes
-     * in the list specifies the order of pathname components: the first
-     * attribute specifies the first pathname component, etc..
+     * Initializes this class from an array of attributes. The order of
+     * attributes in the array specifies the order of pathname names: the first
+     * attribute specifies the first pathname name, etc..
      * 
-     * @param attrList
-     *            The list of attributes.
+     * @param attributes
+     *            The array of attributes.
      * @throws IllegalStateException
      *             if this method has already been called.
      */
-    static synchronized void initialize(final List<Attribute> attributes) {
+    static synchronized void initialize(final Attribute[] attributes) {
         if (null != INSTANCE) {
             throw new IllegalStateException();
         }
@@ -101,20 +101,20 @@ final class NamingSchema {
      *             if there is no corresponding pathname form.
      */
     synchronized Path getPath(final Collection<AttributeEntry> values) {
-        final List<String> components = new ArrayList<String>(values.size());
+        final List<String> names = new ArrayList<String>(values.size());
         for (final AttributeEntry value : values) {
             final Integer index = indexes.get(value.getAttribute());
             if (null == index) {
                 throw new IllegalArgumentException();
             }
-            components.add(index, value.getValueString());
+            names.add(index, value.getValueString());
         }
         final StringBuilder buf = new StringBuilder();
-        for (final String string : components) {
-            if (null == string) {
+        for (final String name : names) {
+            if (null == name) {
                 throw new IllegalArgumentException();
             }
-            buf.append(string);
+            buf.append(name);
             buf.append(File.pathSeparator);
         }
         if (buf.length() > 0) {
@@ -137,14 +137,27 @@ final class NamingSchema {
             throw new IllegalArgumentException();
         }
         final int nameCount = path.getNameCount();
-        final List<AttributeEntry> attributes = new ArrayList<AttributeEntry>(
+        final List<AttributeEntry> entries = new ArrayList<AttributeEntry>(
                 nameCount);
         for (int i = 0; i < nameCount; i++) {
-            final Path component = path.getName(i);
-            final AttributeEntry value = attrList.get(i).getAttributeValue(
-                    component.toString());
-            attributes.add(value);
+            final Path name = path.getName(i);
+            final AttributeEntry value = this.attributes[i]
+                    .getAttributeEntry(name.toString());
+            entries.add(value);
         }
-        return attributes;
+        return entries;
+    }
+
+    /**
+     * Returns the attribute associated with a given index.
+     * 
+     * @param i
+     *            The index of the attribute.
+     * @return The associated attribute.
+     * @throws IndexOutOfBoundsException
+     *             if {@code i} is invalid.
+     */
+    Attribute getAttribute(final int i) {
+        return attributes[i];
     }
 }

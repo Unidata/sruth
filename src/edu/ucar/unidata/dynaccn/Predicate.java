@@ -142,7 +142,7 @@ class Predicate implements Serializable {
      *             if {@code pieceInfo == null}.
      */
     synchronized boolean satisfiedBy(final PieceSpec pieceSpec) {
-        return satisfiedBy(pieceSpec.getFileInfo());
+        return satisfiedBy(pieceSpec);
     }
 
     /**

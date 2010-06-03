@@ -29,6 +29,10 @@ public class ClientTest {
      */
     private static ExecutorService executorService = Executors
                                                            .newCachedThreadPool();
+    /**
+     * The naming schema
+     */
+    private static NamingSchema    namingSchema;
 
     private static void system(final String[] cmd) throws IOException,
             InterruptedException {
@@ -45,6 +49,10 @@ public class ClientTest {
         system(new String[] { "sh", "-c", "date > /tmp/server/server-file-2" });
         system(new String[] { "sh", "-c",
                 "date > /tmp/server/subdir/server-subfile" });
+
+        NamingSchema.initialize(new Attribute[] { new StringAttribute("name1"),
+                new StringAttribute("name2") });
+        namingSchema = NamingSchema.getInstance();
     }
 
     @AfterClass
@@ -96,7 +104,7 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Attribute attribute = new StringAttribute("name");
+        final Attribute attribute = namingSchema.getAttribute(0);
         final Constraint constraint = Constraint.equalTo(attribute,
                 "server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });
@@ -130,7 +138,7 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Attribute attribute = new StringAttribute("name");
+        final Attribute attribute = namingSchema.getAttribute(0);
         final Constraint constraint = Constraint.notEqualTo(attribute,
                 "server-file-2");
         final Filter filter = new Filter(new Constraint[] { constraint });

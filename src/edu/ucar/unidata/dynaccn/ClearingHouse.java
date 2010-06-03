@@ -101,8 +101,7 @@ final class ClearingHouse {
      *             if an I/O error occurs.
      */
     void process(final Peer peer, final PieceSpec pieceSpec) throws IOException {
-        if (predicate.satisfiedBy(pieceSpec.getFileInfo())
-                && !archive.exists(pieceSpec)) {
+        if (predicate.satisfiedBy(pieceSpec) && !archive.exists(pieceSpec)) {
             peer.addRequest(pieceSpec);
         }
     }

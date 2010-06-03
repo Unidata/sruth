@@ -62,6 +62,8 @@ final class Constraint implements Comparable<Constraint>, Serializable {
          * Indicates if one attribute value exactly specifies another according
          * to this instance.
          * 
+         * This implementation returns {@code false}.
+         * 
          * @param value1
          *            The first attribute value.
          * @param value2

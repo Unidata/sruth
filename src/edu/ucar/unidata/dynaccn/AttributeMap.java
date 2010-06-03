@@ -58,6 +58,18 @@ final class AttributeMap implements Iterable<AttributeEntry> {
     }
 
     /**
+     * Maps an attribute to a value.
+     * 
+     * @param entry
+     *            The attribute-entry.
+     * @throws IllegalArgumentException
+     *             if {@code entry.getAttribute()} is already in the map.
+     */
+    void put(final AttributeEntry entry) {
+        put(entry.getAttribute(), entry.getValue());
+    }
+
+    /**
      * Returns the value of a given attribute.
      * 
      * @param attribute

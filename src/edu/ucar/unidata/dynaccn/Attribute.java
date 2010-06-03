@@ -102,7 +102,7 @@ abstract class Attribute implements Comparable<Attribute>, Serializable {
      *            The string form of the value.
      * @return The corresponding attribute-value.
      */
-    abstract AttributeEntry getAttributeValue(String string);
+    abstract AttributeEntry getAttributeEntry(String string);
 
     /**
      * Compares this instance to another.
