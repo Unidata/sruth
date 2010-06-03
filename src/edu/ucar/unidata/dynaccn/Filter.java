@@ -6,9 +6,12 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.Serializable;
-import java.util.Iterator;
-import java.util.Set;
-import java.util.TreeSet;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.PathMatcher;
+import java.nio.file.Paths;
 
 /**
  * A conjunction of constraints on the attributes of a file.
@@ -17,82 +20,99 @@ import java.util.TreeSet;
  * 
  * @author Steven R. Emmerson
  */
-class Filter implements Comparable<Filter>, Serializable {
+class Filter implements Serializable {
     /**
      * The serial version ID.
      */
-    private static final long     serialVersionUID = 1L;
+    private static final long           serialVersionUID = 1L;
     /**
      * The filter that is satisfied by everything.
      */
-    static final Filter           EVERYTHING       = new Filter(
-                                                           new Constraint[0]) {
-                                                       /**
-                                                        * The serial version ID.
-                                                        */
-                                                       private static final long serialVersionUID = 1L;
+    static final Filter                 EVERYTHING       = new Filter("glob:**") {
+                                                             /**
+                                                              * The serial
+                                                              * version ID.
+                                                              */
+                                                             private static final long serialVersionUID = 1L;
 
-                                                       @Override
-                                                       public String toString() {
-                                                           return "EVERYTHING";
-                                                       }
+                                                             @Override
+                                                             public String toString() {
+                                                                 return "EVERYTHING";
+                                                             }
 
-                                                       private Object readResolve() {
-                                                           return EVERYTHING;
-                                                       }
-                                                   };
+                                                             private Object readResolve() {
+                                                                 return EVERYTHING;
+                                                             }
+                                                         };
     /**
      * The filter that is satisfied by nothing.
      */
-    static final Filter           NOTHING          = new Filter(
-                                                           new Constraint[0]) {
-                                                       /**
-                                                        * The serial version ID.
-                                                        */
-                                                       private static final long serialVersionUID = 1L;
+    static final Filter                 NOTHING          = new Filter("glob:/") {
+                                                             /**
+                                                              * The serial
+                                                              * version ID.
+                                                              */
+                                                             private static final long serialVersionUID = 1L;
 
-                                                       @Override
-                                                       boolean satisfiedBy(
-                                                               final FileInfo fileInfo) {
-                                                           return false;
-                                                       }
+                                                             @Override
+                                                             boolean satisfiedBy(
+                                                                     final FileInfo fileInfo) {
+                                                                 return false;
+                                                             }
 
-                                                       @Override
-                                                       boolean exactlySpecifies(
-                                                               final FileInfo fileInfo) {
-                                                           return false;
-                                                       }
+                                                             @Override
+                                                             boolean exactlySpecifies(
+                                                                     final FileInfo fileInfo) {
+                                                                 return false;
+                                                             }
 
-                                                       @Override
-                                                       public String toString() {
-                                                           return "NOTHING";
-                                                       }
+                                                             @Override
+                                                             public String toString() {
+                                                                 return "NOTHING";
+                                                             }
 
-                                                       private Object readResolve() {
-                                                           return NOTHING;
-                                                       }
-                                                   };
+                                                             private Object readResolve() {
+                                                                 return NOTHING;
+                                                             }
+                                                         };
     /**
-     * The constraints.
-     */
-    private final Set<Constraint> constraints      = new TreeSet<Constraint>();
-
-    /**
-     * Constructs from an array of constraints.
+     * The original pattern-syntax and pattern.
      * 
-     * @param constraints
-     *            The array of constraints.
-     * @throws NullPointerException
-     *             if {@code constraints == null}.
+     * @serial The pattern-syntax and pattern.
      */
-    Filter(final Constraint[] constraints) {
-        if (null == constraints) {
-            throw new NullPointerException();
-        }
+    private final String                syntaxAndPattern;
+    /**
+     * The original pattern as a pathname.
+     */
+    private volatile transient Path     patternPath;
+    /**
+     * The path matcher.
+     */
+    private final transient PathMatcher matcher;
 
-        for (final Constraint constraint : constraints) {
-            this.constraints.add(constraint);
+    /**
+     * Constructs from a pattern.
+     * 
+     * @param syntaxAndPattern
+     *            The pattern-syntax and pattern as specified by
+     *            {@link FileSystem#getPathMatcher(String)}.
+     * @throws IllegalArgumentException
+     *             if {@code syntaxAndPattern} is invalid.
+     * @throws NullPointerException
+     *             if {@code syntaxAndPattern == null}.
+     */
+    Filter(final String syntaxAndPattern) {
+        final int index = syntaxAndPattern.indexOf(':');
+        if (-1 == index) {
+            throw new IllegalArgumentException(syntaxAndPattern);
         }
+        this.syntaxAndPattern = syntaxAndPattern;
+        try {
+            patternPath = Paths.get(syntaxAndPattern.substring(index + 1));
+        }
+        catch (final InvalidPathException ignored) {
+        }
+        matcher = FileSystems.getDefault().getPathMatcher(syntaxAndPattern);
     }
 
     /**
@@ -105,19 +125,7 @@ class Filter implements Comparable<Filter>, Serializable {
      *             if {@code fileInfo == null}.
      */
     boolean satisfiedBy(final FileInfo fileInfo) {
-        for (final Constraint constraint : constraints) {
-            if (!fileInfo.satisfies(constraint)) {
-                return false;
-            }
-            final Object value = fileInfo.getAttributeValue(constraint
-                    .getAttribute());
-
-            if (!constraint.satisfiedBy(value)) {
-                return false;
-            }
-        }
-
-        return true;
+        return matcher.matches(fileInfo.getPath());
     }
 
     /**
@@ -129,74 +137,10 @@ class Filter implements Comparable<Filter>, Serializable {
      *         by, the given file.
      */
     boolean exactlySpecifies(final FileInfo fileInfo) {
-        if (fileInfo.getAttributeCount() != constraints.size()) {
-            return false;
-        }
-
-        for (final Constraint constraint : constraints) {
-            if (!constraint.exactlySpecifies(fileInfo
-                    .getAttributeValue(constraint.getAttribute()))) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    @Override
-    public int compareTo(final Filter that) {
-        final Iterator<Constraint> thisIter = constraints.iterator();
-        final Iterator<Constraint> thatIter = that.constraints.iterator();
-        int status;
-
-        for (;;) {
-            if (thisIter.hasNext()) {
-                if (thatIter.hasNext()) {
-                    status = thisIter.next().compareTo(thatIter.next());
-
-                    if (0 != status) {
-                        return status;
-                    }
-                }
-                else {
-                    return 1;
-                }
-            }
-            else {
-                return thatIter.hasNext()
-                        ? -1
-                        : 0;
-            }
-        }
-    }
-
-    @Override
-    public int hashCode() {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + ((constraints == null)
-                ? 0
-                : constraints.hashCode());
-        return result;
-    }
-
-    @Override
-    public boolean equals(final Object obj) {
-        if (this == obj) {
-            return true;
-        }
-        if (obj == null) {
-            return false;
-        }
-        if (getClass() != obj.getClass()) {
-            return false;
-        }
-        final Filter other = (Filter) obj;
-        return 0 == compareTo(other);
+        return fileInfo.getPath().equals(patternPath);
     }
 
     private Object readResolve() {
-        return new Filter(constraints
-                .toArray(new Constraint[constraints.size()]));
+        return new Filter(syntaxAndPattern);
     }
 }

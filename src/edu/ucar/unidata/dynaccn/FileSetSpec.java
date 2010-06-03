@@ -7,10 +7,8 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.InvalidObjectException;
 import java.io.Serializable;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
+import java.util.SortedSet;
 import java.util.TreeSet;
 
 import net.jcip.annotations.GuardedBy;
@@ -29,18 +27,13 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
     /**
      * The serial version ID.
      */
-    private static final long                                serialVersionUID = 1L;
+    private static final long       serialVersionUID = 1L;
     /**
      * The set of specifications. No specification in the set is a subset of
      * another.
      */
     @GuardedBy("this")
-    private final Set<FileId>                                specs            = new TreeSet<FileId>();
-    /**
-     * The actual map from individual attribute values to specifications.
-     */
-    @GuardedBy("this")
-    private final transient Map<AttributeEntry, Set<FileId>> inverseMap       = new HashMap<AttributeEntry, Set<FileId>>();
+    private final SortedSet<FileId> fileIds          = new TreeSet<FileId>();
 
     /**
      * Indicates if this instance is empty or not.
@@ -48,7 +41,7 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
      * @return {@code true} if and only if this instance is empty.
      */
     synchronized boolean isEmpty() {
-        return specs.size() == 0;
+        return fileIds.size() == 0;
     }
 
     /**
@@ -57,111 +50,48 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
      * @return The number of file or category specifications.
      */
     synchronized int size() {
-        return specs.size();
+        return fileIds.size();
     }
 
     /**
      * Removes all elements of this instance.
      */
     synchronized void clear() {
-        specs.clear();
-        inverseMap.clear();
+        fileIds.clear();
     }
 
     /**
      * Adds a specification of a file or category.
      * 
-     * @param spec
+     * @param fileId
      *            The specification of a file or category.
      */
-    public synchronized void add(final FileId spec) {
-        if (!specs.contains(spec)) {
-            if (!alreadyHaveProperSubsetOf(spec)) {
-                removeAllSupersetsOf(spec);
-                specs.add(spec);
-                addToInverseMap(spec);
-            }
-        }
+    synchronized void add(final FileId fileId) {
+        removeInclusionsOf(fileId);
+        fileIds.add(fileId);
     }
 
     /**
-     * Indicates if this instance already has a specification that's a proper
-     * subset of a given specification (and, hence, more general).
-     * 
-     * @param target
-     *            The given specification.
-     * @return {@code true} if and only if this instance already has a
-     *         specification that's a proper subset of the given specification.
-     */
-    @GuardedBy("this")
-    private boolean alreadyHaveProperSubsetOf(final FileId target) {
-        for (final FileId spec : specs) {
-            if (spec.size() < target.size()) {
-                if (target.containsAll(spec)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Adds a specification to the inverse map.
-     * 
-     * @param spec
-     *            The specification to add.
-     */
-    @GuardedBy("this")
-    private void addToInverseMap(final FileId spec) {
-        for (final AttributeEntry value : spec) {
-            Set<FileId> specs = inverseMap.get(value);
-            if (null == specs) {
-                specs = new TreeSet<FileId>();
-                inverseMap.put(value, specs);
-            }
-            specs.add(spec);
-        }
-    }
-
-    /**
-     * Removes all specifications that are supersets of (and, hence, more
-     * restrictive than) a given specification.
+     * Removes all specifications that are included by a given specification.
      * 
      * @param spec
      *            The given specification.
      */
     @GuardedBy("this")
-    private void removeAllSupersetsOf(final FileId target) {
-        Set<FileId> specSet = null;
-        for (final AttributeEntry value : target) {
-            final Set<FileId> specs = inverseMap.get(value);
-            if (null == specs) {
-                return;
+    private void removeInclusionsOf(final FileId target) {
+        final SortedSet<FileId> tailSet = fileIds.tailSet(target);
+        for (final Iterator<FileId> iter = tailSet.iterator(); iter.hasNext();) {
+            final FileId fileId = iter.next();
+            if (!target.includes(fileId)) {
+                break;
             }
-            if (null == specSet) {
-                specSet = specs;
-            }
-            else {
-                specSet.retainAll(specs);
-                if (specSet.isEmpty()) {
-                    return;
-                }
-            }
+            iter.remove();
         }
-        if (null == specSet) {
-            return;
-        }
-        for (final FileId spec : specSet) {
-            for (final AttributeEntry entry : spec) {
-                inverseMap.get(entry.getAttribute()).remove(spec);
-            }
-        }
-        specs.removeAll(specSet);
     }
 
     @Override
     public Iterator<FileId> iterator() {
-        return specs.iterator();
+        return fileIds.iterator();
     }
 
     /*
@@ -171,12 +101,12 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
      */
     @Override
     public String toString() {
-        return "FileSetSpec [specs=" + specs + "]";
+        return "FileSetSpec [fileIds=" + fileIds + "]";
     }
 
     private Object readResolve() throws InvalidObjectException {
         final FileSetSpec set = new FileSetSpec();
-        for (final FileId spec : specs) {
+        for (final FileId spec : fileIds) {
             set.add(spec);
         }
         return set;

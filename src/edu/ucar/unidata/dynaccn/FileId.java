@@ -10,7 +10,6 @@ import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Iterator;
 
 /**
  * An identifier for a file or category.
@@ -19,25 +18,15 @@ import java.util.Iterator;
  * 
  * @author Steven R. Emmerson
  */
-final class FileId implements Comparable<FileId>, Serializable,
-        Iterable<AttributeEntry> {
+final class FileId implements Comparable<FileId>, Serializable {
     /**
      * The serial version identifier.
      */
-    private static final long            serialVersionUID = 1L;
-    /**
-     * The naming schema.
-     */
-    private static final NamingSchema    namingSchema     = NamingSchema
-                                                                  .getInstance();
-    /**
-     * The map from attributes to values.
-     */
-    private final transient AttributeMap map              = new AttributeMap();
+    private static final long       serialVersionUID = 1L;
     /**
      * The relative pathname of the file.
      */
-    private volatile transient Path      path;
+    private volatile transient Path path;
 
     /**
      * Constructs from the relative pathname of the file or category.
@@ -54,9 +43,6 @@ final class FileId implements Comparable<FileId>, Serializable,
             throw new IllegalArgumentException();
         }
         this.path = path;
-        for (final AttributeEntry entry : namingSchema.getAttributes(path)) {
-            map.put(entry);
-        }
     }
 
     /**
@@ -69,60 +55,49 @@ final class FileId implements Comparable<FileId>, Serializable,
     }
 
     /**
-     * Returns the value of a given attribute.
+     * Returns the number of names.
      * 
-     * @param attribute
-     *            The attribute.
-     * @return The value of the attribute in this instance or {@code null} if
-     *         this instance doesn't have the attribute.
-     */
-    Object getAttributeValue(final Attribute attribute) {
-        return map.get(attribute);
-    }
-
-    /**
-     * Returns the number of attributes.
-     * 
-     * @return The number of attributes.
+     * @return The number of names.
      */
     int size() {
-        return map.size();
+        return path.getNameCount();
     }
 
     /**
-     * Indicates if this instance satisfies a constraint.
+     * Equal to {@code getPath().compareTo(that.getPath())}.
      * 
-     * @param constraint
-     *            The constraint to satisfy.
-     * @return {@code true} if and only if this instance satisfies the
-     *         constraint.
+     * @see {@link Comparable#compareTo(Object)}.
      */
-    boolean satisfies(final Constraint constraint) {
-        final Object value = getAttributeValue(constraint.getAttribute());
-        return constraint.satisfiedBy(value);
-    }
-
-    /**
-     * Indicates if this instance contains all the attribute values of another
-     * instance.
-     * 
-     * @param that
-     *            The other instance.
-     * @return {@code true} if and only if this instance contains all the
-     *         attribute values of the other instance.
-     */
-    boolean containsAll(final FileId that) {
-        return map.containsAll(that.map);
-    }
-
-    @Override
-    public Iterator<AttributeEntry> iterator() {
-        return map.iterator();
-    }
-
     @Override
     public int compareTo(final FileId that) {
         return path.compareTo(that.path);
+    }
+
+    /**
+     * Returns the file-identifier of the parent of this instance or {@code
+     * null} if no such parent exists.
+     * 
+     * @return The parent of this instance or {@code null}.
+     */
+    FileId getParent() {
+        final Path parentPath = path.getParent();
+        return null == parentPath
+                ? null
+                : new FileId(parentPath);
+    }
+
+    /**
+     * Indicates if this instance includes a given instance (i.e., if the
+     * pathname of the given instance starts with the pathname of this
+     * instance).
+     * 
+     * @param fileId
+     *            The given instance.
+     * @return {@code true} if and only if this instance includes the given
+     *         instance.
+     */
+    boolean includes(final FileId fileId) {
+        return fileId.path.startsWith(path);
     }
 
     /*

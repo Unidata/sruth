@@ -88,30 +88,6 @@ final class FileInfo implements Serializable {
     }
 
     /**
-     * Returns the value of a given attribute.
-     * 
-     * @param attribute
-     *            The attribute.
-     * @return The value of the attribute in this instance or {@code null} if
-     *         this instance doesn't have the attribute.
-     */
-    Object getAttributeValue(final Attribute attribute) {
-        return fileId.getAttributeValue(attribute);
-    }
-
-    /**
-     * Indicates if this instance satisfies a constraint.
-     * 
-     * @param constraint
-     *            The constraint to satisfy.
-     * @return {@code true} if and only if this instance satisfies the
-     *         constraint.
-     */
-    boolean satisfies(final Constraint constraint) {
-        return fileId.satisfies(constraint);
-    }
-
-    /**
      * Returns the size, in bytes, of the last file-piece.
      * 
      * @return The size of the last file-piece.

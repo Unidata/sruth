@@ -29,10 +29,6 @@ public class ClientTest {
      */
     private static ExecutorService executorService = Executors
                                                            .newCachedThreadPool();
-    /**
-     * The naming schema
-     */
-    private static NamingSchema    namingSchema;
 
     private static void system(final String[] cmd) throws IOException,
             InterruptedException {
@@ -49,10 +45,6 @@ public class ClientTest {
         system(new String[] { "sh", "-c", "date > /tmp/server/server-file-2" });
         system(new String[] { "sh", "-c",
                 "date > /tmp/server/subdir/server-subfile" });
-
-        NamingSchema.initialize(new Attribute[] { new StringAttribute("name1"),
-                new StringAttribute("name2") });
-        namingSchema = NamingSchema.getInstance();
     }
 
     @AfterClass
@@ -104,10 +96,7 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Attribute attribute = namingSchema.getAttribute(0);
-        final Constraint constraint = Constraint.equalTo(attribute,
-                "server-file-2");
-        final Filter filter = new Filter(new Constraint[] { constraint });
+        final Filter filter = new Filter("glob:server-file-2");
         final Predicate predicate = new Predicate(new Filter[] { filter });
         archive = new Archive(Paths.get("/tmp/client/term"));
         final ClearingHouse clearingHouse = new ClearingHouse(archive,
@@ -138,14 +127,9 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Attribute attribute = namingSchema.getAttribute(0);
-        final Constraint constraint = Constraint.notEqualTo(attribute,
-                "server-file-2");
-        final Filter filter = new Filter(new Constraint[] { constraint });
-        final Predicate predicate = new Predicate(new Filter[] { filter });
         archive = new Archive("/tmp/client/nonterm");
         final ClearingHouse clearingHouse = new ClearingHouse(archive,
-                predicate);
+                Predicate.EVERYTHING);
         final Client client = new Client(serverInfo, clearingHouse);
         final Future<Void> clientFuture = start(client);
 
@@ -158,8 +142,10 @@ public class ClientTest {
                 .exists());
         Assert.assertTrue(new File("/tmp/client/nonterm/server-file-1")
                 .length() > 0);
-        Assert.assertFalse(new File("/tmp/client/nonterm/server-file-2")
+        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-2")
                 .exists());
+        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-2")
+                .length() > 0);
         Assert.assertTrue(new File("/tmp/client/nonterm/subdir/server-subfile")
                 .exists());
         Assert.assertTrue(new File("/tmp/client/nonterm/subdir/server-subfile")
