@@ -585,7 +585,7 @@ final class Archive {
      *            The selection criteria.
      * @return
      */
-    void walkArchive(final PiecesSpecConsumer consumer,
+    void walkArchive(final FilePieceSpecSetConsumer consumer,
             final Predicate predicate) {
         final EnumSet<FileVisitOption> opts = EnumSet.of(
                 FileVisitOption.FOLLOW_LINKS, FileVisitOption.DETECT_CYCLES);

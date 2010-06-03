@@ -10,6 +10,6 @@ package edu.ucar.unidata.dynaccn;
  * 
  * @author Steven R. Emmerson
  */
-interface PiecesSpecConsumer {
+interface FilePieceSpecSetConsumer {
     void consume(final FilePieceSpecSet spec);
 }

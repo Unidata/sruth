@@ -160,7 +160,7 @@ final class ClearingHouse {
      * @param predicate
      *            The selection criteria.
      */
-    void walkArchive(final PiecesSpecConsumer consumer,
+    void walkArchive(final FilePieceSpecSetConsumer consumer,
             final Predicate predicate) {
         archive.walkArchive(consumer, predicate);
     }

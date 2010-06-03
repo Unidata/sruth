@@ -247,7 +247,7 @@ final class Peer implements Callable<Void> {
     @ThreadSafe
     private final class FileScanner implements Callable<Void> {
         public Void call() throws InterruptedException {
-            clearingHouse.walkArchive(new PiecesSpecConsumer() {
+            clearingHouse.walkArchive(new FilePieceSpecSetConsumer() {
                 @Override
                 public void consume(final FilePieceSpecSet spec) {
                     noticeQueue.put(spec);
