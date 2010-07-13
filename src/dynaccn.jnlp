@@ -1,0 +1,21 @@
+<jnlp spec="6.0+">
+    <information>
+        <title>Unidata Data Distribution Client</title>
+        <vendor>University Corporation for Atmospheric Research / Unidata Program Center</vendor>
+        <association extensions="udds" mime-type="application/x-udds/>
+    </information>
+    <security>
+        <all-permissions/>
+    </security>
+    <update check="always" policy="prompt-update"/>
+    <resources>
+        <jar href="dynaccn.jar"/>
+        <jar href="jcip-annotations.jar"/>
+        <jar href="slf4j-api-1.6.0.jar"/>
+        <jar href="slf4j-jdk14-1.6.0.jar"/>
+        <jar href="groovy-all-1.7.3.jar"/>
+        <j2se version="1.7+" href="http://java.sun.com/products/autodl/j2se"
+            java-vm-args="-server"/>
+        <application-desc/>
+    </resources>
+</jnlp>
