@@ -169,20 +169,28 @@ final class Tracker extends BlockingTask<Void> {
     /**
      * Constructs from information on the source-server.
      * 
+     * @param port
+     *            Number of the port on which the tracker should listen. If
+     *            non-positive, then the port will be chosen by the operating
+     *            system.
      * @param sourceServer
      *            Information on the source-server.
+     * @throws IllegalArgumentException
+     *             if {@code port >= 65535}.
      * @throws IOException
-     *             if a server serverSocket can't be created.
+     *             if a server socket can't be created.
      * @throws NullPointerException
      *             if {@code sourceServer == null}.
      */
-    Tracker(final ServerInfo sourceServer) throws IOException {
+    Tracker(final int port, final ServerInfo sourceServer) throws IOException {
         if (null == sourceServer) {
             throw new NullPointerException();
         }
         serverSocket = new ServerSocket();
         try {
-            serverSocket.bind(new InetSocketAddress(0));
+            serverSocket.bind(new InetSocketAddress(0 >= port
+                    ? 0
+                    : port));
         }
         catch (final IOException e) {
             try {

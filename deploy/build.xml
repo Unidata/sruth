@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="UDDsys" default="check" basedir="..">
+
+	<property name="output-dir" value="output" />
+	<property name="testOutput-dir" value="testOutput" />
+	<property name="junit-jar" value="/usr/local/junit4.4/junit-4.4.jar" />
+	<property name="jcip-jar" value="/usr/lib/java/jcip-annotations.jar" />
+	<property name="slf4j-jar" value="/usr/lib/java/slf4j-api-1.6.0.jar" />
+	<property name="jars" value="${junit-jar}:${jcip-jar}:${slf4j-jar}" />
+	<property name="run-jar" value="lib/uddsys.jar" />
+	<property name="signed-jar" value="${run-jar}.pack.gz" />
+	<property name="key-dir" value="/share/idv" />
+	<property name="keystore" value="${key-dir}/.keystore" />
+	<property name="storepass" value="poohbear" />
+
+	<target name="compile" description="Compile the project">
+		<mkdir dir="${output-dir}" />
+		<javac srcdir="src" destdir="${output-dir}" classpath="${jars}" />
+		<javac srcdir="test" destdir="${testOutput-dir}" classpath="${jars}" />
+	</target>
+
+	<target name="check" description="Check the project" depends="compile">
+		<junit fork="on" haltonfailure="on">
+			<classpath path="${output-dir}:${testOutput-dir}:${jars}" />
+			<formatter type="xml" />
+			<test name="edu.ucar.unidata.dynaccn.ClientTest" todir="test-reports" />
+			<test name="edu.ucar.unidata.dynaccn.MultiClientTest" todir="test-reports" />
+		</junit>
+	</target>
+
+	<target name="run_jar" description="Make runnable jar file">
+		<delete file="${run-jar}" failonerror="false" />
+		<jar destfile="${run-jar}">
+			<manifest>
+				<attribute name="Main-Class" value="edu.ucar.unidata.dynaccn.SubscriberApp" />
+			</manifest>
+			<fileset dir="/home/steve/java/dynaCCN/output" includes="edu/**" />
+			<zipfileset src="/usr/lib/java/slf4j-api-1.6.0.jar" excludes="META-INF/**" />
+			<zipfileset src="/usr/lib/java/slf4j-jdk14-1.6.0.jar" excludes="META-INF/**" />
+			<zipfileset src="/home/steve/java/lib/miglayout-unsigned-3.7.3.1.jar" excludes="META-INF/**" />
+		</jar>
+		<exec executable="pack200" failonerror="true">
+			<arg line="--repack ${run-jar}" />
+		</exec>
+		<signjar alias="idv" jar="${run-jar}" keystore="${keystore}" storepass="${storepass}" />
+	</target>
+
+	<target name="signed_jar" description="Make signed runnable jar file" depends="run_jar">
+		<exec executable="pack200" failonerror="true">
+			<arg line="--repack ${run-jar}" />
+		</exec>
+		<signjar jar="${run-jar}" alias="idv" keystore="${key-dir}/.keystore" storepass="poohbear" />
+		<exec executable="pack200" failonerror="true">
+			<arg line="${signed-jar} ${run-jar}" />
+		</exec>
+	</target>
+
+	<taskdef name="install4j"
+        classname="com.install4j.Install4JTask"
+        classpath="/share/install4j/bin/ant.jar"/>
+
+    <target name="installer" depends="run_jar">
+        <install4j projectfile="deploy/install4j/UDDsys.install4j"/>
+    </target>
+
+	<target name="available" description="Make application available" depends="installer">
+		<exec executable="scp" failonerror="true">
+			<arg value="deploy/install4j/UDDsys_unix_0_0.sh" />
+			<arg value="deploy/install4j/UDDsys_windows_0_0.exe" />
+			<arg value="deploy/deployJava.js" />
+			<arg value="deploy/dynaccn.jnlp" />
+			<arg value="deploy/index.html" />
+			<arg value="${run-jar}" />
+			<arg value="conan:/content/staff/steve/dynaccn" />
+		</exec>
+	</target>
+</project>

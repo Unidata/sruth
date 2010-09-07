@@ -8,6 +8,7 @@ package edu.ucar.unidata.dynaccn;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 /**
  * A piece of a file.
@@ -104,6 +105,53 @@ final class Piece implements Serializable {
      */
     long getOffset() {
         return pieceSpec.getOffset();
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + Arrays.hashCode(data);
+        result = prime * result + ((pieceSpec == null)
+                ? 0
+                : pieceSpec.hashCode());
+        return result;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#equals(java.lang.Object)
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final Piece other = (Piece) obj;
+        if (!Arrays.equals(data, other.data)) {
+            return false;
+        }
+        if (pieceSpec == null) {
+            if (other.pieceSpec != null) {
+                return false;
+            }
+        }
+        else if (!pieceSpec.equals(other.pieceSpec)) {
+            return false;
+        }
+        return true;
     }
 
     @Override

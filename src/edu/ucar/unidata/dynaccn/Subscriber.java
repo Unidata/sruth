@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.jcip.annotations.NotThreadSafe;
 
@@ -30,8 +31,8 @@ final class Subscriber implements Callable<Void> {
     /**
      * The logger for this class.
      */
-    private static final Logger logger = LoggerFactory
-                                               .getLogger(Subscriber.class);
+    private static final Logger logger    = LoggerFactory
+                                                  .getLogger(Subscriber.class);
     /**
      * The proxy for the tracker.
      */
@@ -44,6 +45,14 @@ final class Subscriber implements Callable<Void> {
      * The data-selection predicate.
      */
     private final Predicate     predicate;
+    /**
+     * Whether or not this instance is running.
+     */
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+    /**
+     * The archive.
+     */
+    private final Archive       archive;
 
     /**
      * Constructs from the pathname of the file-tree, the socket address of the
@@ -93,10 +102,37 @@ final class Subscriber implements Callable<Void> {
         if (null == predicate) {
             throw new NullPointerException();
         }
-        final Archive archive = new Archive(rootDir);
+        archive = new Archive(rootDir);
         sinkNode = new SinkNode(archive, predicate);
         this.trackerProxy = trackerProxy;
         this.predicate = predicate;
+    }
+
+    /**
+     * Returns a proxy for the tracker.
+     * 
+     * @return A proxy for the tracker.
+     */
+    TrackerProxy getTrackerProxy() {
+        return trackerProxy;
+    }
+
+    /**
+     * Returns the predicate used by this instance.
+     * 
+     * @return The predicate used by this instance.
+     */
+    Predicate getPredicate() {
+        return predicate;
+    }
+
+    /**
+     * Returns the pathname of the root of the archive.
+     * 
+     * @return The pathname of the root of the archive.
+     */
+    Path getRootDir() {
+        return archive.getRootDir();
     }
 
     /**
@@ -106,14 +142,20 @@ final class Subscriber implements Callable<Void> {
      * @throws ClassNotFoundException
      *             if the reply from the tracker can't be understood.
      * @throws ExecutionException
-     *             if a task terminates due to an error.
+     *             if a subtask terminates due to an error.
+     * @throws IllegalStateException
+     *             if {@link #isRunning()}.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws IOException
      *             if an I/O error occurs.
+     * @see {@link #isRunning()}
      */
     public Void call() throws ExecutionException, InterruptedException,
             ClassNotFoundException, IOException {
+        if (!isRunning.compareAndSet(false, true)) {
+            throw new IllegalStateException();
+        }
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         try {
@@ -127,6 +169,25 @@ final class Subscriber implements Callable<Void> {
             Thread.currentThread().setName(origThreadName);
         }
         return null;
+    }
+
+    /**
+     * Indicates if this instance is running (i.e., whether or not
+     * {@link #call()} has been called).
+     * 
+     * @return {@code true} if and only if {@link #call()} has been called.
+     */
+    boolean isRunning() {
+        return isRunning.get();
+    }
+
+    /**
+     * Returns the number of received files since {@link #call()} was called.
+     * 
+     * @return The number of received files since {@link #call()} was called.
+     */
+    public long getReceivedFileCount() {
+        return sinkNode.getReceivedFileCount();
     }
 
     /*

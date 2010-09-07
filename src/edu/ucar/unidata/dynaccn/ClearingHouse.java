@@ -9,6 +9,7 @@ import java.io.IOError;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedList;
+import java.util.concurrent.atomic.AtomicLong;
 
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
@@ -34,7 +35,11 @@ final class ClearingHouse {
      * All the peers using this instance.
      */
     @GuardedBy("itself")
-    private final LinkedList<Peer> peers = new LinkedList<Peer>();
+    private final LinkedList<Peer> peers             = new LinkedList<Peer>();
+    /**
+     * The number of completely received files.
+     */
+    private final AtomicLong       receivedFileCount = new AtomicLong(0);
 
     /**
      * Constructs from the data archive and a specification of the
@@ -60,7 +65,7 @@ final class ClearingHouse {
      * 
      * @return The pathname of the root of the file-tree.
      */
-    public Path getRootDir() {
+    Path getRootDir() {
         return archive.getRootDir();
     }
 
@@ -126,6 +131,7 @@ final class ClearingHouse {
         if (predicate.satisfiedBy(piece.getFileInfo())) {
             if (archive.putPiece(piece)) {
                 predicate.removeIfPossible(piece.getFileInfo());
+                receivedFileCount.incrementAndGet();
             }
             final PieceSpec pieceSpec = piece.getInfo();
             synchronized (peers) {
@@ -166,6 +172,15 @@ final class ClearingHouse {
     }
 
     /**
+     * Returns the number of received files since this instance was created.
+     * 
+     * @return The number of received files.
+     */
+    long getReceivedFileCount() {
+        return receivedFileCount.get();
+    }
+
+    /**
      * Removes a file or category.
      * 
      * @param fileId
@@ -180,5 +195,15 @@ final class ClearingHouse {
         catch (final IOError e) {
             throw (IOException) e.getCause();
         }
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "ClearingHouse [archive=" + archive + "]";
     }
 }

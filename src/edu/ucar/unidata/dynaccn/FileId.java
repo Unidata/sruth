@@ -74,19 +74,6 @@ final class FileId implements Comparable<FileId>, Serializable {
     }
 
     /**
-     * Returns the file-identifier of the parent of this instance or {@code
-     * null} if no such parent exists.
-     * 
-     * @return The parent of this instance or {@code null}.
-     */
-    FileId getParent() {
-        final Path parentPath = path.getParent();
-        return null == parentPath
-                ? null
-                : new FileId(parentPath);
-    }
-
-    /**
      * Indicates if this instance includes a given instance (i.e., if the
      * pathname of the given instance starts with the pathname of this
      * instance).

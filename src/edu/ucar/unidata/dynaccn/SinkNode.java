@@ -61,7 +61,7 @@ final class SinkNode extends AbstractNode {
         }
 
         /**
-         * Submits a similar client for execution if appropriate.
+         * Submits an identical client for execution if appropriate.
          */
         @Override
         protected void done() {
@@ -77,6 +77,10 @@ final class SinkNode extends AbstractNode {
                     final Throwable cause = e.getCause();
                     logger.error("Client " + client + " died", cause);
                     if (!(cause instanceof Error || cause instanceof RuntimeException)) {
+                        /*
+                         * A checked-exception means that it might work next
+                         * time.
+                         */
                         final ServerInfo serverInfo = client.getServerInfo();
                         try {
                             Thread.sleep(30000);
@@ -151,19 +155,18 @@ final class SinkNode extends AbstractNode {
      * @param serverInfo
      *            Information on the server to which to connect.
      */
-    private void createClient(final ServerInfo serverInfo) {
+    private synchronized void createClient(final ServerInfo serverInfo) {
         final Client client = new Client(serverInfo, clearingHouse);
         final ClientTask clientTask = new ClientTask(client);
         completionService.submit(clientTask);
     }
 
     /**
-     * Executes this instance. Returns normally if all tasks complete normally
-     * or if the current thread is interrupted. Resubmits terminated clients if
-     * appropriate.
+     * Executes this instance. Returns normally if and only if all data was
+     * received. Replaces clients when appropriate.
      * 
      * @throws ExecutionException
-     *             if a fatal problem occurs.
+     *             if an insurmountable problem occurs during execution.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws RejectedExecutionException
@@ -190,7 +193,14 @@ final class SinkNode extends AbstractNode {
                 }
                 catch (final ExecutionException e) {
                     final Throwable cause = e.getCause();
-                    if (!(cause instanceof Error || cause instanceof RuntimeException)) {
+                    if (cause instanceof Error
+                            || cause instanceof RuntimeException) {
+                        /*
+                         * A checked exception caused creation of an identical
+                         * client; an unchecked exception means the client died
+                         * a horrible death due to an insurmountable problem
+                         * (e.g., NullPointerException).
+                         */
                         throw e;
                     }
                 }
@@ -200,6 +210,15 @@ final class SinkNode extends AbstractNode {
             executor.shutdownNow();
         }
         return null;
+    }
+
+    /**
+     * Returns the number of received files since {@link #call()} was called.
+     * 
+     * @return The number of received files since {@link #call()} was called.
+     */
+    public long getReceivedFileCount() {
+        return clearingHouse.getReceivedFileCount();
     }
 
     /*

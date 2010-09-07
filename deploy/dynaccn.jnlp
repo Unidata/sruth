@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jnlp spec="6.0+" 
+        codebase="https://www.unidata.ucar.edu/staff/steve/dynaccn"
+        <!-- codebase="file:///web/content/staff/steve/dynaccn" -->
+        href="dynaccn.jnlp">
+    <information>
+        <title>Unidata Data Distribution Application</title>
+        <vendor>University Corporation for Atmospheric Research</vendor>
+        <homepage href="http://www.unidata.ucar.edu/staff/steve/dynaccn"/>
+        <description kind="one-line">
+            Unidata application for subscribing to Internet data publications.
+        </description>
+        <description kind="tooltip">
+            Unidata data subscription application
+        </description>
+        <shortcut online="true">
+            <desktop/>
+            <menu submenu="Internet"/>
+        </shortcut>
+        <association extensions="udda" mime-type="application/x-udda">
+            <description>Unidata data subscription</description>
+        </association>
+    </information>
+    <resources>
+        <!-- <property name="jnlp.packEnabled" value="true"/> -->
+        <java version="1.7+"/>
+        <jar href="dynaccn.jar" main="true"/>
+    </resources>
+    <application-desc/>
+    <security>
+        <all-permissions/>
+    </security>
+    <update check="always" policy="prompt-update"/>
+</jnlp>

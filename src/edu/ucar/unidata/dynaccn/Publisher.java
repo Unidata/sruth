@@ -64,13 +64,17 @@ final class Publisher implements Callable<Void> {
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
+     * @param port
+     *            Number of the port on which the tracker should listen. If
+     *            non-positive, then the port will be chosen by the operating
+     *            system.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    Publisher(final Path rootDir) throws IOException {
+    Publisher(final Path rootDir, final int port) throws IOException {
         final Archive archive = new Archive(rootDir);
         sourceNode = new SourceNode(archive, Predicate.NOTHING);
-        tracker = new Tracker(sourceNode.getServerInfo());
+        tracker = new Tracker(port, sourceNode.getServerInfo());
     }
 
     /**
@@ -145,53 +149,102 @@ final class Publisher implements Callable<Void> {
     }
 
     /**
-     * Executes an instance of this class. Doesn't return.
+     * Executes an instance of this class. Doesn't return. Writes the tracker
+     * port number to the standard output stream.
+     * <p>
+     * Usage:
+     * 
+     * <pre>
+     * java ... edu.ucar.unidata.dynaccn.Publisher [-port &lt;port&gt;] rootDir
+     *     
+     * where:
+     *   &lt;port&gt;   Number of the port on which the tracker should listen.
+     *            If not specified or zero, then the port is chosen by the
+     *            operating system.
+     *   rootDir  Pathname of the root of the data archive.
+     * </pre>
      * <p>
      * Exit status:
      * 
      * <pre>
-     *   1  Invalid invocation
-     *   2  Invalid pathname of the root directory
-     *   3  Error serving data
+     * 1  Invalid invocation
+     * 2  Error occurred in publisher
+     * 3  Publisher was interrupted
      * </pre>
      * 
      * @param args
-     *            [0] Pathname of the root of the file-tree.
-     * @param args
-     *            [1] Pathname of the XML subscription file.
+     *            Invocation arguments.
      */
     public static void main(final String[] args) {
-        if (1 != args.length) {
-            logger.error("Invalid invocation");
-            logger.error("Usage: java ... "
-                    + Publisher.class.getCanonicalName() + " rootDir");
-            System.exit(1);
-        }
         Path rootDir = null;
-        try {
-            rootDir = Paths.get(args[0]);
+        int port = -1;
+        int status = 0;
+
+        for (int i = 0; 0 == status && i < args.length; i++) {
+            final String arg = args[i];
+            if ("-port".equals(arg)) {
+                try {
+                    port = Integer.parseInt(args[++i]);
+                    if (port < 0) {
+                        logger.error("Port number is too low: " + port);
+                        status = 1;
+                    }
+                    else if (port >= (1 << 16)) {
+                        logger.error("Port number is too high: " + port);
+                        status = 1;
+                    }
+                }
+                catch (final IndexOutOfBoundsException e) {
+                    logger.error("Port argument is missing");
+                    status = 1;
+                }
+            }
+            else {
+                if (i + 1 < args.length) {
+                    logger.error("Too many arguments");
+                    status = 1;
+                }
+                else {
+                    try {
+                        rootDir = Paths.get(arg);
+                    }
+                    catch (final InvalidPathException e) {
+                        logger.error(
+                                "Invalid pathname of root-directory: \"{}\"",
+                                arg);
+                        status = 1;
+                    }
+                }
+            }
         }
-        catch (final InvalidPathException e) {
-            logger.error("Invalid pathname of root-directory: \"{}\"", args[0]);
-            System.exit(2);
+        if (0 != status) {
+            logger.error("Usage: java ... "
+                    + Publisher.class.getCanonicalName()
+                    + " [-port <port>] rootDir");
         }
-        Publisher publisher = null;
-        try {
-            publisher = new Publisher(rootDir);
+        else {
+            Publisher publisher = null;
+            try {
+                publisher = new Publisher(rootDir, port);
+                try {
+                    System.out.println(publisher.getTrackerPort());
+                    System.out.flush();
+                    publisher.call();
+                }
+                catch (final ExecutionException e) {
+                    logger.error("Error executing " + publisher, e);
+                    status = 2;
+                }
+                catch (final InterruptedException e) {
+                    logger.info("Interrupted: " + publisher);
+                    status = 3;
+                }
+            }
+            catch (final Exception e) {
+                logger.error("Couldn't create publisher for " + rootDir, e);
+                status = 2;
+            }
         }
-        catch (final Exception e) {
-            logger.error("Couldn't create publisher for " + rootDir, e);
-            System.exit(3);
-        }
-        try {
-            System.out.println(publisher.getTrackerPort());
-            System.out.flush();
-            publisher.call();
-        }
-        catch (final Exception e) {
-            logger.error("Error executing " + publisher, e);
-            System.exit(3);
-        }
-        System.exit(0);
+        System.exit(status);
     }
 }

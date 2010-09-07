@@ -177,7 +177,7 @@ public class MultiClientTest {
         system(new String[] { "mkdir", "-p", "/tmp/client/series/1" });
         system(new String[] { "mkdir", "-p", "/tmp/client/series/2" });
         /*
-         * Create server.
+         * Create first server.
          */
         Archive archive = new Archive("/tmp/server");
         Server server = new Server(
@@ -187,7 +187,7 @@ public class MultiClientTest {
 
         /*
          * Create client/server pair that gets data from the first server and
-         * serves data to the second client.
+         * sends data to the second client.
          */
         archive = new Archive("/tmp/client/series/1");
         ClearingHouse clearingHouse = new ClearingHouse(archive,
@@ -199,7 +199,7 @@ public class MultiClientTest {
         final ServerInfo server_2_Info = server.getServerInfo();
 
         /*
-         * Create second client that gets data from the second server.
+         * Create second client that receives data from the second server.
          */
         archive = new Archive("/tmp/client/series/2");
         clearingHouse = new ClearingHouse(archive, Predicate.EVERYTHING);
@@ -350,21 +350,22 @@ public class MultiClientTest {
     @Test
     public void testNodeDelivery() throws IOException, InterruptedException,
             ExecutionException {
-        System.out.println("Node Delivery Test:");
+        System.out.println("SourceNode Delivery Test:");
         system(new String[] { "mkdir", "-p", "/tmp/client/node/1" });
         system(new String[] { "mkdir", "-p", "/tmp/client/node/2" });
         /*
          * Create the source node.
          */
         final Archive serverArchive = new Archive("/tmp/server");
-        final Node sourceNode = new Node(serverArchive, Predicate.NOTHING);
+        final SourceNode sourceNode = new SourceNode(serverArchive,
+                Predicate.NOTHING);
         /*
          * Create the sink nodes.
          */
-        final Node sinkNode1 = new Node(new Archive("/tmp/client/node/1"),
-                Predicate.EVERYTHING);
-        final Node sinkNode2 = new Node(new Archive("/tmp/client/node/2"),
-                Predicate.EVERYTHING);
+        final SinkNode sinkNode1 = new SinkNode(new Archive(
+                "/tmp/client/node/1"), Predicate.EVERYTHING);
+        final SinkNode sinkNode2 = new SinkNode(new Archive(
+                "/tmp/client/node/2"), Predicate.EVERYTHING);
         /*
          * Construct the network topology by hooking the nodes up.
          */
@@ -456,21 +457,22 @@ public class MultiClientTest {
     @Test
     public void testRemoval() throws IOException, InterruptedException,
             ExecutionException {
-        System.out.println("Node Delivery Test:");
+        System.out.println("SourceNode Delivery Test:");
         system(new String[] { "mkdir", "-p", "/tmp/client/removal/1" });
         system(new String[] { "mkdir", "-p", "/tmp/client/removal/2" });
         /*
          * Create the source node.
          */
         final Archive serverArchive = new Archive("/tmp/server");
-        final Node sourceNode = new Node(serverArchive, Predicate.NOTHING);
+        final SourceNode sourceNode = new SourceNode(serverArchive,
+                Predicate.NOTHING);
         /*
          * Create the sink nodes.
          */
-        final Node sinkNode1 = new Node(new Archive("/tmp/client/removal/1"),
-                Predicate.EVERYTHING);
-        final Node sinkNode2 = new Node(new Archive("/tmp/client/removal/2"),
-                Predicate.EVERYTHING);
+        final SinkNode sinkNode1 = new SinkNode(new Archive(
+                "/tmp/client/removal/1"), Predicate.EVERYTHING);
+        final SinkNode sinkNode2 = new SinkNode(new Archive(
+                "/tmp/client/removal/2"), Predicate.EVERYTHING);
         /*
          * Construct the network topology by hooking the nodes up.
          */

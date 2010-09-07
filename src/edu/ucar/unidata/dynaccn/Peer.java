@@ -17,10 +17,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.GuardedBy;
@@ -32,12 +29,13 @@ import org.slf4j.LoggerFactory;
 /**
  * Communicates with its remote counterpart.
  * 
- * Instances are thread-safe.
+ * Instances are thread-safe and should be submitted for execution to an
+ * {@link CancellingExecutor}.
  * 
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class Peer implements Callable<Void> {
+final class Peer extends BlockingTask<Void> {
     /**
      * The logging service.
      */
@@ -46,7 +44,12 @@ final class Peer implements Callable<Void> {
     /**
      * The executor service for tasks.
      */
-    private static final ExecutorService      executorService      = new CancellingExecutor();
+    private static final ExecutorService      executorService      = new CancellingExecutor(
+                                                                           0,
+                                                                           Integer.MAX_VALUE,
+                                                                           60L,
+                                                                           TimeUnit.SECONDS,
+                                                                           new SynchronousQueue<Runnable>());
     /**
      * The task manager.
      */
@@ -120,6 +123,8 @@ final class Peer implements Callable<Void> {
      */
     @Override
     public final Void call() throws ExecutionException, IOException {
+        final String origName = Thread.currentThread().getName();
+        Thread.currentThread().setName(toString());
         try {
             taskManager.submit(new RequestReceiver(connection));
             taskManager.submit(new RequestSender(connection));
@@ -146,9 +151,15 @@ final class Peer implements Callable<Void> {
         finally {
             taskManager.cancel();
             connection.close();
+            Thread.currentThread().setName(origName);
         }
 
         return null;
+    }
+
+    @Override
+    public void stop() {
+        connection.close();
     }
 
     /**
@@ -180,7 +191,7 @@ final class Peer implements Callable<Void> {
 
     /**
      * Handles the creation of a new local data by notifying the remote peer of
-     * the newly-available data.
+     * the newly-available data if appropriate.
      * 
      * @param spec
      *            Specification of the new data.
@@ -265,7 +276,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private static abstract class Receiver<T> extends StreamUsingTask<Void> {
+    private static abstract class Receiver<T> extends BlockingTask<Void> {
         /**
          * The input stream from the remote peer.
          */
@@ -334,7 +345,7 @@ final class Peer implements Callable<Void> {
                 // Implements thread interruption policy
             }
             catch (final IOException e) {
-                if (!isCancelled) {
+                if (!isCanceled()) {
                     throw e;
                 }
             }
@@ -413,7 +424,7 @@ final class Peer implements Callable<Void> {
          * Closes the input stream.
          */
         @Override
-        protected final void close() {
+        protected final void stop() {
             try {
                 inputStream.close();
             }
@@ -550,7 +561,7 @@ final class Peer implements Callable<Void> {
      * @author Steven R. Emmerson
      */
     @ThreadSafe
-    private static abstract class Sender<T> extends StreamUsingTask<Void> {
+    private static abstract class Sender<T> extends BlockingTask<Void> {
         /**
          * The output stream to the remote peer.
          */
@@ -594,7 +605,7 @@ final class Peer implements Callable<Void> {
                 // Implements thread interruption policy
             }
             catch (final IOException e) {
-                if (!isCancelled) {
+                if (!isCanceled()) {
                     throw e;
                 }
             }
@@ -647,7 +658,7 @@ final class Peer implements Callable<Void> {
          * Closes the output stream.
          */
         @Override
-        protected final void close() {
+        protected final void stop() {
             try {
                 outputStream.close();
             }
@@ -752,61 +763,6 @@ final class Peer implements Callable<Void> {
             final Piece piece = pieceQueue.take();
             return piece;
         }
-    }
-
-    /**
-     * An executor service that supports the cancellation of tasks that use
-     * sockets.
-     * 
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private static class CancellingExecutor extends ThreadPoolExecutor {
-        public CancellingExecutor() {
-            super(0, Integer.MAX_VALUE, 60L, TimeUnit.SECONDS,
-                    new SynchronousQueue<Runnable>());
-        }
-
-        @Override
-        protected <T> RunnableFuture<T> newTaskFor(final Callable<T> callable) {
-            if (callable instanceof StreamUsingTask<?>) {
-                return ((StreamUsingTask<T>) callable).newTask();
-            }
-            else {
-                return super.newTaskFor(callable);
-            }
-        }
-    }
-
-    /**
-     * A task that uses a socket and that returns a {@link RunnableFuture} whose
-     * {@link Future#cancel()} method closes the socket.
-     * 
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private static abstract class StreamUsingTask<T> implements Callable<T> {
-        protected volatile boolean isCancelled;
-
-        RunnableFuture<T> newTask() {
-            return new FutureTask<T>(this) {
-                @Override
-                public boolean cancel(final boolean mayInterruptIfRunning) {
-                    isCancelled = true;
-                    close();
-                    return super.cancel(mayInterruptIfRunning);
-                }
-            };
-        }
-
-        /**
-         * Closes the stream.
-         */
-        protected abstract void close();
     }
 
     /**

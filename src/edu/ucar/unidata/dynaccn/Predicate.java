@@ -14,13 +14,13 @@ import java.util.List;
 import net.jcip.annotations.GuardedBy;
 
 /**
- * A disjunction of filters for selecting data for a peer.
+ * A disjunction of filters for selecting files.
  * 
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-class Predicate implements Serializable {
+class Predicate implements Serializable, Iterable<Filter> {
     /**
      * The serial version ID.
      */
@@ -52,7 +52,7 @@ class Predicate implements Serializable {
 
                                                     @Override
                                                     public String toString() {
-                                                        return "Predicate.EVERYTHING";
+                                                        return "EVERYTHING";
                                                     }
 
                                                     private Object readResolve() {
@@ -86,7 +86,7 @@ class Predicate implements Serializable {
 
                                                     @Override
                                                     public String toString() {
-                                                        return "Predicate.NOTHING";
+                                                        return "NOTHING";
                                                     }
 
                                                     private Object readResolve() {
@@ -98,6 +98,12 @@ class Predicate implements Serializable {
      */
     @GuardedBy("this")
     private final List<Filter> filters          = new LinkedList<Filter>();
+
+    /**
+     * Constructs from nothing.
+     */
+    Predicate() {
+    }
 
     /**
      * Constructs from an array of filters.
@@ -117,6 +123,16 @@ class Predicate implements Serializable {
                 this.filters.add(filter);
             }
         }
+    }
+
+    /**
+     * Adds a filter.
+     * 
+     * @param filter
+     *            The filter to be added.
+     */
+    synchronized void add(final Filter filter) {
+        filters.add(filter);
     }
 
     /**
@@ -177,6 +193,11 @@ class Predicate implements Serializable {
      */
     synchronized boolean satisfiedByNothing() {
         return filters.isEmpty();
+    }
+
+    @Override
+    public Iterator<Filter> iterator() {
+        return filters.iterator();
     }
 
     /*

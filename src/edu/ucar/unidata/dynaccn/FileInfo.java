@@ -23,6 +23,10 @@ final class FileInfo implements Serializable {
      */
     private static final long   serialVersionUID = 1L;
     /**
+     * The default size of a canonical piece of data.
+     */
+    private static final int    PIECE_SIZE       = (1 << 17); // 131072
+    /**
      * The file identifier.
      */
     private final FileId        fileId;
@@ -38,6 +42,25 @@ final class FileInfo implements Serializable {
      * The last valid piece-index.
      */
     private final transient int lastIndex;
+
+    /**
+     * Constructs from information on the file. The size of the data-pieces will
+     * be the default piece size, {@link #getDefaultPieceSize()}.
+     * 
+     * @param fileId
+     *            The file identifier.
+     * @param fileSize
+     *            The size of the file in bytes.
+     * @throws NullPointerException
+     *             if {@code fileId} is {@code null}.
+     * @throws IllegalArgumentException
+     *             if {@code fileSize} is less than zero.
+     * @throws IllegalArgumentException
+     *             if {@code fileSize > 0}.
+     */
+    FileInfo(final FileId fileId, final long fileSize) {
+        this(fileId, fileSize, PIECE_SIZE);
+    }
 
     /**
      * Constructs from information on the file.
@@ -63,8 +86,8 @@ final class FileInfo implements Serializable {
             throw new IllegalArgumentException("Invalid file-size: " + fileSize);
         }
         if (0 == fileSize) {
-            lastIndex = -1;
-            pieceSize = 1;
+            lastIndex = 0;
+            pieceSize = 0;
         }
         else {
             if (pieceSize <= 0) {
@@ -76,6 +99,15 @@ final class FileInfo implements Serializable {
         this.fileId = fileId;
         this.fileSize = fileSize;
         this.pieceSize = pieceSize;
+    }
+
+    /**
+     * Returns the default size of a canonical piece of data.
+     * 
+     * @return The default size of a canonical piece of data.
+     */
+    static int getDefaultPieceSize() {
+        return PIECE_SIZE;
     }
 
     /**
@@ -93,7 +125,9 @@ final class FileInfo implements Serializable {
      * @return The size of the last file-piece.
      */
     private int lastSize() {
-        return (int) ((fileSize - 1) % pieceSize) + 1;
+        return (0 == pieceSize)
+                ? 0
+                : (int) ((fileSize - 1) % pieceSize) + 1;
     }
 
     /**
@@ -295,8 +329,8 @@ final class FileInfo implements Serializable {
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{filedId=" + fileId
-                + ", fileSize=" + fileSize + ", pieceSize=" + pieceSize + "}";
+        return getClass().getSimpleName() + " [filedId=" + fileId
+                + ",fileSize=" + fileSize + ",pieceSize=" + pieceSize + "]";
     }
 
     private Object readResolve() throws InvalidObjectException {

@@ -78,4 +78,47 @@ abstract class FilePieceSpecSet implements PieceSpecSet, Serializable {
     Path getPath() {
         return fileInfo.getPath();
     }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((fileInfo == null)
+                ? 0
+                : fileInfo.hashCode());
+        return result;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#equals(java.lang.Object)
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final FilePieceSpecSet other = (FilePieceSpecSet) obj;
+        if (fileInfo == null) {
+            if (other.fileInfo != null) {
+                return false;
+            }
+        }
+        else if (!fileInfo.equals(other.fileInfo)) {
+            return false;
+        }
+        return true;
+    }
 }

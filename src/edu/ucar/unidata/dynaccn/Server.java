@@ -8,8 +8,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -17,8 +17,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.GuardedBy;
 
@@ -39,15 +40,19 @@ final class Server implements Callable<Void> {
     private static final Logger                       logger           = LoggerFactory
                                                                                .getLogger(Server.class);
     /**
-     * Executes port listeners.
-     */
-    private static final ExecutorService              listenerExecutor = Executors
-                                                                               .newCachedThreadPool();
-    /**
      * Executes peers created by this instance.
      */
-    private static final ExecutorService              peerExecutor     = Executors
+    private final ExecutorService                     peerExecutor     = Executors
                                                                                .newCachedThreadPool();
+    /**
+     * Executes port listeners.
+     */
+    private final ExecutorService                     listenerExecutor = new CancellingExecutor(
+                                                                               Connection.SOCKET_COUNT,
+                                                                               Connection.SOCKET_COUNT,
+                                                                               0,
+                                                                               TimeUnit.SECONDS,
+                                                                               new LinkedBlockingQueue<Runnable>());
     /**
      * The port listeners.
      */
@@ -62,11 +67,6 @@ final class Server implements Callable<Void> {
      */
     @GuardedBy("itself")
     private final List<Peer>                          peers            = new LinkedList<Peer>();
-    /**
-     * The peer futures.
-     */
-    private final List<Future<?>>                     peerFutures      = Collections
-                                                                               .synchronizedList(new LinkedList<Future<?>>());
     /**
      * The set of client-specific connections.
      */
@@ -140,34 +140,47 @@ final class Server implements Callable<Void> {
     }
 
     /**
-     * Executes this instance and completes normally if and only if the current
-     * thread is interrupted.
+     * Returns the pathname of the root of the file-tree.
+     * 
+     * @return The pathname of the root of the file-tree.
+     */
+    Path getRootDir() {
+        return clearingHouse.getRootDir();
+    }
+
+    /**
+     * Executes this instance. Never completes normally.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
     @Override
-    public Void call() {
+    public Void call() throws InterruptedException {
+        final String origThreadName = Thread.currentThread().getName();
+        Thread.currentThread().setName(toString());
         try {
             for (final Listener listener : listeners) {
                 listenerManager.submit(listener);
             }
-            try {
-                listenerManager.waitUpon();
-            }
-            catch (final InterruptedException ignored) {
-                // Implements thread interruption policy
-            }
+            listenerManager.waitUpon();
         }
         finally {
             listenerManager.cancel();
-            for (final Future<?> future : peerFutures) {
-                future.cancel(true);
+            synchronized (peers) {
+                for (final Peer peer : peers) {
+                    peer.stop();
+                }
             }
+            peerExecutor.shutdownNow();
+            listenerExecutor.shutdownNow();
+            Thread.currentThread().setName(origThreadName);
         }
         return null;
     }
 
     /**
-     * Handles the creation of new local data by notifying all peers of the new
-     * data.
+     * Handles the creation of new local data by notifying all appropriate
+     * peers.
      * 
      * @param spec
      *            Specification of the new local data.
@@ -195,6 +208,18 @@ final class Server implements Callable<Void> {
         }
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "Server [clearingHouse=" + clearingHouse + ", getPorts()="
+                + Arrays.toString(getPorts()) + ", connections=("
+                + connections.size() + ")]";
+    }
+
     /**
      * Listens to a port for incoming connections.
      * 
@@ -202,7 +227,7 @@ final class Server implements Callable<Void> {
      * 
      * @author Steven R. Emmerson
      */
-    private class Listener implements Callable<Void> {
+    private class Listener extends BlockingTask<Void> {
         /**
          * The server socket.
          */
@@ -225,8 +250,7 @@ final class Server implements Callable<Void> {
                 try {
                     listenerSocket.close();
                 }
-                catch (final Exception e2) {
-                    // ignored
+                catch (final Exception ignored) {
                 }
                 throw e;
             }
@@ -234,8 +258,7 @@ final class Server implements Callable<Void> {
                 try {
                     listenerSocket.close();
                 }
-                catch (final Exception e2) {
-                    // ignored
+                catch (final Exception ignored) {
                 }
                 throw e;
             }
@@ -256,6 +279,8 @@ final class Server implements Callable<Void> {
          */
         @Override
         public Void call() throws IOException {
+            final String origThreadName = Thread.currentThread().getName();
+            Thread.currentThread().setName(toString());
             try {
                 for (;;) {
                     final Socket socket = listenerSocket.accept();
@@ -277,33 +302,33 @@ final class Server implements Callable<Void> {
                         /*
                          * Get the connection with this client.
                          */
-                        Connection connection = new ServerConnection();
-                        final Connection prevConnection = connections
-                                .putIfAbsent(clientId, connection);
-                        if (null != prevConnection) {
-                            connection = prevConnection;
+                        Connection conn = new ServerConnection();
+                        final Connection prevConn = connections.putIfAbsent(
+                                clientId, conn);
+                        if (null != prevConn) {
+                            conn = prevConn;
                         }
+                        final Connection connection = conn;
                         /*
                          * Add this socket to the connection and start the peer
                          * if ready.
                          */
                         if (connection.add(socket)) {
-                            logger.debug("Server: {}", connection);
+                            logger.info("Server open: {}", connection);
                             final Peer peer = new Peer(clearingHouse,
                                     connection);
                             synchronized (peers) {
                                 peers.add(peer);
                             }
-                            peerFutures.add(peerExecutor
-                                    .submit(new FutureTask<Void>(peer) {
-                                        @Override
-                                        protected void done() {
-                                            peerFutures.remove(this);
-                                            synchronized (peers) {
-                                                peers.remove(peer);
-                                            }
-                                        }
-                                    }));
+                            peerExecutor.submit(new FutureTask<Void>(peer) {
+                                @Override
+                                protected void done() {
+                                    logger.info("Server close: {}", connection);
+                                    synchronized (peers) {
+                                        peers.remove(peer);
+                                    }
+                                }
+                            });
                         }
                     }
                     catch (final IOException e) {
@@ -319,6 +344,7 @@ final class Server implements Callable<Void> {
                 catch (final IOException e) {
                     // ignored
                 }
+                Thread.currentThread().setName(origThreadName);
             }
         }
 
@@ -330,6 +356,26 @@ final class Server implements Callable<Void> {
          */
         void close() throws IOException {
             listenerSocket.close();
+        }
+
+        @Override
+        protected void stop() {
+            try {
+                close();
+            }
+            catch (final IOException ignored) {
+            }
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return getClass().getSimpleName() + " [listenerSocket="
+                    + listenerSocket + "]";
         }
     }
 

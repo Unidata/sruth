@@ -74,6 +74,7 @@ final class TaskManager<T> {
         }
         final Future<T> future = completionService.submit(task);
         futures.add(future);
+        notifyAll();
         return true;
     }
 
@@ -86,14 +87,13 @@ final class TaskManager<T> {
      * @throws InterruptedException
      *             if the current thread is interrupted.
      */
-    Future<T> next() throws InterruptedException {
-        synchronized (this) {
-            if (0 == futures.size()) {
-                return null;
-            }
+    synchronized Future<T> next() throws InterruptedException {
+        Future<T> future = null;
+        while (0 < futures.size()
+                && (future = completionService.poll()) == null) {
+            wait();
         }
-        final Future<T> future = completionService.take();
-        synchronized (this) {
+        if (null != future) {
             futures.remove(future);
         }
         return future;
@@ -142,5 +142,6 @@ final class TaskManager<T> {
             future.cancel(true);
         }
         isClosed = true;
+        notifyAll();
     }
 }

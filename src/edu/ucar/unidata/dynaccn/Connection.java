@@ -257,11 +257,11 @@ abstract class Connection {
 
     @Override
     public synchronized String toString() {
-        return getClass().getSimpleName() + "{remote="
-                + sockets[0].getInetAddress() + ", "
-                + sockets[0].getLocalPort() + "<=>" + sockets[0].getPort()
-                + ", " + sockets[1].getLocalPort() + "<=>"
-                + sockets[1].getPort() + ", " + sockets[2].getLocalPort()
-                + "<=>" + sockets[2].getPort() + "}";
+        return getClass().getSimpleName() + "[remote="
+                + sockets[0].getInetAddress() + ",localPorts=["
+                + sockets[0].getLocalPort() + "," + sockets[1].getLocalPort()
+                + "," + sockets[2].getLocalPort() + "]" + ",remotePorts=["
+                + sockets[0].getPort() + "," + sockets[1].getPort() + ","
+                + sockets[2].getPort() + "]]";
     }
 }

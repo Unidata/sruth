@@ -24,5 +24,4 @@ final class ClientConnection extends Connection {
     protected int getServerPort(final Socket socket) {
         return socket.getPort();
     }
-
 }

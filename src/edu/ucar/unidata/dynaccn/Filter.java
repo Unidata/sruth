@@ -6,7 +6,6 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.Serializable;
-import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -14,7 +13,7 @@ import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 
 /**
- * A conjunction of constraints on the attributes of a file.
+ * A filter for selecting a class of files.
  * 
  * Instances are immutable.
  * 
@@ -28,7 +27,7 @@ class Filter implements Serializable {
     /**
      * The filter that is satisfied by everything.
      */
-    static final Filter                 EVERYTHING       = new Filter("glob:**") {
+    static final Filter                 EVERYTHING       = new Filter("**") {
                                                              /**
                                                               * The serial
                                                               * version ID.
@@ -47,7 +46,7 @@ class Filter implements Serializable {
     /**
      * The filter that is satisfied by nothing.
      */
-    static final Filter                 NOTHING          = new Filter("glob:/") {
+    static final Filter                 NOTHING          = new Filter("/") {
                                                              /**
                                                               * The serial
                                                               * version ID.
@@ -76,13 +75,14 @@ class Filter implements Serializable {
                                                              }
                                                          };
     /**
-     * The original pattern-syntax and pattern.
+     * The original pattern.
      * 
-     * @serial The pattern-syntax and pattern.
+     * @serial The pattern.
      */
-    private final String                syntaxAndPattern;
+    private final String                pattern;
     /**
-     * The original pattern as a pathname.
+     * The original pattern as a pathname or {@code null} if the pattern isn't a
+     * valid pathname.
      */
     private volatile transient Path     patternPath;
     /**
@@ -93,26 +93,25 @@ class Filter implements Serializable {
     /**
      * Constructs from a pattern.
      * 
-     * @param syntaxAndPattern
-     *            The pattern-syntax and pattern as specified by
-     *            {@link FileSystem#getPathMatcher(String)}.
+     * @param pattern
+     *            The glob pattern as described by
+     *            {@link java.nio.file.FileSystem#getPathMatcher(String)}.
      * @throws IllegalArgumentException
-     *             if {@code syntaxAndPattern} is invalid.
+     *             if {@code glob} is invalid.
      * @throws NullPointerException
-     *             if {@code syntaxAndPattern == null}.
+     *             if {@code glob == null}.
      */
-    Filter(final String syntaxAndPattern) {
-        final int index = syntaxAndPattern.indexOf(':');
-        if (-1 == index) {
-            throw new IllegalArgumentException(syntaxAndPattern);
+    Filter(final String pattern) {
+        if (null == pattern) {
+            throw new NullPointerException();
         }
-        this.syntaxAndPattern = syntaxAndPattern;
+        this.pattern = pattern;
         try {
-            patternPath = Paths.get(syntaxAndPattern.substring(index + 1));
+            patternPath = Paths.get(pattern);
         }
         catch (final InvalidPathException ignored) {
         }
-        matcher = FileSystems.getDefault().getPathMatcher(syntaxAndPattern);
+        matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
     }
 
     /**
@@ -141,6 +140,6 @@ class Filter implements Serializable {
     }
 
     private Object readResolve() {
-        return new Filter(syntaxAndPattern);
+        return new Filter(pattern);
     }
 }

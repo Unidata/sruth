@@ -158,12 +158,12 @@ public class ClientTest {
         logger.info("testNodes():");
         system(new String[] { "mkdir", "-p", "/tmp/client/node" });
 
-        final Node sourceNode = new Node(new Archive(Paths.get("/tmp/server")),
-                Predicate.NOTHING);
+        final SourceNode sourceNode = new SourceNode(new Archive(Paths
+                .get("/tmp/server")), Predicate.NOTHING);
         final Future<Void> sourceFuture = start(sourceNode);
         final ServerInfo serverInfo = sourceNode.getServerInfo();
 
-        final Node sinkNode = new Node(new Archive(Paths
+        final SinkNode sinkNode = new SinkNode(new Archive(Paths
                 .get("/tmp/client/node")), Predicate.EVERYTHING);
         sinkNode.add(serverInfo);
         final Future<Void> sinkFuture = start(sinkNode);

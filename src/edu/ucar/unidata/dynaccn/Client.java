@@ -59,6 +59,16 @@ final class Client implements Callable<Void> {
     }
 
     /**
+     * Returns information on the server to which this instance will connect or
+     * has connected.
+     * 
+     * @return Information on the associated server.
+     */
+    ServerInfo getServerInfo() {
+        return serverInfo;
+    }
+
+    /**
      * Executes this instance and waits upon one of the following conditions: 1)
      * all data that can be received has been received; 2) an error occurs; or
      * 3) the current thread is interrupted. In any case, any and all subtasks
@@ -109,7 +119,9 @@ final class Client implements Callable<Void> {
              */
             connection.add(sockets[i]);
         }
-        logger.debug("Client: {}", connection);
-        return new Peer(clearingHouse, connection).call();
+        logger.info("Client open: {}", connection);
+        new Peer(clearingHouse, connection).call();
+        logger.info("Client close: {}", connection);
+        return null;
     }
 }

@@ -1,0 +1,64 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+  <HEAD>
+    <META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=iso-8859-1">
+    <TITLE>Unidata Data Distribution (UDD) Project</TITLE>
+    <META NAME="AUTHOR" CONTENT="Steve Emmerson">
+    <META NAME="DESCRIPTION" CONTENT="Installing and running the Unidata Data
+      Distribution package">
+    <META NAME="KEYWORDS" CONTENT="Installation, Unidata Data Distribution">
+    <META NAME="BOOKMARK" CONTENT="UDD">
+  </HEAD>
+  <BODY LANG="en-US" DIR="LTR">
+    <center> <h2>Unidata Data Distribution Project</h2> </center>
+    
+      <p>Perform the following steps to test the Unidata Data Distribution (UDD)
+        project:
+      
+      <ol>
+<!--
+        <li>Install Java 7 (which is not yet a production release)
+         on your system.
+        <a href="http://download.java.net/jdk7/">Click here</a> to go to the
+        Java 7 download page.
+        
+        <li>Install the Unidata Data Distribution package via Java Web Start by clicking this button
+          <script src="deployJava.js"></script>
+          <script>
+            var url = "dynaccn.jnlp";
+            deployJava.createWebStartLaunchButton(url);
+          </script>.
+-->
+     
+        <li><a href="http://dlc.sun.com.edgesuite.net/jdk7/binaries/index.html">
+          Install <b>Java 7</b> on your system</a>. Java 7 is not yet a
+          production release.
+        
+        <li>Install the Unidata Data Distribution system. Click on one of the
+          following and remember the installation directory:
+          <ul>
+            <li><a href="UDDsys_unix_0_0.sh">Unix installation</a>.
+              Have your browser use the <tt>sh</tt> shell to open 
+              the installer.
+            <li><a href="UDDsys_windows_0_0.exe">Windows installation</a>.
+          </ul>
+          
+        <li><p><a href="nexrad2-kftg.udda" type="application/x-udda">
+          Use the Unidata Data Distribution client (UDDclient)
+          to subscribe to
+          the last day's worth of NEXRAD Level II radar data from station KFTG
+          (Denver).</a>
+          Have your browser open files of mime type
+          <i>application/x-udda</i> with the just-installed
+          <tt>UDDclient</tt> utility, which is in the installation directory
+          of the previous step.
+      </ol>
+        
+<!--
+      <p>Or <a href="javascript:deployJava.launch('dynaccn.jnlp');">click here</a>.
+ 
+      <p>Or <a href="dynaccn.jnlp">click here</a>.
+-->
+
+  </BODY>
+</HTML>

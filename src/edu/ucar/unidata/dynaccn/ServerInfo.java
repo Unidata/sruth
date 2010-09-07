@@ -7,6 +7,7 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.Serializable;
 import java.net.InetAddress;
+import java.util.Arrays;
 
 /**
  * Information about a server
@@ -15,7 +16,7 @@ import java.net.InetAddress;
  * 
  * @author Steven R. Emmerson
  */
-final class ServerInfo implements Serializable {
+final class ServerInfo implements Serializable, Comparable<ServerInfo> {
     /**
      * The serial version ID.
      */
@@ -63,6 +64,87 @@ final class ServerInfo implements Serializable {
      */
     int[] getPorts() {
         return ports;
+    }
+
+    @Override
+    public int compareTo(final ServerInfo that) {
+        final byte[] thisBytes = inetAddress.getAddress();
+        final byte[] thatBytes = that.inetAddress.getAddress();
+        if (thisBytes.length < thatBytes.length) {
+            return -1;
+        }
+        if (thisBytes.length > thatBytes.length) {
+            return 1;
+        }
+        for (int i = 0; i < thisBytes.length; i++) {
+            if (thisBytes[i] < thatBytes[i]) {
+                return -1;
+            }
+            if (thisBytes[i] > thatBytes[i]) {
+                return 1;
+            }
+        }
+        for (int i = 0; i < ports.length; i++) {
+            if (ports[i] < that.ports[i]) {
+                return -1;
+            }
+            if (ports[i] > that.ports[i]) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((inetAddress == null)
+                ? 0
+                : inetAddress.hashCode());
+        result = prime * result + Arrays.hashCode(ports);
+        return result;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#equals(java.lang.Object)
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final ServerInfo other = (ServerInfo) obj;
+        if (inetAddress == null) {
+            if (other.inetAddress != null) {
+                return false;
+            }
+        }
+        return compareTo(other) == 0;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "ServerInfo [inetAddress=" + inetAddress + ", ports="
+                + Arrays.toString(ports) + "]";
     }
 
     private Object readResolve() {
