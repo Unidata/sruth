@@ -5,11 +5,11 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
@@ -182,21 +182,11 @@ public class PubSubTest {
      * Stops a task.
      * 
      * @param future
-     *            The future of the task to stop.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws ExecutionException
-     *             if the task terminated due to an error.
+     *            The future of the task to stop or {@code null}.
      */
-    private static void stop(final Future<Void> future)
-            throws InterruptedException, ExecutionException {
-        if (!future.cancel(true)) {
-            try {
-                future.get();
-            }
-            catch (final CancellationException e) {
-                throw new AssertionError(); // can't happen
-            }
+    private static void stop(final Future<Void> future) {
+        if (future != null) {
+            future.cancel(true);
         }
     }
 
@@ -226,7 +216,7 @@ public class PubSubTest {
         /*
          * Create and start the publisher.
          */
-        final Publisher publisher = new Publisher(PUB_ROOT);
+        final Publisher publisher = new Publisher(PUB_ROOT, PortNumberSet.ZERO);
         final Future<Void> pubFuture = start(publisher);
         /*
          * Publish some files before the subscribers are started.
@@ -280,29 +270,59 @@ public class PubSubTest {
         }
     }
 
-    // @Test
-    public void testLdm() throws IOException, InterruptedException,
-            ExecutionException {
+    @Test
+    public void testDynamicNetworking() throws IOException,
+            InterruptedException, ExecutionException {
+        final int MAX_SUBSCRIBERS = 3;
+        final int SLEEP_TIME = 2000;
+        final String SUBSCRIBER_ARCHIVE_PREFIX = "/tmp/SubscriberApp";
+        final int ROUND_COUNT = 3;
         /*
-         * Create and start the publisher.
+         * Create and start the publisher, using the LDM output directory as the
+         * archive.
          */
         final Path pubRoot = Paths.get("/tmp/publisher");
-        final Publisher publisher = new Publisher(pubRoot);
+        final Publisher publisher = new Publisher(pubRoot, PortNumberSet.ZERO);
         final Future<Void> pubFuture = start(publisher);
+
+        final List<Future<Void>> subFutures = new ArrayList<Future<Void>>(
+                MAX_SUBSCRIBERS);
+        for (int round = 0; round < ROUND_COUNT; round++) {
+            /*
+             * For each subscriber:
+             */
+            for (int subIndex = 0; subIndex < MAX_SUBSCRIBERS; subIndex++) {
+                int prevClientCount = publisher.getClientCount();
+                // Stop the previous instance if it exists.
+                if (subIndex < subFutures.size()) {
+                    stop(subFutures.get(subIndex));
+                    subFutures.remove(subIndex);
+                    Thread.sleep(SLEEP_TIME);
+                    Assert.assertEquals(prevClientCount - 1, publisher
+                            .getClientCount());
+                    prevClientCount--;
+                }
+                final Path subRoot = Paths.get(SUBSCRIBER_ARCHIVE_PREFIX
+                        + (subIndex + 1));
+                final Subscriber subscriber = new Subscriber(subRoot, publisher
+                        .getTrackerAddress(), Predicate.EVERYTHING);
+                subFutures.add(subIndex, start(subscriber));
+                Thread.sleep(SLEEP_TIME);
+                Assert.assertEquals(prevClientCount + 1, publisher
+                        .getClientCount());
+            }
+        }
+
         /*
-         * Create and start the subscriber.
+         * Stop all subscribers.
          */
-        final Path subRoot = Paths.get("/tmp/subscriber");
-        final Subscriber subscriber = new Subscriber(subRoot, publisher
-                .getTrackerAddress(), Predicate.EVERYTHING);
-        final Future<Void> subFuture = start(subscriber);
-
-        Thread.sleep(Long.MAX_VALUE);
+        for (final Future<Void> subFuture : subFutures) {
+            stop(subFuture);
+        }
 
         /*
-         * Stop the publisher and subscriber.
+         * Stop the publisher.
          */
         stop(pubFuture);
-        stop(subFuture);
     }
 }

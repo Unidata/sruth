@@ -7,7 +7,9 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
 import java.io.ObjectOutputStream;
+import java.io.OutputStream;
 import java.io.Serializable;
+import java.net.Socket;
 
 import net.jcip.annotations.NotThreadSafe;
 
@@ -19,7 +21,7 @@ import net.jcip.annotations.NotThreadSafe;
  * @author Steven R. Emmerson
  */
 @NotThreadSafe
-final class Inquisitor implements Serializable {
+final class Inquisitor implements Serializable, TrackerTask {
     /**
      * The serial version identifier.
      */
@@ -53,22 +55,33 @@ final class Inquisitor implements Serializable {
     }
 
     /**
-     * Interacts with a {@link Tracker} and with its remote node to obtain
-     * server information and to register its associated server.
+     * Interacts with a {@link Tracker} to obtain information on servers that
+     * can satisfy a data-request and to register the {@link SinkNode}'s server.
      * 
      * @param tracker
      *            The {@link Tracker} to use.
-     * @param oos
-     *            The connection to this instance's remote node.
+     * @param socket
+     *            The connection to this instance's sink-node.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void process(final Tracker tracker, final ObjectOutputStream oos)
+    public void process(final Tracker tracker, final Socket socket)
             throws IOException {
-        // TODO: vet the predicate against the source; reject if illegal
-        final Plumber plumber = tracker.getPlumber(predicate);
-        oos.writeObject(plumber);
-        tracker.register(serverInfo, predicate);
+        final OutputStream outputStream = socket.getOutputStream();
+        final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
+        try {
+            // TODO: vet the predicate against the source; reject if illegal
+            final Plumber plumber = tracker.getPlumber(predicate);
+            oos.writeObject(plumber);
+            tracker.register(serverInfo, predicate);
+        }
+        finally {
+            try {
+                oos.close();
+            }
+            catch (final IOException ignored) {
+            }
+        }
     }
 
     /*

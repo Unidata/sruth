@@ -9,7 +9,7 @@ import java.lang.reflect.Field;
  */
 
 /**
- * Utility string methods.
+ * Util string methods.
  * 
  * @author Steven R. Emmerson
  */

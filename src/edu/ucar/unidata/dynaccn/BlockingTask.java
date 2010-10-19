@@ -32,15 +32,11 @@ abstract class BlockingTask<T> implements Callable<T> {
         return new FutureTask<T>(this) {
             @Override
             public boolean cancel(final boolean mayInterruptIfRunning) {
-                privateStop();
+                isCanceled = true;
+                stop();
                 return super.cancel(mayInterruptIfRunning);
             }
         };
-    }
-
-    private final void privateStop() {
-        isCanceled = true;
-        stop();
     }
 
     /**

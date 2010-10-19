@@ -39,8 +39,6 @@ abstract class Connection {
      *            The socket to be added.
      * @return {@code true} if and only if this instance is complete (i.e., has
      *         all the necessary sockets).
-     * @throws IOException
-     *             if an I/O error occurs.
      * @throws IllegalArgumentException
      *             if the remote IP address of the socket doesn't equal that of
      *             the previously-added sockets.
@@ -49,7 +47,7 @@ abstract class Connection {
      * @throws NullPointerException
      *             if {@code socket} is {@code null}.
      */
-    final synchronized boolean add(final Socket socket) throws IOException {
+    synchronized boolean add(final Socket socket) {
         if (null == socket) {
             throw new NullPointerException();
         }
@@ -90,12 +88,12 @@ abstract class Connection {
      */
     synchronized void close() {
         for (final Socket socket : sockets) {
-            try {
-                if (null != socket && !socket.isClosed()) {
+            if (null != socket && !socket.isClosed()) {
+                try {
                     socket.close();
                 }
-            }
-            catch (final IOException e) {
+                catch (final IOException ignored) {
+                }
             }
         }
     }

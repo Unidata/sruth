@@ -96,7 +96,7 @@ public class ClientTest {
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Filter filter = new Filter("glob:server-file-2");
+        final Filter filter = new Filter("server-file-2");
         final Predicate predicate = new Predicate(new Filter[] { filter });
         archive = new Archive(Paths.get("/tmp/client/term"));
         final ClearingHouse clearingHouse = new ClearingHouse(archive,

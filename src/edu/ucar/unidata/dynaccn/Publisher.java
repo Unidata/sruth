@@ -7,14 +7,15 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.NotThreadSafe;
@@ -34,72 +35,94 @@ final class Publisher implements Callable<Void> {
     /**
      * The logger for this class.
      */
-    private static final Logger     logger          = LoggerFactory
-                                                            .getLogger(Subscriber.class);
+    private static final Logger                   logger          = LoggerFactory
+                                                                          .getLogger(Subscriber.class);
     /**
      * The source-node.
      */
-    private final SourceNode        sourceNode;
+    private final SourceNode                      sourceNode;
     /**
      * The tracker.
      */
-    private final Tracker           tracker;
+    private final Tracker                         tracker;
     /**
-     * The executorService service.
+     * The {@link ExecutorService} for the tracker and source-node tasks.
      */
-    private final ExecutorService   executorService = new CancellingExecutor(
-                                                            2,
-                                                            2,
-                                                            0,
-                                                            TimeUnit.SECONDS,
-                                                            new LinkedBlockingQueue<Runnable>());
+    private final ExecutorService                 executorService = new CancellingExecutor(
+                                                                          2,
+                                                                          2,
+                                                                          0,
+                                                                          TimeUnit.SECONDS,
+                                                                          new SynchronousQueue<Runnable>());
     /**
      * The task manager.
      */
-    private final TaskManager<Void> taskManager     = new TaskManager<Void>(
-                                                            executorService);
+    private final ExecutorCompletionService<Void> taskManager     = new ExecutorCompletionService<Void>(
+                                                                          executorService);
+    /**
+     * The data archive.
+     */
+    private final Archive                         archive;
 
     /**
-     * Constructs from the pathname of the root of the file-tree.
+     * Constructs from the pathname of the root of the file-tree, the tracker
+     * port number, and a range of candidate port numbers for the tracker and
+     * server.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
-     * @param port
-     *            Number of the port on which the tracker should listen. If
-     *            non-positive, then the port will be chosen by the operating
-     *            system.
+     * @param portSet
+     *            The set of candidate port numbers.
+     * @throws IOException
+     *             if an unused port in the given range couldn't be found.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null || predicate == null || portSet ==
+     *             null}.
+     * @throws SocketException
+     *             if a server-side socket couldn't be created.
      */
-    Publisher(final Path rootDir, final int port) throws IOException {
-        final Archive archive = new Archive(rootDir);
-        sourceNode = new SourceNode(archive, Predicate.NOTHING);
-        tracker = new Tracker(port, sourceNode.getServerInfo());
+    Publisher(final Path rootDir, final PortNumberSet portSet)
+            throws IOException {
+        archive = new Archive(rootDir);
+        sourceNode = new SourceNode(archive, Predicate.NOTHING, portSet);
+        tracker = new Tracker(portSet, sourceNode.getServerInfo());
+        sourceNode.addDisconnectListener(new Server.DisconnectListener() {
+            @Override
+            void clientDisconnected(final ServerInfo serverInfo) {
+                tracker.removeServer(serverInfo);
+            }
+        });
     }
 
     /**
      * Executes this instance. Never returns normally.
      * 
-     * @throws ExecutionException
-     *             if a task terminates due to an error.
      * @throws InterruptedException
      *             if the current thread is interrupted.
+     * @throws IOException
+     *             if an IO error occurs.
      */
-    public Void call() throws InterruptedException, ExecutionException {
+    public Void call() throws InterruptedException, IOException {
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         try {
             taskManager.submit(sourceNode);
             taskManager.submit(tracker);
-            taskManager.waitUpon();
+            taskManager.take();
         }
         catch (final RejectedExecutionException e) {
             throw new AssertionError(e);
         }
         finally {
-            taskManager.cancel();
             executorService.shutdownNow();
-            Thread.currentThread().setName(origThreadName);
+            try {
+                archive.close();
+            }
+            finally {
+                Thread.currentThread().setName(origThreadName);
+            }
         }
         return null;
     }
@@ -146,6 +169,15 @@ final class Publisher implements Callable<Void> {
      */
     PubFile newPubFile(final Path path) throws IOException {
         return sourceNode.newPubFile(path);
+    }
+
+    /**
+     * Returns the number of clients that this instance is serving.
+     * 
+     * @return The number of clients that this instance is serving.
+     */
+    int getClientCount() {
+        return sourceNode.getClientCount();
     }
 
     /**
@@ -225,15 +257,13 @@ final class Publisher implements Callable<Void> {
         else {
             Publisher publisher = null;
             try {
-                publisher = new Publisher(rootDir, port);
+                final PortNumberSet portSet = PortNumberSet.getInstance(port,
+                        port + 3);
+                publisher = new Publisher(rootDir, portSet);
                 try {
                     System.out.println(publisher.getTrackerPort());
                     System.out.flush();
                     publisher.call();
-                }
-                catch (final ExecutionException e) {
-                    logger.error("Error executing " + publisher, e);
-                    status = 2;
                 }
                 catch (final InterruptedException e) {
                     logger.info("Interrupted: " + publisher);

@@ -28,11 +28,17 @@ class Predicate implements Serializable, Iterable<Filter> {
     /**
      * The instance that's satisfied by everything.
      */
-    static final Predicate     EVERYTHING       = new Predicate(new Filter[0]) {
+    static final Predicate     EVERYTHING       = new Predicate(
+                                                        new Filter[] { Filter.EVERYTHING }) {
                                                     /**
                                                      * The serial version ID.
                                                      */
                                                     private static final long serialVersionUID = 1L;
+
+                                                    @Override
+                                                    void add(final Filter filter) {
+                                                        throw new UnsupportedOperationException();
+                                                    }
 
                                                     @Override
                                                     synchronized boolean satisfiedBy(
@@ -62,11 +68,17 @@ class Predicate implements Serializable, Iterable<Filter> {
     /**
      * The instance that's satisfied by nothing.
      */
-    static final Predicate     NOTHING          = new Predicate(new Filter[0]) {
+    static final Predicate     NOTHING          = new Predicate(
+                                                        new Filter[] { Filter.NOTHING }) {
                                                     /**
                                                      * The serial version ID.
                                                      */
                                                     private static final long serialVersionUID = 1L;
+
+                                                    @Override
+                                                    void add(final Filter filter) {
+                                                        throw new UnsupportedOperationException();
+                                                    }
 
                                                     @Override
                                                     synchronized boolean satisfiedBy(
@@ -163,7 +175,7 @@ class Predicate implements Serializable, Iterable<Filter> {
      * @throws NullPointerException
      *             if {@code pieceInfo == null}.
      */
-    boolean satisfiedBy(final PieceSpec pieceSpec) {
+    final boolean satisfiedBy(final PieceSpec pieceSpec) {
         return satisfiedBy(pieceSpec.getFileInfo());
     }
 
@@ -196,7 +208,7 @@ class Predicate implements Serializable, Iterable<Filter> {
     }
 
     @Override
-    public Iterator<Filter> iterator() {
+    public synchronized Iterator<Filter> iterator() {
         return filters.iterator();
     }
 

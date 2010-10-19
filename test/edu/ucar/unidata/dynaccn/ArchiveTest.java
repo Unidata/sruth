@@ -7,7 +7,6 @@ package edu.ucar.unidata.dynaccn;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -19,6 +18,7 @@ import java.util.Random;
 
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -46,7 +46,9 @@ public class ArchiveTest {
         }
     }
 
-    private static final String   ROOT_DIR   = "/tmp/archive";
+    private static final String   ROOT_DIR   = "/tmp/"
+                                                     + ArchiveTest.class
+                                                             .getSimpleName();
     private static final int      FILE_COUNT = 2048;
     private static final long     SEED       = System.currentTimeMillis();
 
@@ -59,7 +61,7 @@ public class ArchiveTest {
      */
     @BeforeClass
     public static void setUpBeforeClass() throws Exception {
-        system("rm", "-rf", ROOT_DIR);
+        Assert.assertEquals(0, Misc.system("rm", "-rf", ROOT_DIR));
     }
 
     /**
@@ -67,7 +69,7 @@ public class ArchiveTest {
      */
     @AfterClass
     public static void tearDownAfterClass() throws Exception {
-        system("rm", "-rf", ROOT_DIR);
+        Assert.assertEquals(0, Misc.system("rm", "-rf", ROOT_DIR));
     }
 
     /**
@@ -84,24 +86,6 @@ public class ArchiveTest {
     @After
     public void tearDown() throws Exception {
         archive.close();
-    }
-
-    /**
-     * Executes a system command.
-     * 
-     * @param cmd
-     *            The command to execute
-     * @throws IOException
-     * @throws InterruptedException
-     */
-    private static void system(final String... cmd) throws IOException,
-            InterruptedException {
-        final ProcessBuilder builder = new ProcessBuilder(cmd);
-        builder.inheritIO();
-        final Process process = builder.start();
-        assertNotNull(process);
-        final int status = process.waitFor();
-        assertEquals(0, status);
     }
 
     private Piece firstPiece() {

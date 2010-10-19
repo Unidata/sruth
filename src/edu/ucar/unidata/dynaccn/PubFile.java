@@ -81,7 +81,7 @@ final class PubFile {
      */
     void publish() throws IOException {
         channel.close();
-        final Path newPath = archive.reveal(hiddenPath);
+        final Path newPath = archive.getVisibleForm(hiddenPath);
         Files.createDirectories(newPath.getParent());
         hiddenPath.moveTo(newPath);
     }

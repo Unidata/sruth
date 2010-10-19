@@ -6,6 +6,8 @@
 package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.SocketException;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
@@ -14,8 +16,7 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
@@ -33,74 +34,6 @@ import org.slf4j.LoggerFactory;
 @ThreadSafe
 final class SinkNode extends AbstractNode {
     /**
-     * A task for executing a client.
-     * 
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class ClientTask extends FutureTask<Void> implements
-            Callable<Void> {
-        /**
-         * The associated client.
-         */
-        private final Client client;
-
-        /**
-         * Constructs from a client.
-         * 
-         * @param client
-         *            The client.
-         * @throws NullPointerException
-         *             if {@client == null}.
-         */
-        ClientTask(final Client client) {
-            super(client);
-            this.client = client;
-        }
-
-        /**
-         * Submits an identical client for execution if appropriate.
-         */
-        @Override
-        protected void done() {
-            if (!isCancelled()) {
-                try {
-                    get();
-                }
-                catch (final InterruptedException e) {
-                    // done() implies get() must immediately return
-                    throw new AssertionError(e);
-                }
-                catch (final ExecutionException e) {
-                    final Throwable cause = e.getCause();
-                    logger.error("Client " + client + " died", cause);
-                    if (!(cause instanceof Error || cause instanceof RuntimeException)) {
-                        /*
-                         * A checked-exception means that it might work next
-                         * time.
-                         */
-                        final ServerInfo serverInfo = client.getServerInfo();
-                        try {
-                            Thread.sleep(30000);
-                            createClient(serverInfo);
-                        }
-                        catch (final InterruptedException ignored) {
-                        }
-                    }
-                }
-            }
-        }
-
-        @Override
-        public Void call() {
-            run();
-            return null;
-        }
-    }
-
-    /**
      * The logging service.
      */
     private static final Logger                   logger            = LoggerFactory
@@ -111,12 +44,26 @@ final class SinkNode extends AbstractNode {
     @GuardedBy("this")
     private final Set<ServerInfo>                 serverInfos       = new TreeSet<ServerInfo>();
     /**
-     * The executor service for clients.
+     * The number of clients.
+     */
+    @GuardedBy("this")
+    private int                                   clientCount;
+    /**
+     * The target number of clients.
+     */
+    @GuardedBy("this")
+    private int                                   targetClientCount;
+    /**
+     * The sleep interval in seconds.
+     */
+    private final long                            sleepInterval     = 60;
+    /**
+     * The task execution service.
      */
     private final ExecutorService                 executor          = Executors
                                                                             .newCachedThreadPool();
     /**
-     * The task completion service for clients.
+     * The task completion service.
      */
     private final ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<Void>(
                                                                             executor);
@@ -136,7 +83,35 @@ final class SinkNode extends AbstractNode {
      */
     SinkNode(final Archive archive, final Predicate predicate)
             throws IOException {
-        super(archive, predicate);
+        this(archive, predicate, PortNumberSet.ZERO);
+    }
+
+    /**
+     * Constructs from the data archive, a specification of the locally-desired
+     * data, and a range of port numbers for the server.
+     * 
+     * If {@code minPort == 0 && maxPort == 0} then the operating-system will
+     * assign ephemeral ports.
+     * 
+     * @param archive
+     *            The data archive.
+     * @param predicate
+     *            Specification of the locally-desired data.
+     * @param portSet
+     *            The set of candidate port numbers.
+     * @throws IllegalArgumentException
+     *             if {@code minPort > maxPort}.
+     * @throws IOException
+     *             if an unused port in the given range couldn't be found.
+     * @throws NullPointerException
+     *             if {@code rootDir == null || predicate == null || portSet ==
+     *             null}.
+     * @throws SocketException
+     *             if a server-side socket couldn't be created.
+     */
+    SinkNode(final Archive archive, final Predicate predicate,
+            final PortNumberSet portSet) throws IOException {
+        super(archive, predicate, portSet);
     }
 
     /**
@@ -150,57 +125,139 @@ final class SinkNode extends AbstractNode {
     }
 
     /**
-     * Creates a client. Does all the necessary bookkeeping.
+     * Submits a client task for execution. Does nothing if the task execution
+     * service is shut down.
      * 
      * @param serverInfo
-     *            Information on the server to which to connect.
+     *            Information on the server to which the client shall connect.
      */
-    private synchronized void createClient(final ServerInfo serverInfo) {
-        final Client client = new Client(serverInfo, clearingHouse);
-        final ClientTask clientTask = new ClientTask(client);
-        completionService.submit(clientTask);
+    private synchronized void submitClient(final ServerInfo serverInfo) {
+        if (!executor.isShutdown()) {
+            final Client client = new Client(serverInfo, clearingHouse);
+            completionService.submit(new Callable<Void>() {
+                public Void call() throws ConnectException,
+                        InterruptedException, IOException {
+                    try {
+                        client.call();
+                        logger.debug("Client completed: {}", client);
+                    }
+                    catch (final ConnectException e) {
+                        logger.info(e.toString());
+                        Thread.sleep(30000);
+                        submitClient(client.getServerInfo());
+                        throw e;
+                    }
+                    catch (final IOException e) {
+                        logger.error("Client failure: " + client, e);
+                        throw e;
+                    }
+                    return null;
+                }
+            });
+        }
     }
 
     /**
      * Executes this instance. Returns normally if and only if all data was
      * received. Replaces clients when appropriate.
      * 
-     * @throws ExecutionException
-     *             if an insurmountable problem occurs during execution.
      * @throws InterruptedException
      *             if the current thread is interrupted.
-     * @throws RejectedExecutionException
-     *             if not enough threads are available.
+     * @throws IOException
+     *             if an I/O error occurs.
      */
-    @Override
-    public synchronized Void call() throws ExecutionException,
-            InterruptedException {
+    public Void call() throws IOException, InterruptedException {
         try {
-            final Future<Void> serverFuture = completionService.submit(server);
-            for (final ServerInfo serverInfo : serverInfos) {
-                createClient(serverInfo);
+            completionService.submit(server);
+            synchronized (this) {
+                for (final ServerInfo serverInfo : serverInfos) {
+                    submitClient(serverInfo);
+                }
             }
             for (;;) {
                 final Future<Void> future = completionService.take();
-                if (future.equals(serverFuture)) {
-                    future.get(); // will throw an ExecutionException
-                    throw new AssertionError();
-                }
                 try {
                     future.get();
-                    // A client has determined that all data has been received
+                    /*
+                     * The server won't return; therefore, a client must have
+                     * determined that all data has been received.
+                     */
                     break;
                 }
                 catch (final ExecutionException e) {
                     final Throwable cause = e.getCause();
-                    if (cause instanceof Error
-                            || cause instanceof RuntimeException) {
+                    if (cause instanceof ConnectException) {
+                        // task was resubmitted
+                    }
+                    else if (cause instanceof IOException) {
+                        throw (IOException) cause;
+                    }
+                    else if (cause instanceof InterruptedException) {
+                        break;
+                    }
+                    else {
+                        throw Util.launderThrowable(cause);
+                    }
+                }
+                catch (final InterruptedException e) {
+                    logger.debug("Interrupted");
+                    throw e;
+                }
+            }
+        }
+        finally {
+            synchronized (this) {
+                executor.shutdownNow();
+            }
+        }
+        return null;
+    }
+
+    public Void call2() throws InterruptedException, IOException {
+        final ExecutorService executor = Executors.newCachedThreadPool();
+        final ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<Void>(
+                executor);
+        try {
+            completionService.submit(server);
+            for (;;) {
+                synchronized (this) {
+                    // TODO: TOO SIMPLISTIC: MUST ACCOMMODATE CLIENT TERMINATION
+                    if (clientCount >= targetClientCount) {
+                        cancelWorstClient();
+                    }
+                    if (clientCount < targetClientCount) {
+                        startNewClients(completionService);
+                        startDownloadCounters();
+                    }
+                }
+                final Future<Void> future = completionService.poll(
+                        sleepInterval, TimeUnit.SECONDS);
+                if (future != null && !future.isCancelled()) {
+                    try {
+                        future.get();
                         /*
-                         * A checked exception caused creation of an identical
-                         * client; an unchecked exception means the client died
-                         * a horrible death due to an insurmountable problem
-                         * (e.g., NullPointerException).
+                         * The server won't return; therefore, a client must
+                         * have determined that all data has been received.
                          */
+                        break;
+                    }
+                    catch (final ExecutionException e) {
+                        final Throwable cause = e.getCause();
+                        if (cause instanceof ConnectException) {
+                            // task was resubmitted
+                        }
+                        else if (cause instanceof IOException) {
+                            throw (IOException) cause;
+                        }
+                        else if (cause instanceof InterruptedException) {
+                            break;
+                        }
+                        else {
+                            throw Util.launderThrowable(cause);
+                        }
+                    }
+                    catch (final InterruptedException e) {
+                        logger.debug("Interrupted");
                         throw e;
                     }
                 }
@@ -212,13 +269,35 @@ final class SinkNode extends AbstractNode {
         return null;
     }
 
+    private void startDownloadCounters() {
+        // TODO Auto-generated method stub
+    }
+
+    private void cancelWorstClient() {
+        // TODO Auto-generated method stub
+    }
+
+    private synchronized void startNewClients(
+            final ExecutorCompletionService<Void> completionService) {
+        // TODO Auto-generated method stub
+    }
+
     /**
      * Returns the number of received files since {@link #call()} was called.
      * 
      * @return The number of received files since {@link #call()} was called.
      */
-    public long getReceivedFileCount() {
+    long getReceivedFileCount() {
         return clearingHouse.getReceivedFileCount();
+    }
+
+    /**
+     * Returns the current number of peers to which this instance is connected.
+     * 
+     * @return The current number of peers to which this instance is connected.
+     */
+    int getPeerCount() {
+        return clearingHouse.getPeerCount();
     }
 
     /*

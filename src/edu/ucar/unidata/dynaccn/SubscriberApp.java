@@ -23,6 +23,7 @@ import java.util.concurrent.FutureTask;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -30,6 +31,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.UIManager;
@@ -58,7 +60,8 @@ public final class SubscriberApp {
     private final class UpdateTask extends SwingWorker<Void, Void> {
         @Override
         protected Void doInBackground() {
-            long count = 0;
+            long fileCount = 0;
+            int peerCount = 0;
             while (!isCancelled()) {
                 try {
                     Thread.sleep(1000);
@@ -66,9 +69,13 @@ public final class SubscriberApp {
                 catch (final InterruptedException e) {
                     break; // treat as termination request
                 }
-                final long oldCount = count;
-                count = subscriber.getReceivedFileCount();
-                firePropertyChange(RECEIVED_FILE_COUNT, oldCount, count);
+                final long oldCount = fileCount;
+                fileCount = subscriber.getReceivedFileCount();
+                firePropertyChange(RECEIVED_FILE_COUNT, oldCount, fileCount);
+
+                final int oldPeerCount = peerCount;
+                peerCount = subscriber.getPeerCount();
+                firePropertyChange(PEER_COUNT, oldPeerCount, peerCount);
             }
             return null;
         }
@@ -121,8 +128,8 @@ public final class SubscriberApp {
     /**
      * The user preferences.
      */
-    private static final Preferences prefs                  = Preferences
-                                                                    .userNodeForPackage(SubscriberApp.class);
+    private static final Preferences prefs                  = PreferencesFactory
+                                                                    .userNodeForClass(SubscriberApp.class);
     /**
      * The name of the root directory preference.
      */
@@ -136,9 +143,23 @@ public final class SubscriberApp {
      */
     private static final String      Y_POSITION             = "yPosition";
     /**
-     * The name of the property that's the number of received files.
+     * The name of the preference that's the number of received files.
      */
     private static final String      RECEIVED_FILE_COUNT    = "receivedFileCount";
+    /**
+     * The name of the preference that's the number of peers.
+     */
+    private static final String      PEER_COUNT             = "peerCount";
+    /**
+     * The name of the preference that's the minimum potential port number for
+     * the server.
+     */
+    private static final String      MIN_PORT               = "minPort";
+    /**
+     * The name of the preference that's the maximum potential port number for
+     * the server.
+     */
+    private static final String      MAX_PORT               = "maxPort";
     /**
      * The pathname of the root directory of the archive.
      */
@@ -180,6 +201,10 @@ public final class SubscriberApp {
      */
     private final JLabel             receivedFileCountField = new JLabel("0");
     /**
+     * The number of connected peers.
+     */
+    private final JLabel             peerCountField         = new JLabel("0");
+    /**
      * The updating task.
      */
     private UpdateTask               updateTask;
@@ -191,6 +216,22 @@ public final class SubscriberApp {
      * The thread on which the subscriber executes.
      */
     private SubscriberTask           subscriberTask;
+    /**
+     * The minimum potential port number for the server.
+     */
+    private int                      minPort;
+    /**
+     * The maximum potential port number for the server.
+     */
+    private int                      maxPort;
+    /**
+     * The text field for the minimum potential port number for the server.
+     */
+    private final JTextField         minPortField;
+    /**
+     * The text field for the maximum potential port number for the server.
+     */
+    private final JTextField         maxPortField;
 
     /**
      * Constructs from the pathname of a subscription file.
@@ -204,8 +245,8 @@ public final class SubscriberApp {
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code path == null || rootPane == null || doneListener ==
-     *             null}.
+     *             if {@code path == null || container == null || doneListener
+     *             == null}.
      * @throws ParserConfigurationException
      *             if a parser for the subscription file can't be created.
      * @throws SAXException
@@ -228,11 +269,14 @@ public final class SubscriberApp {
                 .toString());
         final String rootDirPref = prefs.get(ROOT_DIR, System
                 .getProperty("user.home")
-                + File.pathSeparator + "subscriptionApp");
+                + File.separator + this.getClass().getSimpleName());
         rootDir = new File(rootDirPref);
+        minPort = prefs.getInt(MIN_PORT, 1);
+        maxPort = prefs.getInt(MAX_PORT, PortNumberSet.MAX_PORT_NUMBER);
         final JLabel rootDirLbl = new JLabel("Archive:");
         rootDirField = new JLabel(rootDir.toString());
         final JLabel receivedFileCountLbl = new JLabel("Received Files:");
+        final JLabel peerCountLbl = new JLabel("Peer Count:");
 
         changeButton = new JButton("Change...");
         changeButton.setMnemonic('h');
@@ -243,6 +287,30 @@ public final class SubscriberApp {
                 chooseRootDir();
             }
         });
+
+        final JLabel minPortLbl = new JLabel("Min:");
+        minPortField = new JTextField(Integer.toString(
+                PortNumberSet.MAX_PORT_NUMBER).length());
+        minPortField.setText(Integer.toString(minPort));
+        minPortField.setToolTipText("Minimum potential port (1 - "
+                + PortNumberSet.MAX_PORT_NUMBER + ")");
+        final JPanel minPortPanel = new JPanel();
+        new BoxLayout(minPortPanel, BoxLayout.X_AXIS);
+        minPortPanel.add(minPortLbl);
+        minPortPanel.add(minPortField);
+
+        final JLabel maxPortLbl = new JLabel("Max:");
+        maxPortField = new JTextField(Integer.toString(
+                PortNumberSet.MAX_PORT_NUMBER).length());
+        maxPortField.setText(Integer.toString(maxPort));
+        maxPortField.setToolTipText("Maximum potential port (1 - "
+                + PortNumberSet.MAX_PORT_NUMBER + ")");
+        final JPanel maxPortPanel = new JPanel();
+        new BoxLayout(maxPortPanel, BoxLayout.X_AXIS);
+        maxPortPanel.add(maxPortLbl);
+        maxPortPanel.add(maxPortField);
+
+        final JLabel portRangeLbl = new JLabel("Server Port Range:");
 
         final JButton cancelButton = new JButton("Cancel");
         cancelButton.setMnemonic('C');
@@ -272,8 +340,13 @@ public final class SubscriberApp {
         topPanel.add(rootDirLbl, "align right");
         topPanel.add(rootDirField);
         topPanel.add(changeButton);
+        topPanel.add(portRangeLbl);
+        topPanel.add(minPortPanel);
+        topPanel.add(maxPortPanel);
         topPanel.add(receivedFileCountLbl);
         topPanel.add(receivedFileCountField, "span");
+        topPanel.add(peerCountLbl);
+        topPanel.add(peerCountField, "span");
         botPanel.setLayout(new MigLayout("wrap 2"));
         botPanel.add(cancelButton, new CC().alignX("right").sizeGroup("1"));
         botPanel.add(executeButton, new CC().alignX("right").sizeGroup("1"));
@@ -348,17 +421,23 @@ public final class SubscriberApp {
             throw new AssertionError();
         }
         changeButton.setEnabled(false);
-        prefs.put(ROOT_DIR, rootDir.toString());
+        minPort = Integer.parseInt(minPortField.getText());
+        maxPort = Integer.parseInt(maxPortField.getText());
         try {
-            prefs.flush();
-        }
-        catch (final BackingStoreException e) {
-            logger.error("Unable to save archive location preference", e);
-        }
-        botPanel.removeAll();
-        try {
+            final PortNumberSet portSet = PortNumberSet.getInstance(minPort,
+                    maxPort);
+            prefs.put(ROOT_DIR, rootDir.toString());
+            prefs.putInt(MIN_PORT, minPort);
+            prefs.putInt(MAX_PORT, maxPort);
+            try {
+                prefs.flush();
+            }
+            catch (final BackingStoreException e) {
+                logger.error("Unable to save preferences", e);
+            }
+            botPanel.removeAll();
             subscriber = new Subscriber(rootDir.toPath(), subscription
-                    .getTrackerAddress(), subscription.getPredicate());
+                    .getTrackerAddress(), subscription.getPredicate(), portSet);
             final JButton terminateButton = new JButton("Terminate");
             terminateButton.setMnemonic('T');
             terminateButton.addActionListener(new ActionListener() {
@@ -373,18 +452,23 @@ public final class SubscriberApp {
             updateTask.addPropertyChangeListener(new PropertyChangeListener() {
                 @Override
                 public void propertyChange(final PropertyChangeEvent evt) {
-                    receivedFileCountField
-                            .setText(evt.getNewValue().toString());
+                    if (RECEIVED_FILE_COUNT.equals(evt.getPropertyName())) {
+                        receivedFileCountField.setText(evt.getNewValue()
+                                .toString());
+                    }
+                    else if (PEER_COUNT.equals(evt.getPropertyName())) {
+                        peerCountField.setText(evt.getNewValue().toString());
+                    }
                 }
             }); // received on AWT EDT
             updateTask.execute();
             subscriberTask = new SubscriberTask();
             new Thread(subscriberTask).start();
         }
-        catch (final IOException e) {
-            logger.error("Fatal error", e);
+        catch (final Throwable t) {
+            logger.error("Fatal error", t);
             JOptionPane.showMessageDialog(null, "I'm sorry, but I "
-                    + "encountered the following fatal error:\n" + e,
+                    + "encountered the following fatal error:\n" + t,
                     getClass().getSimpleName(), JOptionPane.ERROR_MESSAGE);
             doneListener.actionPerformed(null);
         }
@@ -398,16 +482,14 @@ public final class SubscriberApp {
             updateTask.cancel(true);
         }
         if (null != subscriberTask) {
-            if (!subscriberTask.isDone()) {
-                subscriberTask.cancel(true);
-            }
-            else {
+            if (!subscriberTask.cancel(true)) {
                 try {
                     subscriberTask.get();
                 }
                 catch (final ExecutionException e) {
-                    logger.error("Execution failure in subscriber task", e
-                            .getCause());
+                    final Throwable cause = e.getCause();
+                    logger.error("Execution failure in subscriber task", cause);
+                    throw Util.launderThrowable(cause);
                 }
                 catch (final InterruptedException ignored) {
                 }

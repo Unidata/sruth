@@ -139,6 +139,16 @@ class Filter implements Serializable {
         return fileInfo.getPath().equals(patternPath);
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "Filter [pattern=" + pattern + "]";
+    }
+
     private Object readResolve() {
         return new Filter(pattern);
     }

@@ -22,11 +22,11 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
      */
     private static final long serialVersionUID = 1L;
     /**
-     * The IP address of the host executing the server
+     * The IP address of the host executing the client or server.
      */
     private final InetAddress inetAddress;
     /**
-     * The port numbers on which the server is listening.
+     * The port numbers that the client or server is using.
      */
     private final int[]       ports;
 
@@ -44,8 +44,15 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
         if (null == inetAddress || null == ports) {
             throw new NullPointerException();
         }
+        if (Connection.SOCKET_COUNT != ports.length) {
+            throw new IllegalArgumentException();
+        }
         this.inetAddress = inetAddress;
         this.ports = ports;
+    }
+
+    private Object readResolve() {
+        return new ServerInfo(inetAddress, ports);
     }
 
     /**
@@ -53,7 +60,7 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
      * 
      * @return The IP address of the host on which the server is running.
      */
-    InetAddress getInetAddress() {
+    protected final InetAddress getInetAddress() {
         return inetAddress;
     }
 
@@ -62,12 +69,43 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
      * 
      * @return The port numbers on which the server is listening.
      */
-    int[] getPorts() {
+    protected final int[] getPorts() {
         return ports;
     }
 
     @Override
-    public int compareTo(final ServerInfo that) {
+    public final int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((inetAddress == null)
+                ? 0
+                : inetAddress.hashCode());
+        result = prime * result + Arrays.hashCode(ports);
+        return result;
+    }
+
+    @Override
+    public final boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final ServerInfo other = (ServerInfo) obj;
+        if (inetAddress == null) {
+            if (other.inetAddress != null) {
+                return false;
+            }
+        }
+        return compareTo(other) == 0;
+    }
+
+    @Override
+    public final int compareTo(final ServerInfo that) {
         final byte[] thisBytes = inetAddress.getAddress();
         final byte[] thatBytes = that.inetAddress.getAddress();
         if (thisBytes.length < thatBytes.length) {
@@ -95,59 +133,9 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
         return 0;
     }
 
-    /*
-     * (non-Javadoc)
-     * 
-     * @see java.lang.Object#hashCode()
-     */
     @Override
-    public int hashCode() {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + ((inetAddress == null)
-                ? 0
-                : inetAddress.hashCode());
-        result = prime * result + Arrays.hashCode(ports);
-        return result;
-    }
-
-    /*
-     * (non-Javadoc)
-     * 
-     * @see java.lang.Object#equals(java.lang.Object)
-     */
-    @Override
-    public boolean equals(final Object obj) {
-        if (this == obj) {
-            return true;
-        }
-        if (obj == null) {
-            return false;
-        }
-        if (getClass() != obj.getClass()) {
-            return false;
-        }
-        final ServerInfo other = (ServerInfo) obj;
-        if (inetAddress == null) {
-            if (other.inetAddress != null) {
-                return false;
-            }
-        }
-        return compareTo(other) == 0;
-    }
-
-    /*
-     * (non-Javadoc)
-     * 
-     * @see java.lang.Object#toString()
-     */
-    @Override
-    public String toString() {
-        return "ServerInfo [inetAddress=" + inetAddress + ", ports="
-                + Arrays.toString(ports) + "]";
-    }
-
-    private Object readResolve() {
-        return new ServerInfo(inetAddress, ports);
+    public final String toString() {
+        return getClass().getSimpleName() + " [inetAddress=" + inetAddress
+                + ", ports=" + Arrays.toString(ports) + "]";
     }
 }

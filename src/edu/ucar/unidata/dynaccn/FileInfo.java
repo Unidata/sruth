@@ -9,6 +9,7 @@ import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.nio.file.Path;
 import java.util.Iterator;
+import java.util.prefs.Preferences;
 
 /**
  * Information about a file.
@@ -21,11 +22,25 @@ final class FileInfo implements Serializable {
     /**
      * The serial version identifier.
      */
-    private static final long   serialVersionUID = 1L;
+    private static final long   serialVersionUID     = 1L;
     /**
      * The default size of a canonical piece of data.
      */
-    private static final int    PIECE_SIZE       = (1 << 17); // 131072
+    private static final int    PIECE_SIZE           = (1 << 17);   // 131072
+    /**
+     * The key of the time-to-live preference, {@value} .
+     */
+    public static final String  TIME_TO_LIVE_KEY     = "timeToLive";
+    /**
+     * The default time-to-live. Set from the {@link #TIME_TO_LIVE_KEY}
+     * preference.
+     */
+    public static final int     TIME_TO_LIVE;
+    /**
+     * The default time-to-live if the time-to-live preference,
+     * {@link #TIME_TO_LIVE_KEY}, can't be obtained. {@value} seconds.
+     */
+    public static final int     DEFAULT_TIME_TO_LIVE = 3600;
     /**
      * The file identifier.
      */
@@ -42,6 +57,20 @@ final class FileInfo implements Serializable {
      * The last valid piece-index.
      */
     private final transient int lastIndex;
+    /**
+     * The time-to-live in seconds.
+     */
+    private final int           timeToLive;
+
+    static {
+        final Preferences prefs = Preferences
+                .userNodeForPackage(FileInfo.class);
+        TIME_TO_LIVE = prefs.getInt(TIME_TO_LIVE_KEY, DEFAULT_TIME_TO_LIVE);
+        if (TIME_TO_LIVE <= 0) {
+            throw new IllegalArgumentException(
+                    "Invalid time-to-live preference: " + TIME_TO_LIVE);
+        }
+    }
 
     /**
      * Constructs from information on the file. The size of the data-pieces will
@@ -78,7 +107,34 @@ final class FileInfo implements Serializable {
      * @throws IllegalArgumentException
      *             if {@code fileSize > 0 && pieceSize <= 0}.
      */
-    FileInfo(final FileId fileId, final long fileSize, int pieceSize) {
+    FileInfo(final FileId fileId, final long fileSize, final int pieceSize) {
+        this(fileId, fileSize, pieceSize, TIME_TO_LIVE);
+    }
+
+    /**
+     * Constructs from information on the file. The time-to-live attribute will
+     * be the default, {@link #TIME_TO_LIVE}.
+     * 
+     * @param fileId
+     *            The file identifier.
+     * @param fileSize
+     *            The size of the file in bytes.
+     * @param pieceSize
+     *            The size of a piece of the file in bytes.
+     * @param timeToLive
+     *            The time for the file to live in seconds. A value of {@code
+     *            -1} means indefinitely.
+     * @throws NullPointerException
+     *             if {@code fileId} is {@code null}.
+     * @throws IllegalArgumentException
+     *             if {@code fileSize} is less than zero.
+     * @throws IllegalArgumentException
+     *             if {@code fileSize > 0 && pieceSize <= 0}.
+     * @throws IllegalArgumentException
+     *             if {@code timeToLive <= 0}.
+     */
+    FileInfo(final FileId fileId, final long fileSize, int pieceSize,
+            final int timeToLive) {
         if (null == fileId) {
             throw new NullPointerException();
         }
@@ -96,9 +152,14 @@ final class FileInfo implements Serializable {
             }
             lastIndex = (int) ((fileSize - 1) / pieceSize);
         }
+        if (timeToLive < -1 || timeToLive == 0) {
+            throw new IllegalArgumentException("Invalid time-to-live: "
+                    + timeToLive);
+        }
         this.fileId = fileId;
         this.fileSize = fileSize;
         this.pieceSize = pieceSize;
+        this.timeToLive = timeToLive;
     }
 
     /**
@@ -217,6 +278,15 @@ final class FileInfo implements Serializable {
     }
 
     /**
+     * Returns the time-to-live attribute, in seconds.
+     * 
+     * @return the time-to-live attribute, in seconds.
+     */
+    int getTimeToLive() {
+        return timeToLive;
+    }
+
+    /**
      * Returns the offset, in bytes, to the start of the file-piece with the
      * given piece-index.
      * 
@@ -290,6 +360,7 @@ final class FileInfo implements Serializable {
                 : fileId.hashCode());
         result = prime * result + (int) (fileSize ^ (fileSize >>> 32));
         result = prime * result + pieceSize;
+        result = prime * result + timeToLive;
         return result;
     }
 
@@ -324,18 +395,22 @@ final class FileInfo implements Serializable {
         if (pieceSize != other.pieceSize) {
             return false;
         }
+        if (timeToLive != other.timeToLive) {
+            return false;
+        }
         return true;
     }
 
     @Override
     public String toString() {
         return getClass().getSimpleName() + " [filedId=" + fileId
-                + ",fileSize=" + fileSize + ",pieceSize=" + pieceSize + "]";
+                + ",fileSize=" + fileSize + ",pieceSize=" + pieceSize
+                + ",timeToLive=" + timeToLive + "]";
     }
 
     private Object readResolve() throws InvalidObjectException {
         try {
-            return new FileInfo(fileId, fileSize, pieceSize);
+            return new FileInfo(fileId, fileSize, pieceSize, timeToLive);
         }
         catch (final Exception e) {
             throw (InvalidObjectException) new InvalidObjectException(

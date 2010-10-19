@@ -5,8 +5,6 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.IOException;
-
 import net.jcip.annotations.ThreadSafe;
 
 /**
@@ -18,14 +16,4 @@ import net.jcip.annotations.ThreadSafe;
  */
 @ThreadSafe
 interface RemovalNotice extends Notice {
-    /**
-     * Processes the file specifications of this instance by means of a local
-     * peer.
-     * 
-     * @param peer
-     *            The local peer.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    void processYourself(final Peer peer) throws IOException;
 }

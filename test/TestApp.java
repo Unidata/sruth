@@ -6,7 +6,11 @@ import javax.swing.JFrame;
 import javax.swing.JRootPane;
 import javax.swing.UIManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public final class TestApp {
+    static private Logger  logger = LoggerFactory.getLogger(TestApp.class);
     private ActionListener listener;
 
     TestApp(final JRootPane rootPane) {
@@ -14,9 +18,8 @@ public final class TestApp {
             final JFileChooser chooser = new JFileChooser();
             chooser.addActionListener(new ActionListener() {
                 public void actionPerformed(final ActionEvent e) {
-                    System.out.println("Action=" + e.paramString());
-                    System.out.println("Selected File="
-                            + chooser.getSelectedFile());
+                    logger.info("Action=" + e.paramString());
+                    logger.info("Selected File=" + chooser.getSelectedFile());
                     if (null != listener) {
                         listener.actionPerformed(new ActionEvent(this,
                                 ActionEvent.ACTION_PERFORMED, "done"));

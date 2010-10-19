@@ -10,14 +10,17 @@ import java.io.IOError;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.file.FileSystemException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.StandardWatchEventKind;
 import java.nio.file.WatchEvent;
@@ -30,6 +33,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.NotThreadSafe;
@@ -47,33 +51,6 @@ import org.slf4j.LoggerFactory;
  */
 @ThreadSafe
 final class Archive {
-    private final class DiskFileMap extends LinkedHashMap<Path, DiskFile> {
-        /**
-         * The serial version identifier .
-         */
-        private static final long serialVersionUID = 1L;
-
-        private DiskFileMap() {
-            super(16, 0.75f, true);
-        }
-
-        @Override
-        protected boolean removeEldestEntry(
-                final Map.Entry<Path, DiskFile> entry) {
-            if (diskFiles.size() > MAX_OPEN_FILES) {
-                final DiskFile diskFile = entry.getValue();
-                try {
-                    entry.getValue().close();
-                }
-                catch (final IOException e) {
-                    logger.error("Couldn't close file " + diskFile, e);
-                }
-                return true;
-            }
-            return false;
-        }
-    }
-
     /**
      * Watches for newly-created files in the file-tree.
      * 
@@ -199,14 +176,15 @@ final class Archive {
          *             if an I/O error occurs.
          */
         private void removedFile(final Path path) throws IOException {
-            final Path relativePath = rootDir.relativize(path);
-            final FileId fileId = new FileId(relativePath);
             final WatchKey k = keys.remove(path);
             if (null != k) {
                 dirs.remove(k);
                 k.cancel();
             }
-            server.removed(fileId);
+            // Obviated by addition of file-deleter to this class.
+            // final Path relativePath = rootDir.relativize(path);
+            // final FileId fileId = new FileId(relativePath);
+            // server.removed(fileId);
         }
 
         /**
@@ -267,168 +245,7 @@ final class Archive {
     }
 
     /**
-     * A data-file that resides on a disk.
-     * 
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class DiskFile {
-        /**
-         * The set of existing pieces.
-         */
-        @GuardedBy("this")
-        private FiniteBitSet        indexes;
-        /**
-         * The pathname of the file.
-         */
-        @GuardedBy("this")
-        private Path                path;
-        /**
-         * The I/O channel for the file.
-         */
-        @GuardedBy("this")
-        private SeekableByteChannel channel;
-
-        /**
-         * Constructs from a pathname and the number of pieces in the file. If
-         * the file exists, then it is opened read-only; otherwise, it is opened
-         * as a writable, hidden file.
-         * 
-         * @param path
-         *            The pathname of the file.
-         * @param pieceCount
-         *            The number of pieces in the file.
-         * @throws FileNotFoundException
-         *             if the file doesn't exist and can't be created.
-         * @throws NullPointerException
-         *             if {@code path == null}.
-         */
-        DiskFile(Path path, final int pieceCount) throws IOException {
-            synchronized (this) {
-                if (path.exists()) {
-                    channel = path.newByteChannel(StandardOpenOption.READ);
-                    indexes = new CompleteBitSet(pieceCount);
-                }
-                else {
-                    path = pathname.hide(path);
-                    Files.createDirectories(path.getParent());
-                    // DSYNC isn't used because the file is closed when complete
-                    channel = path
-                            .newByteChannel(StandardOpenOption.READ,
-                                    StandardOpenOption.WRITE,
-                                    StandardOpenOption.CREATE);
-                    indexes = FiniteBitSet.newInstance(pieceCount);
-                }
-                this.path = path;
-            }
-        }
-
-        /**
-         * Writes a piece of data.
-         * 
-         * @param piece
-         *            The piece of data.
-         * @return {@code true} if and only if the file is complete, in which
-         *         case the file is closed.
-         * @throws FileNotFoundException
-         *             if the file has been deleted.
-         * @throws IOException
-         *             if an I/O error occurs.
-         * @throws NullPointerException
-         *             if {@code piece == null}.
-         */
-        synchronized boolean putPiece(final Piece piece) throws IOException {
-            if (!path.exists()) {
-                throw new FileNotFoundException();
-            }
-            else {
-                final int index = piece.getIndex();
-                final boolean isComplete;
-
-                if (indexes.isSet(index)) {
-                    isComplete = false;
-                }
-                else {
-                    channel.position(piece.getOffset());
-                    final ByteBuffer buf = ByteBuffer.wrap(piece.getData());
-                    while (buf.hasRemaining()) {
-                        channel.write(buf);
-                    }
-
-                    indexes = indexes.setBit(index);
-                    isComplete = indexes.areAllSet();
-
-                    if (isComplete) {
-                        channel.close();
-                        final Path newPath = pathname.reveal(path);
-                        Files.createDirectories(newPath.getParent());
-                        path.moveTo(newPath);
-                        channel = newPath
-                                .newByteChannel(StandardOpenOption.READ);
-                        path = newPath;
-                    }
-                }
-
-                return isComplete;
-            }
-        }
-
-        /**
-         * Indicates if the disk file contains a particular piece of data.
-         * 
-         * @param index
-         *            Index of the piece of data.
-         * @return {@code true} if and only if the disk file contains the piece
-         *         of data.
-         */
-        synchronized boolean hasPiece(final int index) {
-            return indexes.isSet(index);
-        }
-
-        /**
-         * Returns a piece of data.
-         * 
-         * @param pieceSpec
-         *            Information on the piece of data.
-         * @throws FileNotFoundException
-         *             if the file has been deleted.
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        synchronized Piece getPiece(final PieceSpec pieceSpec)
-                throws IOException {
-            if (!path.exists()) {
-                throw new FileNotFoundException();
-            }
-            else {
-                final byte[] data = new byte[pieceSpec.getSize()];
-                final ByteBuffer buf = ByteBuffer.wrap(data);
-
-                channel.position(pieceSpec.getOffset());
-                int nread;
-                do {
-                    nread = channel.read(buf);
-                } while (nread != -1 && buf.hasRemaining());
-
-                return new Piece(pieceSpec, data);
-            }
-        }
-
-        /**
-         * Closes this instance.
-         * 
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        synchronized void close() throws IOException {
-            channel.close();
-        }
-    }
-
-    /**
-     * Utility class for hiding and revealing files based on pathnames.
+     * Util class for hiding and revealing files based on pathnames.
      * 
      * Instances are thread-safe.
      * 
@@ -495,6 +312,298 @@ final class Archive {
     }
 
     /**
+     * A data-file that resides on a disk.
+     * 
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class DiskFile {
+        /**
+         * The set of existing pieces.
+         */
+        @GuardedBy("lock")
+        private FiniteBitSet        indexes;
+        /**
+         * The pathname of the file.
+         */
+        @GuardedBy("lock")
+        private Path                path;
+        /**
+         * The I/O channel for the file.
+         */
+        @GuardedBy("lock")
+        private SeekableByteChannel channel;
+        /**
+         * Whether or not the file is or should be writable.
+         */
+        @GuardedBy("lock")
+        private boolean             writable;
+        /**
+         * The lock for this instance.
+         */
+        private final ReentrantLock lock = new ReentrantLock();
+
+        /**
+         * Constructs from a pathname and the number of pieces in the file. If
+         * the file exists, then it is opened read-only; otherwise, it is opened
+         * as a writable, but hidden, file.
+         * 
+         * @param path
+         *            The pathname of the file.
+         * @param pieceCount
+         *            The number of pieces in the file.
+         * @throws FileNotFoundException
+         *             if the file doesn't exist and can't be created.
+         * @throws FileSystemException
+         *             if too many files are open.
+         * @throws NullPointerException
+         *             if {@code path == null}.
+         */
+        DiskFile(final Path path, final int pieceCount)
+                throws FileSystemException, IOException {
+            lock.lock();
+            try {
+                if (path.exists()) {
+                    this.path = path;
+                    writable = false;
+                    open();
+                    indexes = new CompleteBitSet(pieceCount);
+                }
+                else {
+                    this.path = pathname.hide(path);
+                    Files.createDirectories(path.getParent());
+                    writable = true;
+                    open();
+                    indexes = FiniteBitSet.newInstance(pieceCount);
+                }
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Locks this instance.
+         */
+        void lock() {
+            lock.lock();
+        }
+
+        /**
+         * Unlocks this instance.
+         */
+        void unlock() {
+            lock.unlock();
+        }
+
+        /**
+         * Opens the file.
+         * 
+         * @throws FileSystemException
+         *             if too many files are open.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private void open() throws FileSystemException, IOException {
+            lock.lock();
+            try {
+                if (channel == null) {
+                    if (!writable) {
+                        channel = path.newByteChannel(StandardOpenOption.READ);
+                    }
+                    else {
+                        Files.createDirectories(path.getParent());
+                        channel = path.newByteChannel(StandardOpenOption.READ,
+                                StandardOpenOption.WRITE,
+                                StandardOpenOption.CREATE);
+                    }
+                }
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Writes a piece of data. If the data-piece completes the file, then
+         * the file is moved from the hidden file-tree to the visible file-tree
+         * in a manner that is robust in the face of removal of necessary
+         * directories by another thread.
+         * 
+         * @param piece
+         *            The piece of data.
+         * @return {@code true} if and only if the file is complete, in which
+         *         case the file is closed.
+         * @throws FileSystemException
+         *             if too many files are open.
+         * @throws IOException
+         *             if an I/O error occurs.
+         * @throws NullPointerException
+         *             if {@code piece == null}.
+         */
+        boolean putPiece(final Piece piece) throws FileSystemException,
+                IOException {
+            lock.lock();
+            try {
+                final int index = piece.getIndex();
+                final boolean isComplete;
+                if (indexes.isSet(index)) {
+                    isComplete = false;
+                }
+                else {
+                    open();
+                    channel.position(piece.getOffset());
+                    final ByteBuffer buf = ByteBuffer.wrap(piece.getData());
+                    while (buf.hasRemaining()) {
+                        channel.write(buf);
+                    }
+                    indexes = indexes.setBit(index);
+                    isComplete = indexes.areAllSet();
+                    if (isComplete) {
+                        final Path newPath = pathname.reveal(path);
+                        for (;;) {
+                            try {
+                                Files.createDirectories(newPath.getParent());
+                                break;
+                            }
+                            catch (final NoSuchFileException e) {
+                                // A directory in the path was just deleted
+                            }
+                        }
+                        close();
+                        for (;;) {
+                            try {
+                                path.moveTo(newPath,
+                                        StandardCopyOption.ATOMIC_MOVE);
+                                final int timeToLive = piece.getTimeToLive();
+                                if (timeToLive >= 0) {
+                                    /*
+                                     * TODO: make the combination of future
+                                     * file-deletion and file moving more robust
+                                     * in the face of power failures and very
+                                     * short lifetimes.
+                                     */
+                                    fileDeleter.delete(newPath,
+                                            1000 * timeToLive);
+                                }
+                                break;
+                            }
+                            catch (final NoSuchFileException e) {
+                                // A directory in the path was just deleted
+                            }
+                        }
+                        path = newPath;
+                        writable = false;
+                    }
+                }
+                return isComplete;
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Indicates if the disk file contains a particular piece of data.
+         * 
+         * @param index
+         *            Index of the piece of data.
+         * @return {@code true} if and only if the disk file contains the piece
+         *         of data.
+         */
+        boolean hasPiece(final int index) {
+            lock.lock();
+            try {
+                return indexes.isSet(index);
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Returns a piece of data.
+         * 
+         * @param pieceSpec
+         *            Information on the piece of data.
+         * @throws FileSystemException
+         *             if too many files are open.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        Piece getPiece(final PieceSpec pieceSpec) throws FileSystemException,
+                IOException {
+            lock.lock();
+            try {
+                final byte[] data = new byte[pieceSpec.getSize()];
+                final ByteBuffer buf = ByteBuffer.wrap(data);
+                open();
+                channel.position(pieceSpec.getOffset());
+                int nread;
+                do {
+                    nread = channel.read(buf);
+                } while (nread != -1 && buf.hasRemaining());
+                return new Piece(pieceSpec, data);
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Closes this instance. Does nothing if the file is already closed.
+         * 
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        void close() throws IOException {
+            lock.lock();
+            try {
+                if (channel != null) {
+                    channel.close();
+                    channel = null;
+                }
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+    }
+
+    private final class DiskFileMap extends LinkedHashMap<Path, DiskFile> {
+        /**
+         * The serial version identifier .
+         */
+        private static final long serialVersionUID = 1L;
+
+        private DiskFileMap() {
+            super(16, 0.75f, true);
+        }
+
+        @Override
+        protected boolean removeEldestEntry(
+                final Map.Entry<Path, DiskFile> entry) {
+            if (size() > MAX_OPEN_FILES) {
+                final DiskFile diskFile = entry.getValue();
+                diskFile.lock();
+                try {
+                    diskFile.close();
+                    diskFiles.remove(entry.getKey());
+                }
+                catch (final IOException e) {
+                    logger.error("Couldn't close file " + diskFile, e);
+                }
+                finally {
+                    diskFile.unlock();
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
      * The logger for this class.
      */
     private static final Logger logger         = LoggerFactory
@@ -510,7 +619,7 @@ final class Archive {
     /**
      * The maximum number of open files.
      */
-    private static final int    MAX_OPEN_FILES = 512;
+    private static final int    MAX_OPEN_FILES = 128;
     /**
      * The pathname utility for hidden pathnames.
      */
@@ -524,6 +633,24 @@ final class Archive {
      * The pathname of the root of the file-tree.
      */
     private final Path          rootDir;
+    /**
+     * The file-deleter.
+     */
+    private final FileDeleter   fileDeleter;
+
+    /**
+     * Constructs from the pathname of the root of the file-tree.
+     * 
+     * @param rootDir
+     *            The pathname of the root of the file-tree.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null}.
+     */
+    Archive(final String rootDir) throws IOException {
+        this(Paths.get(rootDir));
+    }
 
     /**
      * Constructs from the pathname of the root of the file-tree.
@@ -548,28 +675,23 @@ final class Archive {
          * 
          * but the given method doesn't exist in reality. Hence, the following:
          */
-        final Boolean hidden = (Boolean) hiddenDir.getAttribute("dos:hidden",
-                LinkOption.NOFOLLOW_LINKS);
-        if (null != hidden && !hidden) {
-            // The file-system is DOS and the hidden directory isn't hidden
-            hiddenDir.setAttribute("dos:hidden", Boolean.TRUE,
-                    LinkOption.NOFOLLOW_LINKS);
+        try {
+            final Boolean hidden = (Boolean) hiddenDir.getAttribute(
+                    "dos:hidden", LinkOption.NOFOLLOW_LINKS);
+            if (null != hidden && !hidden) {
+                // The file-system is DOS and the hidden directory isn't hidden
+                hiddenDir.setAttribute("dos:hidden", Boolean.TRUE,
+                        LinkOption.NOFOLLOW_LINKS);
+            }
+        }
+        catch (final FileSystemException ignored) {
+            // The file-system isn't DOS
         }
         this.rootDir = rootDir;
-    }
-
-    /**
-     * Constructs from the pathname of the root of the file-tree.
-     * 
-     * @param rootDir
-     *            The pathname of the root of the file-tree.
-     * @throws IOException
-     *             if an I/O error occurs.
-     * @throws NullPointerException
-     *             if {@code rootDir == null}.
-     */
-    Archive(final String rootDir) throws IOException {
-        this(Paths.get(rootDir));
+        final Path fileDeletionQueuePath = hiddenDir
+                .resolve("fileDeletionQueue");
+        this.fileDeleter = new FileDeleter(rootDir, new FileDeletionQueue(
+                fileDeletionQueuePath));
     }
 
     /**
@@ -582,18 +704,22 @@ final class Archive {
     }
 
     /**
-     * Returns the disk-file associated with a file. Creates the instance if it
-     * doesn't already exist.
+     * Returns the disk-file associated with a file. Creates the disk-file if it
+     * doesn't already exist. The disk-file is returned in a locked state.
      * 
      * @param fileInfo
      *            Information on the file
-     * @return The associated instance.
+     * @return The associated, locked disk-file
+     * @throws FileSystemException
+     *             if too many files are open. The map is now empty and all
+     *             files are closed.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
      *             if {@code fileInfo == null}.
      */
-    private DiskFile getDiskFile(final FileInfo fileInfo) throws IOException {
+    private DiskFile getDiskFile(final FileInfo fileInfo)
+            throws FileSystemException, IOException {
         DiskFile diskFile;
         final Path path = fileInfo.getPath();
         synchronized (diskFiles) {
@@ -602,9 +728,49 @@ final class Archive {
                 /*
                  * This file can't be open because it doesn't have an entry.
                  */
-                diskFile = new DiskFile(rootDir.resolve(path), fileInfo
-                        .getPieceCount());
+                for (;;) {
+                    try {
+                        diskFile = new DiskFile(rootDir.resolve(path), fileInfo
+                                .getPieceCount());
+                        break;
+                    }
+                    catch (final FileSystemException e) {
+                        // Too many open files
+                        if (removeLru() == null) {
+                            throw e;
+                        }
+                    }
+                }
                 diskFiles.put(path, diskFile);
+            }
+            diskFile.lock();
+        }
+        return diskFile;
+    }
+
+    /**
+     * Removes the least-recently-used (LRU) disk-file from the map: gets the
+     * LRU disk-file, removes it from the map, and closes it.
+     * 
+     * @return The removed disk-file or {@code null} if the map is empty.
+     * @throws IOException
+     *             if an I/O error occurs.
+     */
+    private DiskFile removeLru() throws IOException {
+        DiskFile diskFile;
+        synchronized (diskFiles) {
+            final Iterator<DiskFile> iter = diskFiles.values().iterator();
+            if (!iter.hasNext()) {
+                return null;
+            }
+            diskFile = iter.next();
+            diskFile.lock();
+            try {
+                iter.remove();
+                diskFile.close();
+            }
+            finally {
+                diskFile.unlock();
             }
         }
         return diskFile;
@@ -616,14 +782,32 @@ final class Archive {
      * @param piece
      *            Piece of data to be written.
      * @return {@code true} if and only if the file is now complete.
+     * @throws FileNotFoundException
+     *             if the destination file doesn't exist.
+     * @throws FileSystemException
+     *             if too many files are open.
      * @throws IOException
      *             if an I/O error occurred.
      * @throws NullPointerException
      *             if {@code piece == null}.
      */
-    boolean putPiece(final Piece piece) throws IOException {
+    boolean putPiece(final Piece piece) throws FileSystemException, IOException {
         final DiskFile diskFile = getDiskFile(piece.getFileInfo());
-        return diskFile.putPiece(piece);
+        try {
+            for (;;) {
+                try {
+                    return diskFile.putPiece(piece);
+                }
+                catch (final FileSystemException e) {
+                    if (diskFile.equals(removeLru())) {
+                        throw e;
+                    }
+                }
+            }
+        }
+        finally {
+            diskFile.unlock();
+        }
     }
 
     /**
@@ -632,11 +816,29 @@ final class Archive {
      * @param pieceSpec
      *            Information on the piece of data.
      * @return The piece of data.
+     * @throws FileSystemException
+     *             if too many files are open.
      * @throws IOException
      *             if an I/O error occurred.
      */
-    Piece getPiece(final PieceSpec pieceSpec) throws IOException {
-        return getDiskFile(pieceSpec.getFileInfo()).getPiece(pieceSpec);
+    Piece getPiece(final PieceSpec pieceSpec) throws FileSystemException,
+            IOException {
+        final DiskFile diskFile = getDiskFile(pieceSpec.getFileInfo());
+        try {
+            for (;;) {
+                try {
+                    return diskFile.getPiece(pieceSpec);
+                }
+                catch (final FileSystemException e) {
+                    if (diskFile.equals(removeLru())) {
+                        throw e;
+                    }
+                }
+            }
+        }
+        finally {
+            diskFile.unlock();
+        }
     }
 
     /**
@@ -647,85 +849,20 @@ final class Archive {
      * @param pieceSpec
      *            Specification of the piece of data.
      * @return {@code true} if and only if the piece of data exists.
+     * @throws FileSystemException
+     *             if too many files are open.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    boolean exists(final PieceSpec pieceSpec) throws IOException {
-        return getDiskFile(pieceSpec.getFileInfo()).hasPiece(
-                pieceSpec.getIndex());
-    }
-
-    /**
-     * Recursively visits all the file-based data-specifications in a directory
-     * that match a selection criteria. Doesn't visit files in hidden
-     * directories.
-     * 
-     * @param root
-     *            The directory to recursively walk.
-     * @param consumer
-     *            The consumer of file-based data-specifications.
-     * @param predicate
-     *            The selection criteria.
-     */
-    private void walkDirectory(final Path root,
-            final FilePieceSpecSetConsumer consumer, final Predicate predicate) {
-        final EnumSet<FileVisitOption> opts = EnumSet.of(
-                FileVisitOption.FOLLOW_LINKS, FileVisitOption.DETECT_CYCLES);
-        Files.walkFileTree(root, opts, Integer.MAX_VALUE,
-                new SimpleFileVisitor<Path>() {
-                    @Override
-                    public FileVisitResult preVisitDirectory(final Path dir) {
-                        return pathname.isHidden(dir)
-                                ? FileVisitResult.SKIP_SUBTREE
-                                : FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult visitFile(final Path path,
-                            final BasicFileAttributes attr) {
-                        if (attr.isRegularFile()) {
-                            final FileId fileId = new FileId(rootDir
-                                    .relativize(path));
-                            final FileInfo fileInfo = new FileInfo(fileId, attr
-                                    .size(), PIECE_SIZE);
-                            if (predicate.satisfiedBy(fileInfo)) {
-                                consumer.consume(FilePieceSpecSet.newInstance(
-                                        new FileInfo(fileId, attr.size(),
-                                                PIECE_SIZE), true));
-                            }
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-    }
-
-    /**
-     * Visits all the file-based data-specifications in the archive that match a
-     * selection criteria. Doesn't visit files in hidden directories.
-     * 
-     * @param consumer
-     *            The consumer of file-based data-specifications.
-     * @param predicate
-     *            The selection criteria.
-     */
-    void walkArchive(final FilePieceSpecSetConsumer consumer,
-            final Predicate predicate) {
-        walkDirectory(rootDir, consumer, predicate);
-    }
-
-    /**
-     * Watches the archive for new files and removed files and directories.
-     * Ignores hidden directories. Doesn't return.
-     * 
-     * @param server
-     *            The server.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws IOException
-     */
-    void watchArchive(final Server server) throws IOException,
-            InterruptedException {
-        new FileWatcher(server);
+    boolean exists(final PieceSpec pieceSpec) throws FileSystemException,
+            IOException {
+        final DiskFile diskFile = getDiskFile(pieceSpec.getFileInfo());
+        try {
+            return diskFile.hasPiece(pieceSpec.getIndex());
+        }
+        finally {
+            diskFile.unlock();
+        }
     }
 
     /**
@@ -800,7 +937,7 @@ final class Archive {
      *            The pathname whose hidden form is to be returned.
      * @return The hidden form of {@code path}.
      */
-    Path hide(final Path path) {
+    Path getHiddenForm(final Path path) {
         return pathname.hide(path);
     }
 
@@ -811,7 +948,7 @@ final class Archive {
      *            The hidden pathname whose visible form is to be returned.
      * @return The visible form of {@code path}.
      */
-    Path reveal(final Path path) {
+    Path getVisibleForm(final Path path) {
         return pathname.reveal(path);
     }
 
@@ -824,21 +961,98 @@ final class Archive {
      * @return The corresponding absolute, hidden pathname.
      */
     Path getHiddenAbsolutePath(final Path path) {
-        return rootDir.resolve(hide(path));
+        return rootDir.resolve(getHiddenForm(path));
     }
 
     /**
-     * Closes this instance. Closes all open files.
+     * Recursively visits all the file-based data-specifications in a directory
+     * that match a selection criteria. Doesn't visit files in hidden
+     * directories.
+     * 
+     * @param root
+     *            The directory to recursively walk.
+     * @param consumer
+     *            The consumer of file-based data-specifications.
+     * @param predicate
+     *            The selection criteria.
+     */
+    private void walkDirectory(final Path root,
+            final FilePieceSpecSetConsumer consumer, final Predicate predicate) {
+        final EnumSet<FileVisitOption> opts = EnumSet.of(
+                FileVisitOption.FOLLOW_LINKS, FileVisitOption.DETECT_CYCLES);
+        Files.walkFileTree(root, opts, Integer.MAX_VALUE,
+                new SimpleFileVisitor<Path>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(final Path dir) {
+                        return pathname.isHidden(dir)
+                                ? FileVisitResult.SKIP_SUBTREE
+                                : FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult visitFile(final Path path,
+                            final BasicFileAttributes attr) {
+                        if (attr.isRegularFile()) {
+                            final FileId fileId = new FileId(rootDir
+                                    .relativize(path));
+                            final FileInfo fileInfo = new FileInfo(fileId, attr
+                                    .size(), PIECE_SIZE);
+                            if (predicate.satisfiedBy(fileInfo)) {
+                                consumer.consume(FilePieceSpecSet.newInstance(
+                                        fileInfo, true));
+                            }
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+    }
+
+    /**
+     * Visits all the file-based data-specifications in the archive that match a
+     * selection criteria. Doesn't visit files in hidden directories.
+     * 
+     * @param consumer
+     *            The consumer of file-based data-specifications.
+     * @param predicate
+     *            The selection criteria.
+     */
+    void walkArchive(final FilePieceSpecSetConsumer consumer,
+            final Predicate predicate) {
+        walkDirectory(rootDir, consumer, predicate);
+    }
+
+    /**
+     * Watches the archive for new files and removed files and directories.
+     * Ignores hidden directories. Doesn't return.
+     * 
+     * @param server
+     *            The server.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
+     * @throws IOException
+     */
+    void watchArchive(final Server server) throws IOException,
+            InterruptedException {
+        new FileWatcher(server);
+    }
+
+    /**
+     * Closes this instance. Closes all open files and the file-deleter.
      * 
      * @throws IOException
      *             if an I/O error occurs.
      */
     void close() throws IOException {
-        synchronized (diskFiles) {
-            for (final Iterator<DiskFile> iter = diskFiles.values().iterator(); iter
-                    .hasNext();) {
-                iter.next().close();
-                iter.remove();
+        try {
+            fileDeleter.close();
+        }
+        finally {
+            synchronized (diskFiles) {
+                for (final Iterator<DiskFile> iter = diskFiles.values()
+                        .iterator(); iter.hasNext();) {
+                    iter.next().close();
+                    iter.remove();
+                }
             }
         }
     }

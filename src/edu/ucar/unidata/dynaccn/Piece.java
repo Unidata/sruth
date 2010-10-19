@@ -107,6 +107,15 @@ final class Piece implements Serializable {
         return pieceSpec.getOffset();
     }
 
+    /**
+     * Returns the time-to-live, in seconds, of the associated file.
+     * 
+     * @return The time-to-live, in seconds, of the associated file.
+     */
+    int getTimeToLive() {
+        return pieceSpec.getTimeToLive();
+    }
+
     /*
      * (non-Javadoc)
      * 

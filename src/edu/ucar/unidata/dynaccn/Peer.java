@@ -11,12 +11,16 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
+import java.net.ConnectException;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.file.FileSystemException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -35,26 +39,12 @@ import org.slf4j.LoggerFactory;
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class Peer extends BlockingTask<Void> {
+final class Peer implements Callable<Void> {
     /**
      * The logging service.
      */
     private static final Logger               logger               = LoggerFactory
                                                                            .getLogger(Peer.class);
-    /**
-     * The executor service for tasks.
-     */
-    private static final ExecutorService      executorService      = new CancellingExecutor(
-                                                                           0,
-                                                                           Integer.MAX_VALUE,
-                                                                           60L,
-                                                                           TimeUnit.SECONDS,
-                                                                           new SynchronousQueue<Runnable>());
-    /**
-     * The task manager.
-     */
-    private final TaskManager<Void>           taskManager          = new TaskManager<Void>(
-                                                                           executorService);
     /**
      * The data clearing-house to use
      */
@@ -108,58 +98,96 @@ final class Peer extends BlockingTask<Void> {
         this.clearingHouse = clearingHouse;
         this.connection = connection;
         localPredicate = clearingHouse.getPredicate();
-        clearingHouse.add(this);
     }
 
     /**
-     * Executes this instance and completes normally if and only if 1) all tasks
-     * terminate normally; or 2) the current thread is interrupted. Upon
-     * completion, the connection to the remote peer is closed.
+     * Executes this instance and completes normally if and only if all desired
+     * data is received. Upon completion, the connection is closed.
      * 
-     * @throws ExecutionException
-     *             if an exception was thrown.
+     * @throws ConnectException
+     *             if the connection to the remote peer is lost.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      * @throws IOException
-     *             if an I/O error occurs.
+     *             if a serious I/O error occurs.
      */
     @Override
-    public final Void call() throws ExecutionException, IOException {
+    public final Void call() throws IOException, ConnectException,
+            InterruptedException {
         final String origName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
+        final ExecutorService executorService = new CancellingExecutor(0,
+                Integer.MAX_VALUE, 0L, TimeUnit.SECONDS,
+                new SynchronousQueue<Runnable>());
+        final ExecutorCompletionService<Void> taskManager = new ExecutorCompletionService<Void>(
+                executorService);
         try {
             taskManager.submit(new RequestReceiver(connection));
             taskManager.submit(new RequestSender(connection));
 
+            // Depends on RequestReceiver executing first
             remotePredicate = remotePredicateQueue.take();
+            logger.info("Starting up: {}", this);
 
             taskManager.submit(new NoticeSender(connection));
             taskManager.submit(new PieceSender(connection));
 
-            if (!Predicate.NOTHING.equals(localPredicate)) {
-                // This peer wants data
+            if (!localPredicate.satisfiedByNothing()) {
+                // This instance wants data
                 taskManager.submit(new NoticeReceiver(connection));
                 taskManager.submit(new PieceReceiver(connection));
             }
 
-            // Check the archive for remotely-desired data
-            taskManager.submit(new FileScanner());
+            clearingHouse.add(this);
 
-            taskManager.waitUpon();
+            try {
+                Future<Void> fileScannerFuture = null;
+                if (!remotePredicate.satisfiedByNothing()) {
+                    // The remote instance wants data
+                    fileScannerFuture = taskManager.submit(new FileScanner());
+                }
+
+                for (;;) {
+                    final Future<Void> future = taskManager.take();
+                    if (!future.isCancelled()) {
+                        try {
+                            future.get();
+                        }
+                        catch (final ExecutionException e) {
+                            final Throwable cause = e.getCause();
+                            if (cause instanceof SocketException
+                                    || cause instanceof EOFException) {
+                                throw (ConnectException) new ConnectException(
+                                        "Connection lost: " + this)
+                                        .initCause(cause);
+                            }
+                            if (cause instanceof IOException) {
+                                throw (IOException) cause;
+                            }
+                            throw Util.launderThrowable(cause);
+                        }
+                        if (!future.equals(fileScannerFuture)) {
+                            // A Sender or Receiver completed
+                            break;
+                        }
+                    }
+                }
+            }
+            finally {
+                clearingHouse.remove(this);
+            }
         }
-        catch (final InterruptedException ignored) {
-            // Implements interruption policy of thread
+        catch (final InterruptedException e) {
+            logger.debug("Interrupted");
+            throw e;
         }
         finally {
-            taskManager.cancel();
+            executorService.shutdownNow();
             connection.close();
             Thread.currentThread().setName(origName);
         }
 
         return null;
-    }
-
-    @Override
-    public void stop() {
-        connection.close();
     }
 
     /**
@@ -249,6 +277,17 @@ final class Peer extends BlockingTask<Void> {
         clearingHouse.process(this, pieceSpec);
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "Peer [connection=" + connection + ", remotePredicate="
+                + remotePredicate + "]";
+    }
+
     /**
      * Scans the archive for remotely-desired data and adds it to the notice
      * queue.
@@ -258,6 +297,7 @@ final class Peer extends BlockingTask<Void> {
     @ThreadSafe
     private final class FileScanner implements Callable<Void> {
         public Void call() throws InterruptedException {
+            setThreadName(toString());
             clearingHouse.walkArchive(new FilePieceSpecSetConsumer() {
                 @Override
                 public void consume(final FilePieceSpecSet spec) {
@@ -265,6 +305,16 @@ final class Peer extends BlockingTask<Void> {
                 }
             }, remotePredicate);
             return null;
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "FileScanner [rootDir=" + clearingHouse.getRootDir() + "]";
         }
     }
 
@@ -277,6 +327,10 @@ final class Peer extends BlockingTask<Void> {
      */
     @ThreadSafe
     private static abstract class Receiver<T> extends BlockingTask<Void> {
+        /**
+         * The underlying socket.
+         */
+        private final Socket      socket;
         /**
          * The input stream from the remote peer.
          */
@@ -304,6 +358,7 @@ final class Peer extends BlockingTask<Void> {
                 throw new NullPointerException();
             }
 
+            this.socket = socket;
             this.inputStream = socket.getInputStream();
             this.type = type;
         }
@@ -316,37 +371,62 @@ final class Peer extends BlockingTask<Void> {
          * (because all the desired data has been received, for example).
          * 
          * @throws ClassCastException
-         *             if the object has the wrong type.
+         *             if a received object has the wrong type.
          * @throws ClassNotFoundException
-         *             if object has unknown type.
+         *             if a received object has unknown type.
+         * @throws EOFException
+         *             if a read on the socket returned EOF.
+         * @throws InterruptedException
+         *             if the current thread is interrupted.
          * @throws IOException
-         *             if an I/O error occurs.
+         *             if a serious I/O error occurs.
+         * @throws SocketException
+         *             if the socket was closed by the remote peer.
          */
-        public Void call() throws IOException, ClassNotFoundException {
-            setThreadName(getClass().getSimpleName());
+        public Void call() throws EOFException, SocketException, IOException,
+                ClassNotFoundException {
+            setThreadName(toString());
             final ObjectInputStream objectInputStream = new ObjectInputStream(
                     inputStream);
             try {
                 initialize(objectInputStream);
                 for (;;) {
-                    final Object obj = readObject(objectInputStream);
-                    if (null == obj) {
-                        break;
+                    try {
+                        final Object obj = readObject(objectInputStream);
+                        if (null == obj) {
+                            break;
+                        }
+                        if (!process(type.cast(obj))) {
+                            break; // done
+                        }
                     }
-                    if (!process(type.cast(obj))) {
-                        break;
+                    catch (final EOFException e) {
+                        logger.debug(e.toString());
+                        throw e;
+                    }
+                    catch (final SocketException e) {
+                        /*
+                         * The possible subclasses of the exception are:
+                         * BindException, ConnectException,
+                         * NoRouteToHostException, and PortUnreachableException
+                         * -- none of which can occur here because the
+                         * connection is established. Consequently, the
+                         * exception is most likely due to the connection being
+                         * reset (i.e., closed) by the remote peer.
+                         */
+                        logger.debug(e.toString());
+                        throw e;
                     }
                 }
             }
-            catch (final EOFException e) {
-                // ignored
-            }
             catch (final InterruptedException ignored) {
-                // Implements thread interruption policy
+                logger.debug("Interrupted");
             }
-            catch (final IOException e) {
-                if (!isCanceled()) {
-                    throw e;
+            finally {
+                try {
+                    objectInputStream.close();
+                }
+                catch (final IOException ignored) {
                 }
             }
             return null;
@@ -361,31 +441,23 @@ final class Peer extends BlockingTask<Void> {
          * @param ois
          *            The object input stream.
          * @return The next object from the object input stream or {@code null}.
+         * @throws EOFException
+         *             if a read on the socket returned EOF.
          * @throws ClassCastException
          *             if the object has the wrong type.
          * @throws ClassNotFoundException
          *             if object has unknown type.
          * @throws IOException
-         *             if an I/O error occurs.
+         *             if a serious I/O error occurs.
+         * @throws SocketException
+         *             if the socket was closed by the remote peer.
          */
         protected final Object readObject(final ObjectInputStream ois)
-                throws IOException, ClassNotFoundException {
-            try {
-                final Object obj = ois.readUnshared();
-                logger.trace("Received {}", obj);
-                return obj;
-            }
-            catch (final SocketException ignored) {
-                /*
-                 * The possible subclasses of the exception are: BindException,
-                 * ConnectException, NoRouteToHostException, and
-                 * PortUnreachableException -- none of which can occur here
-                 * because the connection is established. Consequently, the
-                 * exception is most likely due to the connection being reset
-                 * (i.e., closed) by the remote peer.
-                 */
-                return null;
-            }
+                throws EOFException, IOException, ClassNotFoundException,
+                SocketException {
+            final Object obj = ois.readUnshared();
+            logger.trace("Received {}", obj);
+            return obj;
         }
 
         /**
@@ -412,6 +484,8 @@ final class Peer extends BlockingTask<Void> {
          * @param obj
          *            The object to process.
          * @return {@code true} if and only if processing should continue.
+         * @throws FileSystemException
+         *             if too many files are open.
          * @throws InterruptedException
          *             if the current thread is interrupted.
          * @throws IOException
@@ -429,6 +503,13 @@ final class Peer extends BlockingTask<Void> {
                 inputStream.close();
             }
             catch (final IOException ignored) {
+            }
+            finally {
+                try {
+                    socket.shutdownInput();
+                }
+                catch (final IOException ignored) {
+                }
             }
         }
     }
@@ -486,6 +567,16 @@ final class Peer extends BlockingTask<Void> {
             }
             return true;
         }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "RequestReceiver []";
+        }
     }
 
     /**
@@ -517,6 +608,16 @@ final class Peer extends BlockingTask<Void> {
             notice.processYourself(Peer.this);
             return true;
         }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "NoticeReceiver []";
+        }
     }
 
     /**
@@ -545,11 +646,17 @@ final class Peer extends BlockingTask<Void> {
         @Override
         protected boolean process(final Piece piece) throws IOException,
                 InterruptedException {
-            final boolean keepGoing = !clearingHouse.process(Peer.this, piece);
-            if (!keepGoing) {
-                taskManager.cancel();
-            }
-            return keepGoing;
+            return !clearingHouse.process(Peer.this, piece);
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "PieceReceiver []";
         }
     }
 
@@ -562,6 +669,10 @@ final class Peer extends BlockingTask<Void> {
      */
     @ThreadSafe
     private static abstract class Sender<T> extends BlockingTask<Void> {
+        /**
+         * The underlying socket.
+         */
+        private final Socket       socket;
         /**
          * The output stream to the remote peer.
          */
@@ -579,20 +690,21 @@ final class Peer extends BlockingTask<Void> {
          *             if {socket == null}.
          */
         protected Sender(final Socket socket) throws IOException {
+            this.socket = socket;
             this.outputStream = socket.getOutputStream();
         }
 
         /**
          * Executes this instance. Completes normally if and only if 1) the
-         * {@link #nextObject} method returns {@code null}; or 2) the current
-         * thread is interrupted.
+         * {@link #nextObject()} method returns {@code null}; 2) the underlying
+         * socket is closed; or 3) the current thread is interrupted.
          * 
          * @throws IOException
          *             if an I/O error occurs.
          */
         @Override
         public final Void call() throws IOException {
-            setThreadName(getClass().getSimpleName());
+            setThreadName(toString());
             final ObjectOutputStream objectOutputStream = new ObjectOutputStream(
                     outputStream);
             initialize(objectOutputStream);
@@ -601,13 +713,12 @@ final class Peer extends BlockingTask<Void> {
                     writeObject(obj, objectOutputStream);
                 }
             }
-            catch (final InterruptedException ignored) {
-                // Implements thread interruption policy
+            catch (final SocketException e) {
+                logger.debug("Connection closed: {}", socket);
+                throw e;
             }
-            catch (final IOException e) {
-                if (!isCanceled()) {
-                    throw e;
-                }
+            catch (final InterruptedException e) {
+                logger.debug("Interrupted");
             }
             return null;
         }
@@ -664,6 +775,13 @@ final class Peer extends BlockingTask<Void> {
             }
             catch (final IOException ignored) {
             }
+            finally {
+                try {
+                    socket.shutdownOutput();
+                }
+                catch (final IOException ignored) {
+                }
+            }
         }
     }
 
@@ -702,6 +820,16 @@ final class Peer extends BlockingTask<Void> {
             final PieceSpecSet request = requestQueue.take();
             return request;
         }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "RequestSender []";
+        }
     }
 
     /**
@@ -733,6 +861,16 @@ final class Peer extends BlockingTask<Void> {
             final Notice notice = noticeQueue.take();
             return notice;
         }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "NoticeSender []";
+        }
     }
 
     /**
@@ -762,6 +900,16 @@ final class Peer extends BlockingTask<Void> {
         protected Piece nextObject() throws InterruptedException {
             final Piece piece = pieceQueue.take();
             return piece;
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "PieceSender []";
         }
     }
 

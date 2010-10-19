@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
@@ -32,7 +31,7 @@ public class MultiClientTest {
     /**
      * The sleep interval to be used.
      */
-    private static long                            sleepAmount     = 500;
+    private static long                            sleepAmount     = 1000;
 
     private static void system(final String[] cmd) throws IOException,
             InterruptedException {
@@ -90,12 +89,7 @@ public class MultiClientTest {
     private static void stop(final Future<Void> future)
             throws InterruptedException, ExecutionException {
         if (!future.cancel(true)) {
-            try {
-                future.get();
-            }
-            catch (final CancellationException e) {
-                throw new AssertionError(); // can't happen
-            }
+            future.get();
         }
     }
 
@@ -255,62 +249,68 @@ public class MultiClientTest {
         /*
          * Create the source server.
          */
-        Archive archive = new Archive("/tmp/server");
-        Server server = new Server(
-                new ClearingHouse(archive, Predicate.NOTHING));
-        final Future<Void> sourceServerFuture = start(server);
-        final ServerInfo sourceServerInfo = server.getServerInfo();
+        final Archive archive = new Archive("/tmp/server");
+        final ClearingHouse sourceClearingHouse = new ClearingHouse(archive,
+                Predicate.NOTHING);
+        final Server sourceServer = new Server(sourceClearingHouse);
+        final Future<Void> sourceServerFuture = start(sourceServer);
+        final ServerInfo sourceServerInfo = sourceServer.getServerInfo();
 
         /*
-         * Create the left server.
+         * Create sink server 1.
          */
-        archive = new Archive("/tmp/client/peer/1");
-        final ClearingHouse leftClearingHouse = new ClearingHouse(archive,
+        final Archive archive1 = new Archive("/tmp/client/peer/1");
+        final ClearingHouse clearingHouse1 = new ClearingHouse(archive1,
                 Predicate.EVERYTHING);
-        server = new Server(leftClearingHouse);
-        final Future<Void> leftServerFuture = start(server);
-        final ServerInfo leftServerInfo = server.getServerInfo();
+        final Server server1 = new Server(clearingHouse1);
+        final Future<Void> serverFuture1 = start(server1);
+        final ServerInfo serverInfo1 = server1.getServerInfo();
 
         /*
-         * Create the right server.
+         * Create sink server 2.
          */
-        archive = new Archive("/tmp/client/peer/2");
-        final ClearingHouse rightClearingHouse = new ClearingHouse(archive,
+        final Archive archive2 = new Archive("/tmp/client/peer/2");
+        final ClearingHouse clearingHouse2 = new ClearingHouse(archive2,
                 Predicate.EVERYTHING);
-        server = new Server(rightClearingHouse);
-        final Future<Void> rightServerFuture = start(server);
-        final ServerInfo rightServerInfo = server.getServerInfo();
+        final Server server2 = new Server(clearingHouse2);
+        final Future<Void> serverFuture2 = start(server2);
+        final ServerInfo serverInfo2 = server2.getServerInfo();
 
         /*
-         * Create the clients.
+         * Create the sink clients.
          */
-        final Client leftSourceClient = new Client(sourceServerInfo,
-                leftClearingHouse);
-        final Client rightSourceClient = new Client(sourceServerInfo,
-                rightClearingHouse);
-        final Client leftPeerClient = new Client(rightServerInfo,
-                leftClearingHouse);
-        final Client rightPeerClient = new Client(leftServerInfo,
-                rightClearingHouse);
+        final Client sourceClient1 = new Client(sourceServerInfo,
+                clearingHouse1);
+        final Client sourceClient2 = new Client(sourceServerInfo,
+                clearingHouse2);
+        final Client peerClient1 = new Client(serverInfo2, clearingHouse1);
+        final Client peerClient2 = new Client(serverInfo1, clearingHouse2);
 
         /*
-         * Start the clients.
+         * Start the sink clients.
          */
-        final Future<Void> leftPeerClientFuture = start(leftPeerClient);
-        final Future<Void> rightPeerClientFuture = start(rightPeerClient);
-        final Future<Void> leftClientFuture = start(leftSourceClient);
-        final Future<Void> rightClientFuture = start(rightSourceClient);
+        final Future<Void> peerClientFuture1 = start(peerClient1);
+        final Future<Void> peerClientFuture2 = start(peerClient2);
+        final Future<Void> sourceClientFuture1 = start(sourceClient1);
+        final Future<Void> sourceClientFuture2 = start(sourceClient2);
 
         Thread.sleep(sleepAmount);
         // Thread.sleep(Long.MAX_VALUE);
 
-        stop(leftPeerClientFuture);
-        stop(rightPeerClientFuture);
-        stop(leftClientFuture);
-        stop(rightClientFuture);
+        Assert.assertEquals(2, sourceServer.getClientCount());
+        Assert.assertEquals(2, sourceClearingHouse.getPeerCount());
+        Assert.assertEquals(1, server1.getClientCount());
+        Assert.assertEquals(1, server2.getClientCount());
+        Assert.assertEquals(3, clearingHouse1.getPeerCount());
+        Assert.assertEquals(3, clearingHouse2.getPeerCount());
+
+        stop(peerClientFuture1);
+        stop(peerClientFuture2);
+        stop(sourceClientFuture1);
+        stop(sourceClientFuture2);
         stop(sourceServerFuture);
-        stop(leftServerFuture);
-        stop(rightServerFuture);
+        stop(serverFuture1);
+        stop(serverFuture2);
 
         Assert
                 .assertTrue(new File("/tmp/client/peer/1/server-file-1")
@@ -381,6 +381,11 @@ public class MultiClientTest {
         final Future<Void> sinkNode2Future = start(sinkNode2);
 
         Thread.sleep(sleepAmount);
+        Thread.sleep(sleepAmount);
+
+        Assert.assertEquals(2, sourceNode.getClientCount());
+        Assert.assertEquals(2, sinkNode1.getPeerCount());
+        Assert.assertEquals(2, sinkNode2.getPeerCount());
 
         Assert
                 .assertTrue(new File("/tmp/client/node/1/server-file-1")
@@ -419,14 +424,14 @@ public class MultiClientTest {
         /*
          * Test dropping a large file into the source directory.
          */
-        final Path path = serverArchive.hide(Paths
+        final Path path = serverArchive.getHiddenForm(Paths
                 .get("/tmp/server/subdir/server-subfile-2"));
         Files.createDirectories(path.getParent());
         final SeekableByteChannel channel = path.newByteChannel(
                 StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
         channel.write(ByteBuffer.wrap(new byte[1000000]));
         channel.close();
-        path.moveTo(serverArchive.reveal(path));
+        path.moveTo(serverArchive.getVisibleForm(path));
 
         Thread.sleep(sleepAmount);
 
@@ -454,10 +459,11 @@ public class MultiClientTest {
         stop(sourceNodeFuture);
     }
 
-    @Test
+    // Obviated by addition of FileDeleter to Archive
+    // @Test
     public void testRemoval() throws IOException, InterruptedException,
             ExecutionException {
-        System.out.println("SourceNode Delivery Test:");
+        System.out.println("Removal Test:");
         system(new String[] { "mkdir", "-p", "/tmp/client/removal/1" });
         system(new String[] { "mkdir", "-p", "/tmp/client/removal/2" });
         /*
@@ -495,6 +501,9 @@ public class MultiClientTest {
         system(new String[] { "rm", "/tmp/server/server-file-1" });
         system(new String[] { "rm", "-rf", "/tmp/server/subdir" });
 
+        Thread.sleep(sleepAmount);
+        Thread.sleep(sleepAmount);
+        Thread.sleep(sleepAmount);
         Thread.sleep(sleepAmount);
         // Thread.sleep(Long.MAX_VALUE);
 

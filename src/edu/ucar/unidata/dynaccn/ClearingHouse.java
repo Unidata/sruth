@@ -5,6 +5,7 @@
  */
 package edu.ucar.unidata.dynaccn;
 
+import java.io.FileNotFoundException;
 import java.io.IOError;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -13,6 +14,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Clearing house for processing pieces of data and their information.
@@ -23,6 +27,11 @@ import net.jcip.annotations.ThreadSafe;
  */
 @ThreadSafe
 final class ClearingHouse {
+    /**
+     * The logger for this class.
+     */
+    private static final Logger    logger            = LoggerFactory
+                                                             .getLogger(ClearingHouse.class);
     /**
      * The data archive.
      */
@@ -79,18 +88,33 @@ final class ClearingHouse {
     }
 
     /**
-     * Adds a peer.
+     * Adds a peer. Makes the peer's
+     * {@link Peer#notifyRemoteIfDesired(PieceSpec)} method eligible for
+     * calling.
      * 
      * @param peer
      *            The peer to be added.
      * @throws IllegalStateException
      *             if the peer was already added.
+     * @see {@link #remove(Peer)}.
      */
     void add(final Peer peer) {
         synchronized (peers) {
             if (!peers.add(peer)) {
                 throw new IllegalStateException("Already added: " + peer);
             }
+        }
+    }
+
+    /**
+     * Removes a peer that was added via {@link #add(Peer)}.
+     * 
+     * @param peer
+     *            The peer to be removed.
+     */
+    void remove(final Peer peer) {
+        synchronized (peers) {
+            peers.remove(peer);
         }
     }
 
@@ -129,17 +153,24 @@ final class ClearingHouse {
     boolean process(final Peer peer, final Piece piece) throws IOException,
             InterruptedException {
         if (predicate.satisfiedBy(piece.getFileInfo())) {
-            if (archive.putPiece(piece)) {
-                predicate.removeIfPossible(piece.getFileInfo());
-                receivedFileCount.incrementAndGet();
-            }
-            final PieceSpec pieceSpec = piece.getInfo();
-            synchronized (peers) {
-                for (final Peer otherPeer : peers) {
-                    if (!peer.equals(otherPeer)) {
-                        otherPeer.notifyRemoteIfDesired(pieceSpec);
+            try {
+                if (archive.putPiece(piece)) {
+                    predicate.removeIfPossible(piece.getFileInfo());
+                    receivedFileCount.incrementAndGet();
+                }
+                final PieceSpec pieceSpec = piece.getInfo();
+                synchronized (peers) {
+                    for (final Peer otherPeer : peers) {
+                        if (!peer.equals(otherPeer)) {
+                            otherPeer.notifyRemoteIfDesired(pieceSpec);
+                        }
                     }
                 }
+            }
+            catch (final FileNotFoundException e) {
+                // The file has been deleted
+                logger.debug("Can't add data to removed file \"{}\"", piece
+                        .getPath());
             }
         }
         return predicate.satisfiedByNothing();
@@ -161,7 +192,7 @@ final class ClearingHouse {
     /**
      * Walks the files in the data archive.
      * 
-     * @param fileSpecConsumer
+     * @param consumer
      *            The consumer of data specifications.
      * @param predicate
      *            The selection criteria.
@@ -178,6 +209,17 @@ final class ClearingHouse {
      */
     long getReceivedFileCount() {
         return receivedFileCount.get();
+    }
+
+    /**
+     * Returns the current number of contributing peers.
+     * 
+     * @return The current number of contributing peers.
+     */
+    int getPeerCount() {
+        synchronized (peers) {
+            return peers.size();
+        }
     }
 
     /**

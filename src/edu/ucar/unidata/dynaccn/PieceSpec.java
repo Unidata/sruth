@@ -96,6 +96,15 @@ final class PieceSpec extends FilePieceSpecSet {
         return fileInfo.getSize(index);
     }
 
+    /**
+     * Returns the time-to-live, in seconds, of the associated file.
+     * 
+     * @return The time-to-live, in seconds, of the associated file.
+     */
+    int getTimeToLive() {
+        return fileInfo.getTimeToLive();
+    }
+
     @Override
     public PieceSpecSet merge(final PieceSpecSet specs) {
         return specs.merge(this);

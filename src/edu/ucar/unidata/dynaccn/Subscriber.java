@@ -7,6 +7,7 @@ package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
 import java.net.SocketAddress;
+import java.net.SocketException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -56,13 +57,14 @@ final class Subscriber implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the file-tree, the socket address of the
-     * tracker, and the predicate for the desired data.
+     * remote tracker, and the predicate for the desired data. The server will
+     * listen on ports assigned by the operating-system.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
      * @param trackerAddress
-     *            The socket address of the tracker.
-     * @param prediate
+     *            The socket address of the remote tracker.
+     * @param predciate
      *            The predicate for selecting the desired data.
      * @throws IOException
      *             if an I/O error occurs.
@@ -72,12 +74,45 @@ final class Subscriber implements Callable<Void> {
      */
     Subscriber(final Path rootDir, final SocketAddress trackerAddress,
             final Predicate predicate) throws IOException {
-        this(rootDir, new TrackerProxy(trackerAddress), predicate);
+        this(rootDir, trackerAddress, predicate, PortNumberSet.ZERO);
+    }
+
+    /**
+     * Constructs from the pathname of the file-tree, the socket address of the
+     * tracker, the predicate for the desired data, and a range of port numbers
+     * for the server.
+     * 
+     * If {@code minPort == 0 && maxPort == 0} then the operating-system will
+     * assign ephemeral ports to the server.
+     * 
+     * @param rootDir
+     *            Pathname of the root of the file-tree.
+     * @param trackerAddress
+     *            The socket address of the tracker.
+     * @param predicate
+     *            The predicate for selecting the desired data.
+     * @param portSet
+     *            The set of candidate port numbers.
+     * @throws IOException
+     *             if an unused port in the given range couldn't be found.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null || predicate == null || portSet ==
+     *             null}.
+     * @throws SocketException
+     *             if a server-side socket couldn't be created.
+     */
+    Subscriber(final Path rootDir, final SocketAddress trackerAddress,
+            final Predicate predicate, final PortNumberSet portSet)
+            throws IOException {
+        this(rootDir, new TrackerProxy(trackerAddress), predicate, portSet);
     }
 
     /**
      * Constructs from the pathname of the file-tree, information about the
-     * tracker, and the predicate for the desired data.
+     * tracker, and the predicate for the desired data. The server will listen
+     * on ephemeral ports assigned by the operating-system.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -93,6 +128,40 @@ final class Subscriber implements Callable<Void> {
      */
     Subscriber(final Path rootDir, final TrackerProxy trackerProxy,
             final Predicate predicate) throws IOException {
+        this(rootDir, trackerProxy, predicate, PortNumberSet.ZERO);
+    }
+
+    /**
+     * Constructs from the pathname of the file-tree, information about the
+     * tracker, the predicate for the desired data, and a range of port numbers
+     * for the server.
+     * 
+     * If {@code minPort == 0 && maxPort == 0} then the operating-system will
+     * assign ephemeral ports to the server.
+     * 
+     * @param rootDir
+     *            Pathname of the root of the file-tree.
+     * @param trackerProxy
+     *            Information on the tracker.
+     * @param prediate
+     *            The predicate for selecting the desired data.
+     * @param portSet
+     *            The set of candidate port numbers.
+     * @throws IllegalArgumentException
+     *             if {@code minPort > maxPort}.
+     * @throws IOException
+     *             if an unused port in the given range couldn't be found.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null || trackerProxy == null ||
+     *             predicate == null || portSet == null}.
+     * @throws SocketException
+     *             if a server-side socket couldn't be created.
+     */
+    Subscriber(final Path rootDir, final TrackerProxy trackerProxy,
+            final Predicate predicate, final PortNumberSet portSet)
+            throws IOException {
         if (null == rootDir) {
             throw new NullPointerException();
         }
@@ -103,7 +172,7 @@ final class Subscriber implements Callable<Void> {
             throw new NullPointerException();
         }
         archive = new Archive(rootDir);
-        sinkNode = new SinkNode(archive, predicate);
+        sinkNode = new SinkNode(archive, predicate, portSet);
         this.trackerProxy = trackerProxy;
         this.predicate = predicate;
     }
@@ -139,16 +208,19 @@ final class Subscriber implements Callable<Void> {
      * Executes this instance. Returns normally if and only if all desired data
      * has been received.
      * 
+     * @throws AssertionError
+     *             if an unexpected exception is thrown. The cause of the
+     *             {@link AssertionError} will be the unexpected exception.
      * @throws ClassNotFoundException
      *             if the reply from the tracker can't be understood.
      * @throws ExecutionException
-     *             if a subtask terminates due to an error.
+     *             if the server throws an exception
      * @throws IllegalStateException
-     *             if {@link #isRunning()}.
+     *             if {@link #isRunning()} returns {@code true}.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws IOException
-     *             if an I/O error occurs.
+     *             if a severe I/O error occurs.
      * @see {@link #isRunning()}
      */
     public Void call() throws ExecutionException, InterruptedException,
@@ -166,7 +238,12 @@ final class Subscriber implements Callable<Void> {
             sinkNode.call();
         }
         finally {
-            Thread.currentThread().setName(origThreadName);
+            try {
+                archive.close();
+            }
+            finally {
+                Thread.currentThread().setName(origThreadName);
+            }
         }
         return null;
     }
@@ -188,6 +265,15 @@ final class Subscriber implements Callable<Void> {
      */
     public long getReceivedFileCount() {
         return sinkNode.getReceivedFileCount();
+    }
+
+    /**
+     * Returns the current number of peers to which this instance is connected.
+     * 
+     * @return The current number of peers to which this instance is connected.
+     */
+    int getPeerCount() {
+        return sinkNode.getPeerCount();
     }
 
     /*

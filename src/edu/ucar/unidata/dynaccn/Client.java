@@ -4,13 +4,9 @@
  */
 package edu.ucar.unidata.dynaccn;
 
-import java.io.DataOutputStream;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.Socket;
+import java.net.ConnectException;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,20 +20,15 @@ final class Client implements Callable<Void> {
     /**
      * The logging service.
      */
-    private static final Logger    logger     = LoggerFactory
-                                                      .getLogger(Client.class);
-    /**
-     * The connection to the remote server.
-     */
-    private final ClientConnection connection = new ClientConnection();
+    private static final Logger logger = LoggerFactory.getLogger(Client.class);
     /**
      * The data clearing-house.
      */
-    private final ClearingHouse    clearingHouse;
+    private final ClearingHouse clearingHouse;
     /**
      * Information on the remote server.
      */
-    private final ServerInfo       serverInfo;
+    private final ServerInfo    serverInfo;
 
     /**
      * Constructs from information on the remote server.
@@ -69,59 +60,67 @@ final class Client implements Callable<Void> {
     }
 
     /**
-     * Executes this instance and waits upon one of the following conditions: 1)
-     * all data that can be received has been received; 2) an error occurs; or
-     * 3) the current thread is interrupted. In any case, any and all subtasks
-     * will have been terminated upon return.
+     * Executes this instance. Returns when either all data that can be received
+     * has been received or an exception is thrown.
      * 
-     * @throws IOException
-     *             if an I/O error occurs while attempting to connect to the
-     *             remote server.
-     * @throws ExecutionException
-     *             if this instance terminated due to an error.
+     * @throws AssertionError
+     *             Shouldn't occur, but if it does, then the cause of the
+     *             {@link AssertionError} will be the impossible exception.
+     * @throws ConnectException
+     *             if the connection to the remote server can't be made or is
+     *             lost.
+     * @throws Error
+     *             if an {@link Error} is thrown.
      * @throws InterruptedException
      *             if the current thread is interrupted.
+     * @throws IOException
+     *             if a serious I/O error occurs.
+     * @throws RuntimeException
+     *             if a {@link RuntimeException} is thrown.
      */
     @Override
-    public Void call() throws IOException, InterruptedException,
-            ExecutionException {
-        final int[] serverPorts = serverInfo.getPorts();
-        final InetAddress serverAddress = serverInfo.getInetAddress();
-        final Socket[] sockets = new Socket[serverPorts.length];
-        /*
-         * Create this client's sockets and get their port numbers.
-         */
-        for (int i = 0; i < sockets.length; i++) {
-            sockets[i] = new Socket(); // unbound socket
-            sockets[i].bind(null); // obtains ephemeral port
+    public Void call() throws ConnectException, IOException,
+            InterruptedException {
+        Thread.currentThread().setName(toString());
+        final ConnectionToServer connection;
+        try {
+            connection = new ConnectionToServer(serverInfo);
         }
-        /*
-         * For each socket:
-         */
-        for (int i = 0; i < sockets.length; i++) {
-            /*
-             * Connect the socket to the server.
-             */
-            sockets[i].connect(new InetSocketAddress(serverAddress,
-                    serverPorts[i]));
-            /*
-             * Write this client's port numbers on the socket to help identify
-             * this client.
-             */
-            final DataOutputStream stream = new DataOutputStream(sockets[i]
-                    .getOutputStream());
-            for (final Socket socket : sockets) {
-                stream.writeInt(socket.getLocalPort());
-            }
-            stream.flush();
-            /*
-             * Add this socket to the connection.
-             */
-            connection.add(sockets[i]);
+        catch (final IOException e) {
+            throw (ConnectException) new ConnectException(
+                    "Couldn't connect to " + serverInfo).initCause(e);
         }
-        logger.info("Client open: {}", connection);
-        new Peer(clearingHouse, connection).call();
-        logger.info("Client close: {}", connection);
+        try {
+            final Peer peer = new Peer(clearingHouse, connection);
+            logger.debug("Peer starting: {}", connection);
+            peer.call();
+            logger.debug("Peer completed: {}", peer);
+        }
+        finally {
+            connection.close();
+        }
         return null;
+    }
+
+    /**
+     * Returns the number of bytes downloaded since the later of the previous
+     * call or the start of this client.
+     * 
+     * @return The number of downloaded bytes since last time or the start.
+     */
+    synchronized long getDownloadAmount() {
+        // TODO
+        return 0;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "Client [serverInfo=" + serverInfo + ",localPredicate="
+                + clearingHouse.getPredicate() + "]";
     }
 }

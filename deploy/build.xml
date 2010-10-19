@@ -55,19 +55,16 @@
 		</exec>
 	</target>
 
-	<taskdef name="install4j"
-        classname="com.install4j.Install4JTask"
-        classpath="/share/install4j/bin/ant.jar"/>
+	<taskdef name="install4j" classname="com.install4j.Install4JTask" classpath="/share/install4j/bin/ant.jar" />
 
-    <target name="installer" depends="run_jar">
-        <install4j projectfile="deploy/install4j/UDDsys.install4j"/>
-    </target>
+	<target name="installer" depends="run_jar">
+		<install4j projectfile="deploy/install4j/UDDsys.install4j" />
+	</target>
 
 	<target name="available" description="Make application available" depends="installer">
 		<exec executable="scp" failonerror="true">
 			<arg value="deploy/install4j/UDDsys_unix_0_0.sh" />
 			<arg value="deploy/install4j/UDDsys_windows_0_0.exe" />
-			<arg value="deploy/deployJava.js" />
 			<arg value="deploy/dynaccn.jnlp" />
 			<arg value="deploy/index.html" />
 			<arg value="${run-jar}" />
