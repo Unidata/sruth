@@ -11,7 +11,7 @@ import java.net.InetAddress;
 import java.net.Socket;
 
 /**
- * The client-side of a connection to a server.
+ * The client-side of a connection to a remote server.
  * 
  * Instances are thread-safe.
  * 
@@ -19,29 +19,42 @@ import java.net.Socket;
  */
 final class ConnectionToServer extends Connection {
     /**
-     * Constructs from information on the server.
+     * Constructs from information on the remote server and the port numbers
+     * used by the local server.
      * 
-     * @param serverInfo
-     *            Information on the server.
+     * @param remoteServerInfo
+     *            Information on the remote server.
+     * @param localServerPorts
+     *            The port numbers used by the local server.
      * @throws IllegalArgumentException
-     *             if {@code serverPorts.length != SOCKET_COUNT}.
+     *             if {@code remoteServerInfo.getPorts().length != SOCKET_COUNT}
+     *             .
+     * @throws IllegalArgumentException
+     *             if {@code localServerPorts.length != SOCKET_COUNT}.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
-     *             if {@code serverInfo == null}.
+     *             if {@code remoteServerInfo == null}.
+     * @throws NullPointerException
+     *             if {@code localServerPorts == null}.
      */
-    ConnectionToServer(final ServerInfo serverInfo) throws IOException {
-        final int[] serverPorts = serverInfo.getPorts();
+    ConnectionToServer(final ServerInfo remoteServerInfo,
+            final int[] localServerPorts) throws IOException {
+        final int[] remoteServerPorts = remoteServerInfo.getPorts();
 
-        if (serverPorts.length != SOCKET_COUNT) {
-            throw new IllegalArgumentException("serverPorts.length: "
-                    + serverPorts.length);
+        if (remoteServerPorts.length != SOCKET_COUNT) {
+            throw new IllegalArgumentException("remoteServerPorts.length: "
+                    + remoteServerPorts.length);
+        }
+        if (localServerPorts.length != SOCKET_COUNT) {
+            throw new IllegalArgumentException("localServerPorts.length: "
+                    + localServerPorts.length);
         }
         try {
-            final InetAddress serverAddress = serverInfo.getInetAddress();
+            final InetAddress serverAddress = remoteServerInfo.getInetAddress();
             final Socket[] sockets = new Socket[SOCKET_COUNT];
             for (int i = 0; i < SOCKET_COUNT; i++) {
-                sockets[i] = new Socket(serverAddress, serverPorts[i]);
+                sockets[i] = new Socket(serverAddress, remoteServerPorts[i]);
                 add(sockets[i]);
             }
             /*
@@ -49,13 +62,13 @@ final class ConnectionToServer extends Connection {
              */
             for (final Socket socket : sockets) {
                 /*
-                 * Write this client's port numbers on the socket to help
-                 * identify this client.
+                 * Write the port numbers of the local server on the socket to
+                 * help identify this client.
                  */
-                final DataOutputStream stream = new DataOutputStream(socket
-                        .getOutputStream());
-                for (final Socket sock : sockets) {
-                    stream.writeInt(sock.getLocalPort());
+                final DataOutputStream stream = new DataOutputStream(
+                        socket.getOutputStream());
+                for (final int port : localServerPorts) {
+                    stream.writeInt(port);
                 }
                 stream.flush();
             }

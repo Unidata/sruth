@@ -1,3 +1,8 @@
+/**
+ * Copyright 2010 University Corporation for Atmospheric Research.  All rights
+ * reserved.  See file LICENSE in the top-level source directory for licensing
+ * information.
+ */
 package edu.ucar.unidata.dynaccn;
 
 import java.io.IOException;
@@ -26,7 +31,6 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.GuardedBy;
-import net.jcip.annotations.NotThreadSafe;
 import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
@@ -40,25 +44,6 @@ import org.slf4j.LoggerFactory;
  * @author Steven R. Emmerson
  */
 final class Server implements Callable<Void> {
-    /**
-     * A listener for client-disconnect events.
-     * 
-     * Instances are thread-compatible but not thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @NotThreadSafe
-    static abstract class DisconnectListener {
-        /**
-         * Handles client-disconnect events.
-         * 
-         * @param serverInfo
-         *            Information on the server associated with the disconnected
-         *            client.
-         */
-        abstract void clientDisconnected(ServerInfo serverInfo);
-    }
-
     /**
      * Support for listeners of client-disconnect events.
      * 
@@ -90,7 +75,8 @@ final class Server implements Callable<Void> {
          * Notifies all listeners of a client disconnect.
          * 
          * @param serverInfo
-         *            Information on the disconnected client.
+         *            Information on the server associated with the disconnected
+         *            client.
          * @throws NullPointerException
          *             if {@code serverInfo == null}.
          */
@@ -110,7 +96,7 @@ final class Server implements Callable<Void> {
      */
     private class Listener extends BlockingTask<Void> {
         /**
-         * The server socket.
+         * The localServer socket.
          */
         private final ServerSocket listenerSocket;
 
@@ -126,7 +112,7 @@ final class Server implements Callable<Void> {
          * @throws NullPointerException
          *             if {@code portSet == null}.
          * @throws SocketException
-         *             if a server-side socket couldn't be created.
+         *             if a localServer-side socket couldn't be created.
          */
         Listener(final PortNumberSet portSet) throws IOException,
                 SocketException {
@@ -175,21 +161,22 @@ final class Server implements Callable<Void> {
             final Socket socket = listenerSocket.accept();
             try {
                 /*
-                 * Get the port numbers of the client.
+                 * Get the port numbers of the server associated with the
+                 * client.
                  */
-                final int[] clientPorts = ConnectionToClient
+                final int[] clientServerPorts = ConnectionToClient
                         .getRemoteServerPorts(socket);
                 /*
                  * Create a unique client identifier.
                  */
-                final ServerInfo serverInfo = new ServerInfo(socket
-                        .getInetAddress(), clientPorts);
+                final ServerInfo remoteServerInfo = new ServerInfo(
+                        socket.getInetAddress(), clientServerPorts);
                 /*
                  * Get the connection with this client.
                  */
                 ConnectionToClient connection = new ConnectionToClient();
                 final ConnectionToClient prevConn = connections.putIfAbsent(
-                        serverInfo, connection);
+                        remoteServerInfo, connection);
                 if (null != prevConn) {
                     connection = prevConn;
                 }
@@ -198,7 +185,7 @@ final class Server implements Callable<Void> {
                  * ready.
                  */
                 if (connection.add(socket)) {
-                    connections.remove(serverInfo);
+                    connections.remove(remoteServerInfo);
                     final Peer peer = new Peer(clearingHouse, connection);
                     synchronized (peers) {
                         peers.add(peer);
@@ -210,11 +197,11 @@ final class Server implements Callable<Void> {
                             synchronized (peers) {
                                 peers.remove(peer);
                             }
-                            disconnectListenerSupport.notify(serverInfo);
+                            disconnectListenerSupport.notify(remoteServerInfo);
                             if (!isCanceled()) {
                                 try {
                                     get();
-                                    logger.debug("Peer completed: {}", peer);
+                                    logger.debug("Terminated: {}", peer);
                                 }
                                 catch (final ExecutionException e) {
                                     final Throwable cause = e.getCause();
@@ -222,7 +209,7 @@ final class Server implements Callable<Void> {
                                         // ignored
                                     }
                                     else if (cause instanceof ConnectException) {
-                                        logger.info(cause.toString());
+                                        logger.info("Connection lost: {}", peer);
                                     }
                                     else if (cause instanceof IOException) {
                                         logger.error("Peer failure: " + peer,
@@ -241,7 +228,8 @@ final class Server implements Callable<Void> {
                 }
             }
             catch (final IOException e) {
-                logger.info("Couldn't get remote port numbers from {}: {}",
+                logger.info(
+                        "Couldn't get port numbers of remote localServer from {}: {}",
                         socket, e.toString());
                 socket.close();
             }
@@ -353,11 +341,10 @@ final class Server implements Callable<Void> {
     /**
      * Constructs from the clearing-house. Immediately starts listening for
      * connection attempts but doesn't process the attempts until method
-     * {@link #call()} is called. The ports used by the server will be ephemeral
-     * one assigned by the operating-system.
+     * {@link #call()} is called. The ports used by the localServer will be
+     * ephemeral ones assigned by the operating-system.
      * 
-     * By default, the resulting instance will listen on all available
-     * interfaces.
+     * The resulting instance will listen on all available interfaces.
      * 
      * @param clearingHouse
      *            The clearing-house to use.
@@ -371,25 +358,25 @@ final class Server implements Callable<Void> {
     }
 
     /**
-     * Constructs from the clearing-house and port numbers for the server.
+     * Constructs from the clearing-house and port numbers for the localServer.
      * Immediately starts listening for connection attempts but doesn't process
      * the attempts until method {@link #call()} is called.
      * 
-     * By default, the resulting instance will listen on all available
-     * interfaces.
+     * The resulting instance will listen on all available interfaces.
      * 
      * @param clearingHouse
      *            The clearing-house to use.
      * @param serverPorts
-     *            Port numbers for the server or {@code null}. A port number of
-     *            zero will cause the operating-system to assign an ephemeral
-     *            port. If {@code null}, then all ports will be ephemeral.
+     *            Port numbers for the localServer or {@code null}. A port
+     *            number of zero will cause the operating-system to assign an
+     *            ephemeral port. If {@code null}, then all ports will be
+     *            ephemeral.
      * @throws IOException
      *             if an unused port in the given range couldn't be found.
      * @throws NullPointerException
      *             if {@code clearingHouse == null}.
      * @throws SocketException
-     *             if a server-side socket couldn't be created.
+     *             if a localServer-side socket couldn't be created.
      */
     Server(final ClearingHouse clearingHouse, final int[] serverPorts)
             throws IOException {
@@ -421,8 +408,8 @@ final class Server implements Callable<Void> {
 
     /**
      * Constructs from the clearing-house and an range of port numbers for the
-     * server. Immediately starts listening for connection attempts but doesn't
-     * process the attempts until method {@link #call()} is called.
+     * localServer. Immediately starts listening for connection attempts but
+     * doesn't process the attempts until method {@link #call()} is called.
      * 
      * If {@code minPort == 0 && maxPort == 0} then the operating-system will
      * assign ephemeral ports.
@@ -438,7 +425,7 @@ final class Server implements Callable<Void> {
      * @throws NullPointerException
      *             if {@code clearingHouse == null || portSet == null}.
      * @throws SocketException
-     *             if a server-side socket couldn't be created.
+     *             if a localServer-side socket couldn't be created.
      */
     Server(final ClearingHouse clearingHouse, final PortNumberSet portSet)
             throws IOException, SocketException {
@@ -464,10 +451,10 @@ final class Server implements Callable<Void> {
     }
 
     /**
-     * Returns information on the server. This method may be called immediately
-     * after construction of the instance.
+     * Returns information on the localServer. This method may be called
+     * immediately after construction of the instance.
      * 
-     * @return Information on the server.
+     * @return Information on the localServer.
      * @throws UnknownHostException
      *             if the IP address of the local host can't be obtained.
      */
@@ -482,7 +469,7 @@ final class Server implements Callable<Void> {
      * @return The ports on which this instance is listening in ascending
      *         numerical order.
      */
-    private int[] getPorts() {
+    int[] getPorts() {
         final int[] ports = new int[listeners.length];
         for (int i = 0; i < ports.length; i++) {
             ports[i] = listeners[i].getPort();
@@ -501,10 +488,10 @@ final class Server implements Callable<Void> {
     }
 
     /**
-     * Adds a listener for client disconnections.
+     * Adds a listener for disconnections.
      * 
      * @param listener
-     *            The listener for client disconnection events.
+     *            The listener for disconnection events.
      * @throws NullPointerException
      *             if {@code listener == null}.
      */

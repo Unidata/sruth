@@ -58,7 +58,8 @@ public class MultiClientTest {
 
     @AfterClass
     public static void tearDownAfterClass() throws Exception {
-        // system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
+        // system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client"
+        // });
     }
 
     @Before
@@ -114,7 +115,8 @@ public class MultiClientTest {
         archive = new Archive("/tmp/client/parallel/1");
         final ClearingHouse clearingHouse_1 = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
-        final Client client_1 = new Client(sourceServerInfo, clearingHouse_1);
+        final Client client_1 = new Client(sourceServerInfo, new int[] { 1, 2,
+                3 }, clearingHouse_1);
 
         /*
          * Create the second client that gets data from the source.
@@ -122,7 +124,8 @@ public class MultiClientTest {
         archive = new Archive("/tmp/client/parallel/2");
         final ClearingHouse clearingHouse_2 = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
-        final Client client_2 = new Client(sourceServerInfo, clearingHouse_2);
+        final Client client_2 = new Client(sourceServerInfo, new int[] { 4, 5,
+                6 }, clearingHouse_2);
 
         /*
          * Start the clients.
@@ -186,7 +189,8 @@ public class MultiClientTest {
         archive = new Archive("/tmp/client/series/1");
         ClearingHouse clearingHouse = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
-        Client client = new Client(server_1_Info, clearingHouse);
+        Client client = new Client(server_1_Info, new int[] { 1, 2, 3 },
+                clearingHouse);
         final Future<Void> client_1_Future = start(client);
         server = new Server(clearingHouse);
         final Future<Void> server_2_Future = start(server);
@@ -197,7 +201,7 @@ public class MultiClientTest {
          */
         archive = new Archive("/tmp/client/series/2");
         clearingHouse = new ClearingHouse(archive, Predicate.EVERYTHING);
-        client = new Client(server_2_Info, clearingHouse);
+        client = new Client(server_2_Info, new int[] { 4, 5, 6 }, clearingHouse);
         final Future<Void> client_2_Future = start(client);
 
         Thread.sleep(sleepAmount);
@@ -216,12 +220,10 @@ public class MultiClientTest {
                 .exists());
         Assert.assertTrue(new File("/tmp/client/series/1/server-file-2")
                 .length() > 0);
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/series/1/subdir/server-subfile").exists());
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/series/1/subdir/server-subfile").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/series/1/subdir/server-subfile")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/series/1/subdir/server-subfile")
+                .length() > 0);
 
         Assert.assertTrue(new File("/tmp/client/series/2/server-file-1")
                 .exists());
@@ -231,12 +233,10 @@ public class MultiClientTest {
                 .exists());
         Assert.assertTrue(new File("/tmp/client/series/2/server-file-2")
                 .length() > 0);
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/series/2/subdir/server-subfile").exists());
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/series/2/subdir/server-subfile").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/series/2/subdir/server-subfile")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/series/2/subdir/server-subfile")
+                .length() > 0);
     }
 
     @Test
@@ -262,9 +262,9 @@ public class MultiClientTest {
         final Archive archive1 = new Archive("/tmp/client/peer/1");
         final ClearingHouse clearingHouse1 = new ClearingHouse(archive1,
                 Predicate.EVERYTHING);
-        final Server server1 = new Server(clearingHouse1);
-        final Future<Void> serverFuture1 = start(server1);
-        final ServerInfo serverInfo1 = server1.getServerInfo();
+        final Server sinkServer1 = new Server(clearingHouse1);
+        final Future<Void> sinkServerFuture1 = start(sinkServer1);
+        final ServerInfo sinkServerInfo1 = sinkServer1.getServerInfo();
 
         /*
          * Create sink server 2.
@@ -272,19 +272,21 @@ public class MultiClientTest {
         final Archive archive2 = new Archive("/tmp/client/peer/2");
         final ClearingHouse clearingHouse2 = new ClearingHouse(archive2,
                 Predicate.EVERYTHING);
-        final Server server2 = new Server(clearingHouse2);
-        final Future<Void> serverFuture2 = start(server2);
-        final ServerInfo serverInfo2 = server2.getServerInfo();
+        final Server sinkServer2 = new Server(clearingHouse2);
+        final Future<Void> sinkServerFuture2 = start(sinkServer2);
+        final ServerInfo sinkServerInfo2 = sinkServer2.getServerInfo();
 
         /*
          * Create the sink clients.
          */
         final Client sourceClient1 = new Client(sourceServerInfo,
-                clearingHouse1);
+                sinkServer1.getPorts(), clearingHouse1);
         final Client sourceClient2 = new Client(sourceServerInfo,
-                clearingHouse2);
-        final Client peerClient1 = new Client(serverInfo2, clearingHouse1);
-        final Client peerClient2 = new Client(serverInfo1, clearingHouse2);
+                sinkServer2.getPorts(), clearingHouse2);
+        final Client peerClient1 = new Client(sinkServerInfo2,
+                sinkServer1.getPorts(), clearingHouse1);
+        final Client peerClient2 = new Client(sinkServerInfo1,
+                sinkServer2.getPorts(), clearingHouse2);
 
         /*
          * Start the sink clients.
@@ -299,8 +301,8 @@ public class MultiClientTest {
 
         Assert.assertEquals(2, sourceServer.getClientCount());
         Assert.assertEquals(2, sourceClearingHouse.getPeerCount());
-        Assert.assertEquals(1, server1.getClientCount());
-        Assert.assertEquals(1, server2.getClientCount());
+        Assert.assertEquals(1, sinkServer1.getClientCount());
+        Assert.assertEquals(1, sinkServer2.getClientCount());
         Assert.assertEquals(3, clearingHouse1.getPeerCount());
         Assert.assertEquals(3, clearingHouse2.getPeerCount());
 
@@ -309,38 +311,22 @@ public class MultiClientTest {
         stop(sourceClientFuture1);
         stop(sourceClientFuture2);
         stop(sourceServerFuture);
-        stop(serverFuture1);
-        stop(serverFuture2);
+        stop(sinkServerFuture1);
+        stop(sinkServerFuture2);
 
-        Assert
-                .assertTrue(new File("/tmp/client/peer/1/server-file-1")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/peer/1/server-file-1")
-                        .length() > 0);
-        Assert
-                .assertTrue(new File("/tmp/client/peer/1/server-file-2")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/peer/1/server-file-2")
-                        .length() > 0);
+        Assert.assertTrue(new File("/tmp/client/peer/1/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/peer/1/server-file-1").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/peer/1/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/peer/1/server-file-2").length() > 0);
         Assert.assertTrue(new File("/tmp/client/peer/1/subdir/server-subfile")
                 .exists());
         Assert.assertTrue(new File("/tmp/client/peer/1/subdir/server-subfile")
                 .length() > 0);
 
-        Assert
-                .assertTrue(new File("/tmp/client/peer/2/server-file-1")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/peer/2/server-file-1")
-                        .length() > 0);
-        Assert
-                .assertTrue(new File("/tmp/client/peer/2/server-file-2")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/peer/2/server-file-2")
-                        .length() > 0);
+        Assert.assertTrue(new File("/tmp/client/peer/2/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/peer/2/server-file-1").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/peer/2/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/peer/2/server-file-2").length() > 0);
         Assert.assertTrue(new File("/tmp/client/peer/2/subdir/server-subfile")
                 .exists());
         Assert.assertTrue(new File("/tmp/client/peer/2/subdir/server-subfile")
@@ -362,10 +348,12 @@ public class MultiClientTest {
         /*
          * Create the sink nodes.
          */
+        final TrivialPlumber plumber = new TrivialPlumber(
+                sourceNode.getServerInfo());
         final SinkNode sinkNode1 = new SinkNode(new Archive(
-                "/tmp/client/node/1"), Predicate.EVERYTHING);
+                "/tmp/client/node/1"), Predicate.EVERYTHING, plumber);
         final SinkNode sinkNode2 = new SinkNode(new Archive(
-                "/tmp/client/node/2"), Predicate.EVERYTHING);
+                "/tmp/client/node/2"), Predicate.EVERYTHING, plumber);
         /*
          * Construct the network topology by hooking the nodes up.
          */
@@ -387,35 +375,19 @@ public class MultiClientTest {
         Assert.assertEquals(2, sinkNode1.getPeerCount());
         Assert.assertEquals(2, sinkNode2.getPeerCount());
 
-        Assert
-                .assertTrue(new File("/tmp/client/node/1/server-file-1")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/node/1/server-file-1")
-                        .length() > 0);
-        Assert
-                .assertTrue(new File("/tmp/client/node/1/server-file-2")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/node/1/server-file-2")
-                        .length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/1/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/node/1/server-file-1").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/1/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/node/1/server-file-2").length() > 0);
         Assert.assertTrue(new File("/tmp/client/node/1/subdir/server-subfile")
                 .exists());
         Assert.assertTrue(new File("/tmp/client/node/1/subdir/server-subfile")
                 .length() > 0);
 
-        Assert
-                .assertTrue(new File("/tmp/client/node/2/server-file-1")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/node/2/server-file-1")
-                        .length() > 0);
-        Assert
-                .assertTrue(new File("/tmp/client/node/2/server-file-2")
-                        .exists());
-        Assert
-                .assertTrue(new File("/tmp/client/node/2/server-file-2")
-                        .length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/2/server-file-1").exists());
+        Assert.assertTrue(new File("/tmp/client/node/2/server-file-1").length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/2/server-file-2").exists());
+        Assert.assertTrue(new File("/tmp/client/node/2/server-file-2").length() > 0);
         Assert.assertTrue(new File("/tmp/client/node/2/subdir/server-subfile")
                 .exists());
         Assert.assertTrue(new File("/tmp/client/node/2/subdir/server-subfile")
@@ -435,18 +407,14 @@ public class MultiClientTest {
 
         Thread.sleep(sleepAmount);
 
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/node/1/subdir/server-subfile-2").exists());
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/node/1/subdir/server-subfile-2").length() == 1000000);
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/node/2/subdir/server-subfile-2").exists());
-        Assert
-                .assertTrue(new File(
-                        "/tmp/client/node/2/subdir/server-subfile-2").length() == 1000000);
+        Assert.assertTrue(new File("/tmp/client/node/1/subdir/server-subfile-2")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/node/1/subdir/server-subfile-2")
+                .length() == 1000000);
+        Assert.assertTrue(new File("/tmp/client/node/2/subdir/server-subfile-2")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/node/2/subdir/server-subfile-2")
+                .length() == 1000000);
 
         Thread.sleep(sleepAmount);
         // Thread.sleep(Long.MAX_VALUE);
@@ -475,10 +443,12 @@ public class MultiClientTest {
         /*
          * Create the sink nodes.
          */
+        final TrivialPlumber plumber = new TrivialPlumber(
+                sourceNode.getServerInfo());
         final SinkNode sinkNode1 = new SinkNode(new Archive(
-                "/tmp/client/removal/1"), Predicate.EVERYTHING);
+                "/tmp/client/removal/1"), Predicate.EVERYTHING, plumber);
         final SinkNode sinkNode2 = new SinkNode(new Archive(
-                "/tmp/client/removal/2"), Predicate.EVERYTHING);
+                "/tmp/client/removal/2"), Predicate.EVERYTHING, plumber);
         /*
          * Construct the network topology by hooking the nodes up.
          */

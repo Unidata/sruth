@@ -28,35 +28,47 @@ final class Client implements Callable<Void> {
     /**
      * Information on the remote server.
      */
-    private final ServerInfo    serverInfo;
+    private final ServerInfo    remoteServerInfo;
+    /**
+     * The port numbers of the associated local server.
+     */
+    private final int[]         localServerPorts;
 
     /**
-     * Constructs from information on the remote server.
+     * Constructs from information on the remote server, the port numbers of the
+     * local server, and the clearing house to be used.
      * 
-     * @param serverInfo
+     * @param remoteServerInfo
      *            Information on the remote server.
+     * @param localServerPorts
+     *            Port numbers of the associated local server. EACH PORT NUMBER
+     *            MUST BE UNIQUE TO THIS INSTANCE.
      * @param clearingHouse
      *            The clearing-house to use.
      * @throws NullPointerException
-     *             if {@code serverInfo == null || clearingHouse == null}.
+     *             if
+     *             {@code remoteServerInfo == null || localServerPorts == null || clearingHouse == null}
+     *             .
      */
-    Client(final ServerInfo serverInfo, final ClearingHouse clearingHouse) {
-        if (null == clearingHouse || null == serverInfo) {
+    Client(final ServerInfo remoteServerInfo, final int[] localServerPorts,
+            final ClearingHouse clearingHouse) {
+        if (null == clearingHouse || null == remoteServerInfo) {
             throw new NullPointerException();
         }
 
         this.clearingHouse = clearingHouse;
-        this.serverInfo = serverInfo;
+        this.remoteServerInfo = remoteServerInfo;
+        this.localServerPorts = localServerPorts.clone();
     }
 
     /**
-     * Returns information on the server to which this instance will connect or
-     * has connected.
+     * Returns information on the remote server to which this instance will
+     * connect or has connected.
      * 
-     * @return Information on the associated server.
+     * @return Information on the remote server.
      */
     ServerInfo getServerInfo() {
-        return serverInfo;
+        return remoteServerInfo;
     }
 
     /**
@@ -84,17 +96,22 @@ final class Client implements Callable<Void> {
         Thread.currentThread().setName(toString());
         final ConnectionToServer connection;
         try {
-            connection = new ConnectionToServer(serverInfo);
+            connection = new ConnectionToServer(remoteServerInfo,
+                    localServerPorts);
         }
         catch (final IOException e) {
             throw (ConnectException) new ConnectException(
-                    "Couldn't connect to " + serverInfo).initCause(e);
+                    "Couldn't connect to " + remoteServerInfo).initCause(e);
         }
         try {
             final Peer peer = new Peer(clearingHouse, connection);
-            logger.debug("Peer starting: {}", connection);
-            peer.call();
-            logger.debug("Peer completed: {}", peer);
+            logger.debug("Starting up: {}", peer);
+            try {
+                peer.call();
+            }
+            finally {
+                logger.debug("Terminated: {}", peer);
+            }
         }
         finally {
             connection.close();
@@ -120,7 +137,7 @@ final class Client implements Callable<Void> {
      */
     @Override
     public String toString() {
-        return "Client [serverInfo=" + serverInfo + ",localPredicate="
-                + clearingHouse.getPredicate() + "]";
+        return "Client [remoteServerInfo=" + remoteServerInfo
+                + ",localPredicate=" + clearingHouse.getPredicate() + "]";
     }
 }

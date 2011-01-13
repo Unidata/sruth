@@ -39,17 +39,19 @@ public class ClientTest {
 
     @BeforeClass
     public static void setUpBeforeClass() throws Exception {
-        system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
-        system(new String[] { "mkdir", "-p", "/tmp/server/subdir" });
-        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-1" });
-        system(new String[] { "sh", "-c", "date > /tmp/server/server-file-2" });
+        system(new String[] { "rm", "-rf", "/tmp/localServer", "/tmp/client" });
+        system(new String[] { "mkdir", "-p", "/tmp/localServer/subdir" });
         system(new String[] { "sh", "-c",
-                "date > /tmp/server/subdir/server-subfile" });
+                "date > /tmp/localServer/localServer-file-1" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/localServer/localServer-file-2" });
+        system(new String[] { "sh", "-c",
+                "date > /tmp/localServer/subdir/localServer-subfile" });
     }
 
     @AfterClass
     public static void tearDownAfterClass() throws Exception {
-        system(new String[] { "rm", "-rf", "/tmp/server", "/tmp/client" });
+        system(new String[] { "rm", "-rf", "/tmp/localServer", "/tmp/client" });
     }
 
     @Before
@@ -90,29 +92,32 @@ public class ClientTest {
         logger.info("testTermination():");
         system(new String[] { "mkdir", "-p", "/tmp/client/term" });
 
-        Archive archive = new Archive(Paths.get("/tmp/server"));
+        Archive archive = new Archive(Paths.get("/tmp/localServer"));
         final Server server = new Server(new ClearingHouse(archive,
                 Predicate.NOTHING));
         final Future<Void> serverFuture = start(server);
         final ServerInfo serverInfo = server.getServerInfo();
 
-        final Filter filter = new Filter("server-file-2");
+        final Filter filter = new Filter("localServer-file-2");
         final Predicate predicate = new Predicate(new Filter[] { filter });
         archive = new Archive(Paths.get("/tmp/client/term"));
         final ClearingHouse clearingHouse = new ClearingHouse(archive,
                 predicate);
-        final Client client = new Client(serverInfo, clearingHouse);
+        final Client client = new Client(serverInfo, new int[] { 0, 0, 0 },
+                clearingHouse);
         final Future<Void> clientFuture = start(client);
 
         clientFuture.get();
         stop(serverFuture);
 
-        Assert.assertFalse(new File("/tmp/client/term/server-file-1").exists());
-        Assert.assertTrue(new File("/tmp/client/term/server-file-2").exists());
-        Assert
-                .assertTrue(new File("/tmp/client/term/server-file-2").length() > 0);
-        Assert.assertFalse(new File("/tmp/client/term/subdir/server-subfile")
+        Assert.assertFalse(new File("/tmp/client/term/localServer-file-1")
                 .exists());
+        Assert.assertTrue(new File("/tmp/client/term/localServer-file-2")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/term/localServer-file-2")
+                .length() > 0);
+        Assert.assertFalse(new File(
+                "/tmp/client/term/subdir/localServer-subfile").exists());
     }
 
     @Test
@@ -121,7 +126,7 @@ public class ClientTest {
         logger.info("testNonTermination():");
         system(new String[] { "mkdir", "-p", "/tmp/client/nonterm" });
 
-        Archive archive = new Archive("/tmp/server");
+        Archive archive = new Archive("/tmp/localServer");
         final Server server = new Server(new ClearingHouse(archive,
                 Predicate.NOTHING));
         final Future<Void> serverFuture = start(server);
@@ -130,7 +135,8 @@ public class ClientTest {
         archive = new Archive("/tmp/client/nonterm");
         final ClearingHouse clearingHouse = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
-        final Client client = new Client(serverInfo, clearingHouse);
+        final Client client = new Client(serverInfo, new int[] { 0, 0, 0 },
+                clearingHouse);
         final Future<Void> clientFuture = start(client);
 
         Thread.sleep(200);
@@ -138,18 +144,18 @@ public class ClientTest {
         stop(clientFuture);
         stop(serverFuture);
 
-        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-1")
+        Assert.assertTrue(new File("/tmp/client/nonterm/localServer-file-1")
                 .exists());
-        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-1")
+        Assert.assertTrue(new File("/tmp/client/nonterm/localServer-file-1")
                 .length() > 0);
-        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-2")
+        Assert.assertTrue(new File("/tmp/client/nonterm/localServer-file-2")
                 .exists());
-        Assert.assertTrue(new File("/tmp/client/nonterm/server-file-2")
+        Assert.assertTrue(new File("/tmp/client/nonterm/localServer-file-2")
                 .length() > 0);
-        Assert.assertTrue(new File("/tmp/client/nonterm/subdir/server-subfile")
-                .exists());
-        Assert.assertTrue(new File("/tmp/client/nonterm/subdir/server-subfile")
-                .length() > 0);
+        Assert.assertTrue(new File(
+                "/tmp/client/nonterm/subdir/localServer-subfile").exists());
+        Assert.assertTrue(new File(
+                "/tmp/client/nonterm/subdir/localServer-subfile").length() > 0);
     }
 
     @Test
@@ -158,14 +164,14 @@ public class ClientTest {
         logger.info("testNodes():");
         system(new String[] { "mkdir", "-p", "/tmp/client/node" });
 
-        final SourceNode sourceNode = new SourceNode(new Archive(Paths
-                .get("/tmp/server")), Predicate.NOTHING);
+        final SourceNode sourceNode = new SourceNode(new Archive(
+                Paths.get("/tmp/localServer")), Predicate.NOTHING);
         final Future<Void> sourceFuture = start(sourceNode);
         final ServerInfo serverInfo = sourceNode.getServerInfo();
 
-        final SinkNode sinkNode = new SinkNode(new Archive(Paths
-                .get("/tmp/client/node")), Predicate.EVERYTHING);
-        sinkNode.add(serverInfo);
+        final SinkNode sinkNode = new SinkNode(new Archive(
+                Paths.get("/tmp/client/node")), Predicate.EVERYTHING,
+                new TrivialPlumber(serverInfo));
         final Future<Void> sinkFuture = start(sinkNode);
 
         Thread.sleep(200);
@@ -173,15 +179,17 @@ public class ClientTest {
         stop(sinkFuture);
         stop(sourceFuture);
 
-        Assert.assertTrue(new File("/tmp/client/node/server-file-1").exists());
-        Assert
-                .assertTrue(new File("/tmp/client/node/server-file-1").length() > 0);
-        Assert.assertTrue(new File("/tmp/client/node/server-file-2").exists());
-        Assert
-                .assertTrue(new File("/tmp/client/node/server-file-2").length() > 0);
-        Assert.assertTrue(new File("/tmp/client/node/subdir/server-subfile")
+        Assert.assertTrue(new File("/tmp/client/node/localServer-file-1")
                 .exists());
-        Assert.assertTrue(new File("/tmp/client/node/subdir/server-subfile")
+        Assert.assertTrue(new File("/tmp/client/node/localServer-file-1")
                 .length() > 0);
+        Assert.assertTrue(new File("/tmp/client/node/localServer-file-2")
+                .exists());
+        Assert.assertTrue(new File("/tmp/client/node/localServer-file-2")
+                .length() > 0);
+        Assert.assertTrue(new File(
+                "/tmp/client/node/subdir/localServer-subfile").exists());
+        Assert.assertTrue(new File(
+                "/tmp/client/node/subdir/localServer-subfile").length() > 0);
     }
 }

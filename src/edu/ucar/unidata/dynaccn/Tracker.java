@@ -13,6 +13,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -32,31 +33,29 @@ import org.slf4j.LoggerFactory;
  * Keeps track of subscriptions by sink-nodes and gives sink-nodes contact
  * information for the source-node and/or other sink-nodes.
  * 
- * Instances are thread-compatible but not thread-safe.
+ * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-@NotThreadSafe
+@ThreadSafe
 final class Tracker extends BlockingTask<Void> {
     /**
      * An n-to-m bidirectional mapping between servers and the filters of their
      * data-selection predicates.
      * 
-     * Instances are thread-safe.
+     * Instances are thread-compatible but not thread-safe.
      * 
      * @author Steven R. Emmerson
      */
-    @ThreadSafe
+    @NotThreadSafe
     private static final class FilterServerMap {
         /**
          * The map from filters to servers.
          */
-        @GuardedBy("this")
         private final Map<Filter, Set<ServerInfo>> serverSets = new HashMap<Filter, Set<ServerInfo>>();
         /**
          * The map from servers to filters.
          */
-        @GuardedBy("this")
         private final Map<ServerInfo, Set<Filter>> filterSets = new HashMap<ServerInfo, Set<Filter>>();
 
         /**
@@ -68,7 +67,7 @@ final class Tracker extends BlockingTask<Void> {
          *            The filter to satisfy.
          * @return The set of satisfying servers. May be empty.
          */
-        synchronized Set<ServerInfo> get(final Filter filter) {
+        Set<ServerInfo> getServers(final Filter filter) {
             Set<ServerInfo> serverSet = serverSets.get(filter);
             if (serverSet == null) {
                 serverSet = Collections.emptySet();
@@ -77,15 +76,15 @@ final class Tracker extends BlockingTask<Void> {
         }
 
         /**
-         * Adds to a mapping from a filter to a server. Creates the entry if it
-         * doesn't already exist.
+         * Adds to a mapping from a filter to a sink-node's server. Creates the
+         * entry if it doesn't already exist.
          * 
          * @param filter
          *            The file-selection filter.
          * @param serverInfo
-         *            Information on the server.
+         *            Information on the sink-node's server.
          */
-        synchronized void add(final Filter filter, final ServerInfo serverInfo) {
+        void add(final Filter filter, final ServerInfo serverInfo) {
             Set<ServerInfo> serverInfos = serverSets.get(filter);
             if (null == serverInfos) {
                 serverInfos = new TreeSet<ServerInfo>();
@@ -102,12 +101,12 @@ final class Tracker extends BlockingTask<Void> {
         }
 
         /**
-         * Removes a server.
+         * Removes a sink-node's server.
          * 
          * @param serverInfo
-         *            Information on the server to be removed.
+         *            Information on the sink-node's server to be removed.
          */
-        synchronized void remove(final ServerInfo serverInfo) {
+        void remove(final ServerInfo serverInfo) {
             final Set<Filter> filters = filterSets.get(serverInfo);
             if (filters != null) {
                 for (final Filter filter : filters) {
@@ -188,7 +187,7 @@ final class Tracker extends BlockingTask<Void> {
                 throw e;
             }
             catch (final Throwable t) {
-                logger.warn("Unexpected error on socket {}: {}", socket, t);
+                logger.error("Unexpected error on socket {}: {}", socket, t);
                 throw Util.launderThrowable(t);
             }
             finally {
@@ -237,17 +236,27 @@ final class Tracker extends BlockingTask<Void> {
                                                               TimeUnit.SECONDS,
                                                               new SynchronousQueue<Runnable>());
     /**
-     * The server socket on which this instance listens.
+     * The socket on which this instance listens.
      */
     private final ServerSocket    serverSocket;
     /**
      * The filter-to-servers map.
      */
+    @GuardedBy("this")
     private final FilterServerMap filterServerMapping = new FilterServerMap();
     /**
      * Information on the source-server.
      */
     private final ServerInfo      sourceServer;
+    /**
+     * The set of directly-connected clients.
+     */
+    @GuardedBy("this")
+    private final Set<ServerInfo> directClients       = new HashSet<ServerInfo>();
+    /**
+     * The maximum number of directly-connected clients.
+     */
+    private final int             directClientLimit;
 
     /**
      * Constructs from information on the source-server.
@@ -256,16 +265,26 @@ final class Tracker extends BlockingTask<Void> {
      *            The set of candidate port numbers.
      * @param sourceServer
      *            Information on the source-server.
+     * @param directClientLimit
+     *            The maximum number of directly-connected clients.
+     * @throws IllegalArgumentException
+     *             if {@code directClientLimit <= 0};
      * @throws IOException
      *             if a server socket can't be created.
      * @throws NullPointerException
      *             if {@code sourceServer == null || portSet == null}.
      */
-    Tracker(final PortNumberSet portSet, final ServerInfo sourceServer)
-            throws IOException {
+    Tracker(final PortNumberSet portSet, final ServerInfo sourceServer,
+            final int directClientLimit) throws IOException {
         if (null == sourceServer) {
             throw new NullPointerException();
         }
+        if (directClientLimit <= 0) {
+            throw new IllegalArgumentException(
+                    "Invalid directly-connected client limit: "
+                            + directClientLimit);
+        }
+        this.directClientLimit = directClientLimit;
         serverSocket = new ServerSocket();
         try {
             for (final int port : portSet) {
@@ -296,9 +315,9 @@ final class Tracker extends BlockingTask<Void> {
     }
 
     /**
-     * Returns the local address of the server socket.
+     * Returns the local address of the this instance's server socket.
      * 
-     * @return The local address of the server socket.
+     * @return The local address of the this instance's server socket.
      */
     InetSocketAddress getAddress() {
         return (InetSocketAddress) serverSocket.getLocalSocketAddress();
@@ -306,7 +325,7 @@ final class Tracker extends BlockingTask<Void> {
 
     /**
      * Executes this instance. Completes normally if and only if the current
-     * thread is interrupted. Closes the server socket.
+     * thread is interrupted. Closes the tracker socket.
      * 
      * @throws IOException
      *             if an I/O error occurs.
@@ -343,14 +362,25 @@ final class Tracker extends BlockingTask<Void> {
     }
 
     /**
-     * Removes a server from the set of known servers.
+     * Handles the disconnection of a sink-node.
      * 
      * @param serverInfo
-     *            Information on the server.
+     *            Information on the sink-node's server.
      */
-    void removeServer(final ServerInfo serverInfo) {
-        // TODO: could be from malware => vet source and verify server
-        // unavailability
+    synchronized void clientDisconnected(final ServerInfo serverInfo) {
+        directClients.remove(serverInfo);
+        filterServerMapping.remove(serverInfo);
+    }
+
+    /**
+     * Handles a report of a sink-node's server going offline.
+     * 
+     * @param serverInfo
+     *            Information on the sink-node's server.
+     */
+    synchronized void serverOffline(final ServerInfo serverInfo) {
+        // TODO: could be from malware => vet source and verify
+        // unavailability of sink-node's server
         filterServerMapping.remove(serverInfo);
     }
 
@@ -365,24 +395,35 @@ final class Tracker extends BlockingTask<Void> {
     }
 
     /**
-     * Returns an object that will connect a sink-node to the servers that will
-     * satisfy its data-selection predicate.
+     * Tells a {@link TrackerPlumber} about the servers that can satisfy its sink-node
+     * predicate.
      * 
      * @param predicate
      *            The file-selection predicate to satisfy.
+     * @param sinkServerInfo
+     *            Information on the sink-node's server.
+     * @param connector
+     *            The object that will connect the sink-node to the servers that
+     *            can satisfy its predicate.
      * @return A object that will appropriately connect a sink-node.
      */
-    Plumber getPlumber(final Predicate predicate) {
-        final Plumber plumber = new Plumber();
+    synchronized void informConnector(final Predicate predicate,
+            final ServerInfo sinkServerInfo, final Connector connector) {
         for (final Filter filter : predicate) {
-            final Set<ServerInfo> servers = filterServerMapping.get(filter);
+            final Set<ServerInfo> servers = filterServerMapping
+                    .getServers(filter);
             for (final ServerInfo serverInfo : servers) {
-                plumber.add(serverInfo, filter);
+                // Only consider servers that aren't the sink-node's server
+                if (!serverInfo.equals(sinkServerInfo)) {
+                    connector.add(serverInfo, filter);
+                }
             }
         }
-        // TODO: don't always add the source-server
-        plumber.put(sourceServer, predicate);
-        return plumber;
+        if (directClients.size() < directClientLimit) {
+            connector.put(sourceServer, predicate);
+            directClients.add(sinkServerInfo);
+        }
+        register(sinkServerInfo, predicate);
     }
 
     /**
@@ -390,13 +431,14 @@ final class Tracker extends BlockingTask<Void> {
      * predicate.
      * 
      * @param serverInfo
-     *            Information on the server.
+     *            Information on the sink-node's server.
      * @param predicate
      *            The file-selection predicate.
      * @throws NullPointerException
      *             if {@code serverInfo == null || predicate == null}.
      */
-    void register(final ServerInfo serverInfo, final Predicate predicate) {
+    private void register(final ServerInfo serverInfo, final Predicate predicate) {
+        assert Thread.holdsLock(this);
         for (final Filter filter : predicate) {
             filterServerMapping.add(filter, serverInfo);
         }

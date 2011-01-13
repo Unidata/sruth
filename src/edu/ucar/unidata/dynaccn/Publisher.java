@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.prefs.Preferences;
 
 import net.jcip.annotations.NotThreadSafe;
 
@@ -25,6 +26,11 @@ import org.slf4j.LoggerFactory;
 
 /**
  * A publisher of data. Runs a source-node and a tracker.
+ * 
+ * The number of directly-connected clients is limited to the class preference
+ * {@value #DIRECT_CLIENT_LIMIT_NAME} (default
+ * {@value #DEFAULT_DIRECT_CLIENT_LIMIT}), which is read at object
+ * initialization.
  * 
  * Instances are thread-compatible but not thread-safe.
  * 
@@ -35,8 +41,22 @@ final class Publisher implements Callable<Void> {
     /**
      * The logger for this class.
      */
-    private static final Logger                   logger          = LoggerFactory
-                                                                          .getLogger(Subscriber.class);
+    private static final Logger                   logger                      = LoggerFactory
+                                                                                      .getLogger(Subscriber.class);
+    /**
+     * The class-specific user preferences.
+     */
+    private static final Preferences              prefs                       = PreferencesFactory
+                                                                                      .userNodeForClass(Publisher.class);
+    /**
+     * The name of the preference for the limit on the number of
+     * directly-connected clients.
+     */
+    private static final String                   DIRECT_CLIENT_LIMIT_NAME    = "directClientLimit";
+    /**
+     * The default limit on the number of directly-fed clients ({@value} ).
+     */
+    private static final int                      DEFAULT_DIRECT_CLIENT_LIMIT = 5;
     /**
      * The source-node.
      */
@@ -48,26 +68,29 @@ final class Publisher implements Callable<Void> {
     /**
      * The {@link ExecutorService} for the tracker and source-node tasks.
      */
-    private final ExecutorService                 executorService = new CancellingExecutor(
-                                                                          2,
-                                                                          2,
-                                                                          0,
-                                                                          TimeUnit.SECONDS,
-                                                                          new SynchronousQueue<Runnable>());
+    private final ExecutorService                 executorService             = new CancellingExecutor(
+                                                                                      2,
+                                                                                      2,
+                                                                                      0,
+                                                                                      TimeUnit.SECONDS,
+                                                                                      new SynchronousQueue<Runnable>());
     /**
      * The task manager.
      */
-    private final ExecutorCompletionService<Void> taskManager     = new ExecutorCompletionService<Void>(
-                                                                          executorService);
+    private final ExecutorCompletionService<Void> taskManager                 = new ExecutorCompletionService<Void>(
+                                                                                      executorService);
     /**
      * The data archive.
      */
     private final Archive                         archive;
 
     /**
-     * Constructs from the pathname of the root of the file-tree, the tracker
-     * port number, and a range of candidate port numbers for the tracker and
-     * server.
+     * Constructs from the pathname of the root of the file-tree and a range of
+     * candidate port numbers for the tracker and localServer.
+     * 
+     * The number of directly-connected clients is limited to the value of the
+     * {@value #DIRECT_CLIENT_LIMIT_NAME} preference (default
+     * {@value #DEFAULT_DIRECT_CLIENT_LIMIT}).
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -81,17 +104,47 @@ final class Publisher implements Callable<Void> {
      *             if {@code rootDir == null || predicate == null || portSet ==
      *             null}.
      * @throws SocketException
-     *             if a server-side socket couldn't be created.
+     *             if a localServer-side socket couldn't be created.
      */
     Publisher(final Path rootDir, final PortNumberSet portSet)
             throws IOException {
+        this(rootDir, portSet, prefs.getInt(DIRECT_CLIENT_LIMIT_NAME,
+                DEFAULT_DIRECT_CLIENT_LIMIT));
+    }
+
+    /**
+     * Constructs from the pathname of the root of the file-tree, a range of
+     * candidate port numbers for the tracker and localServer, and the limit on the
+     * number of directly-fed clients.
+     * 
+     * @param rootDir
+     *            Pathname of the root of the file-tree.
+     * @param portSet
+     *            The set of candidate port numbers.
+     * @param directClientLimit
+     *            The maximum number of directly-connected clients.
+     * @throws IllegalArgumentException
+     *             if {@code directClientLimit <= 0}.
+     * @throws IOException
+     *             if an unused port in the given range couldn't be found.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null || predicate == null || portSet ==
+     *             null}.
+     * @throws SocketException
+     *             if a localServer-side socket couldn't be created.
+     */
+    Publisher(final Path rootDir, final PortNumberSet portSet,
+            final int directClientLimit) throws IOException {
         archive = new Archive(rootDir);
         sourceNode = new SourceNode(archive, Predicate.NOTHING, portSet);
-        tracker = new Tracker(portSet, sourceNode.getServerInfo());
-        sourceNode.addDisconnectListener(new Server.DisconnectListener() {
+        tracker = new Tracker(portSet, sourceNode.getServerInfo(),
+                directClientLimit);
+        sourceNode.addDisconnectListener(new DisconnectListener() {
             @Override
-            void clientDisconnected(final ServerInfo serverInfo) {
-                tracker.removeServer(serverInfo);
+            public void clientDisconnected(final ServerInfo serverInfo) {
+                tracker.clientDisconnected(serverInfo);
             }
         });
     }

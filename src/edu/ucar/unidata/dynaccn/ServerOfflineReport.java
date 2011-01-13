@@ -25,15 +25,15 @@ final class ServerOfflineReport implements Serializable, TrackerTask {
      */
     private static final long serialVersionUID = 1L;
     /**
-     * Information on the offline server.
+     * Information on the offline localServer.
      */
     private final ServerInfo  serverInfo;
 
     /**
-     * Constructs from information on the offline server.
+     * Constructs from information on the offline localServer.
      * 
      * @param serverInfo
-     *            Information on the offline server.
+     *            Information on the offline localServer.
      * @throws NullPointerException
      *             if {@code serverInfo == null}.
      */
@@ -45,7 +45,7 @@ final class ServerOfflineReport implements Serializable, TrackerTask {
     }
 
     /**
-     * Interacts with a {@link Tracker} to handle a server going offline.
+     * Interacts with a {@link Tracker} to handle a localServer going offline.
      * 
      * @param tracker
      *            The {@link Tracker} to use.
@@ -55,7 +55,7 @@ final class ServerOfflineReport implements Serializable, TrackerTask {
      *             if an I/O error occurs.
      */
     public void process(final Tracker tracker, final Socket socket) {
-        tracker.removeServer(serverInfo);
+        tracker.serverOffline(serverInfo);
     }
 
     /*

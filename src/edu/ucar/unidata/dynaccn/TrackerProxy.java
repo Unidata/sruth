@@ -55,7 +55,7 @@ final class TrackerProxy {
      * @throws ClassNotFoundException
      *             if the reply from the tracker is not understood.
      */
-    Plumber getPlumber(final Inquisitor inquisitor) throws IOException,
+    Connector getConnector(final Inquisitor inquisitor) throws IOException,
             ClassNotFoundException {
         // TODO: institute a timeout mechanism
         final Socket socket = new Socket();
@@ -66,11 +66,11 @@ final class TrackerProxy {
         oos.flush();
         final InputStream inputStream = socket.getInputStream();
         final ObjectInputStream ois = new ObjectInputStream(inputStream);
-        final Plumber map = (Plumber) ois.readObject();
+        final Connector connector = (Connector) ois.readObject();
         oos.close();
         ois.close();
         socket.close();
-        return map;
+        return connector;
     }
 
     /*

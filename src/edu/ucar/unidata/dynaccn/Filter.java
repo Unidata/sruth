@@ -19,7 +19,7 @@ import java.nio.file.Paths;
  * 
  * @author Steven R. Emmerson
  */
-class Filter implements Serializable {
+class Filter implements Comparable<Filter>, Serializable {
     /**
      * The serial version ID.
      */
@@ -137,6 +137,53 @@ class Filter implements Serializable {
      */
     boolean exactlySpecifies(final FileInfo fileInfo) {
         return fileInfo.getPath().equals(patternPath);
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((pattern == null)
+                ? 0
+                : pattern.hashCode());
+        return result;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#equals(java.lang.Object)
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final Filter other = (Filter) obj;
+        if (pattern == null) {
+            return other.pattern == null;
+        }
+        else {
+            return (other.pattern == null)
+                    ? false
+                    : compareTo(other) == 0;
+        }
+    }
+
+    @Override
+    public int compareTo(final Filter that) {
+        return pattern.compareTo(that.pattern);
     }
 
     /*

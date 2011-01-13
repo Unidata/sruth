@@ -73,21 +73,21 @@ final class Archive {
          */
         private final Map<Path, WatchKey> keys = new HashMap<Path, WatchKey>();
         /**
-         * The associated server.
+         * The associated localServer.
          */
         private final Server              server;
 
         /**
-         * Constructs from the server to notify about new files. Doesn't return.
+         * Constructs from the localServer to notify about new files. Doesn't return.
          * 
-         * @param server
-         *            The server to notify about new files.
+         * @param localServer
+         *            The localServer to notify about new files.
          * @throws IOException
          *             if an I/O error occurs.
          * @throws InterruptedException
          *             if the current thread is interrupted.
          * @throws NullPointerException
-         *             if {@code server == null}.
+         *             if {@code localServer == null}.
          */
         FileWatcher(final Server server) throws IOException,
                 InterruptedException {
@@ -184,7 +184,7 @@ final class Archive {
             // Obviated by addition of file-deleter to this class.
             // final Path relativePath = rootDir.relativize(path);
             // final FileId fileId = new FileId(relativePath);
-            // server.removed(fileId);
+            // localServer.removed(fileId);
         }
 
         /**
@@ -1025,8 +1025,8 @@ final class Archive {
      * Watches the archive for new files and removed files and directories.
      * Ignores hidden directories. Doesn't return.
      * 
-     * @param server
-     *            The server.
+     * @param localServer
+     *            The localServer.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws IOException

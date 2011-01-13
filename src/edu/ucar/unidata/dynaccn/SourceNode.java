@@ -26,7 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A server and no clients.
+ * A localServer and no clients.
  * 
  * Instances are thread-safe.
  * 
@@ -35,7 +35,7 @@ import org.slf4j.LoggerFactory;
 @ThreadSafe
 final class SourceNode extends AbstractNode {
     /**
-     * Causes the server to be notified of newly-created files in the file-tree.
+     * Causes the localServer to be notified of newly-created files in the file-tree.
      * 
      * Instances are thread-safe.
      * 
@@ -44,7 +44,7 @@ final class SourceNode extends AbstractNode {
     private final class FileWatcher implements Callable<Void> {
         @Override
         public Void call() throws InterruptedException, IOException {
-            archive.watchArchive(server);
+            archive.watchArchive(localServer);
             return null;
         }
     }
@@ -60,7 +60,7 @@ final class SourceNode extends AbstractNode {
      * @param predicate
      *            Specification of the locally-desired data.
      * @throws IOException
-     *             if the server can't connect to the network.
+     *             if the localServer can't connect to the network.
      * @throws NullPointerException
      *             if {@code rootDir == null || predicate == null}.
      */
@@ -71,19 +71,19 @@ final class SourceNode extends AbstractNode {
 
     /**
      * Constructs from the data archive, a specification of the locally-desired
-     * data, and the port numbers for the server.
+     * data, and the port numbers for the localServer.
      * 
      * @param archive
      *            The data archive.
      * @param predicate
      *            Specification of the locally-desired data.
      * @param serverPorts
-     *            Port numbers for the server or {@code null}. A port number of
+     *            Port numbers for the localServer or {@code null}. A port number of
      *            zero will cause the operating-system to assign an ephemeral
-     *            port. If {@code null} then all ports used by the server will
+     *            port. If {@code null} then all ports used by the localServer will
      *            be ephemeral.
      * @throws IOException
-     *             if the server can't connect to the network.
+     *             if the localServer can't connect to the network.
      * @throws NullPointerException
      *             if {@code rootDir == null || predicate == null}.
      */
@@ -94,7 +94,7 @@ final class SourceNode extends AbstractNode {
 
     /**
      * Constructs from the data archive, a specification of the locally-desired
-     * data, and a range for the port numbers for the server.
+     * data, and a range for the port numbers for the localServer.
      * 
      * If {@code minPort == 0 && maxPort == 0} then the operating-system will
      * assign ephemeral ports.
@@ -111,7 +111,7 @@ final class SourceNode extends AbstractNode {
      *             if {@code rootDir == null || predicate == null || portSet ==
      *             null}.
      * @throws SocketException
-     *             if a server-side socket couldn't be created.
+     *             if a localServer-side socket couldn't be created.
      */
     SourceNode(final Archive archive, final Predicate predicate,
             final PortNumberSet portSet) throws IOException {
@@ -132,14 +132,14 @@ final class SourceNode extends AbstractNode {
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         /*
-         * The {@link ExecutorService} for the server and file-watcher tasks.
+         * The {@link ExecutorService} for the localServer and file-watcher tasks.
          */
         final ExecutorService executorService = new ThreadPoolExecutor(2, 2, 0,
                 TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
         final ExecutorCompletionService<Void> taskManager = new ExecutorCompletionService<Void>(
                 executorService);
         try {
-            taskManager.submit(server);
+            taskManager.submit(localServer);
             taskManager.submit(new FileWatcher());
             final Future<Void> future = taskManager.take();
             try {

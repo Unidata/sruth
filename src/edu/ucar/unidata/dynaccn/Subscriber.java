@@ -57,8 +57,8 @@ final class Subscriber implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the file-tree, the socket address of the
-     * remote tracker, and the predicate for the desired data. The server will
-     * listen on ports assigned by the operating-system.
+     * remote tracker, and the predicate for the desired data. The localServer
+     * will listen on ports assigned by the operating-system.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -80,10 +80,10 @@ final class Subscriber implements Callable<Void> {
     /**
      * Constructs from the pathname of the file-tree, the socket address of the
      * tracker, the predicate for the desired data, and a range of port numbers
-     * for the server.
+     * for the localServer.
      * 
      * If {@code minPort == 0 && maxPort == 0} then the operating-system will
-     * assign ephemeral ports to the server.
+     * assign ephemeral ports to the localServer.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -101,7 +101,7 @@ final class Subscriber implements Callable<Void> {
      *             if {@code rootDir == null || predicate == null || portSet ==
      *             null}.
      * @throws SocketException
-     *             if a server-side socket couldn't be created.
+     *             if a localServer-side socket couldn't be created.
      */
     Subscriber(final Path rootDir, final SocketAddress trackerAddress,
             final Predicate predicate, final PortNumberSet portSet)
@@ -111,8 +111,8 @@ final class Subscriber implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the file-tree, information about the
-     * tracker, and the predicate for the desired data. The server will listen
-     * on ephemeral ports assigned by the operating-system.
+     * tracker, and the predicate for the desired data. The localServer will
+     * listen on ephemeral ports assigned by the operating-system.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -132,12 +132,12 @@ final class Subscriber implements Callable<Void> {
     }
 
     /**
-     * Constructs from the pathname of the file-tree, information about the
+     * Constructs from the pathname of the archive, information about the
      * tracker, the predicate for the desired data, and a range of port numbers
-     * for the server.
+     * for the localServer.
      * 
      * If {@code minPort == 0 && maxPort == 0} then the operating-system will
-     * assign ephemeral ports to the server.
+     * assign ephemeral ports to the localServer.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -157,7 +157,7 @@ final class Subscriber implements Callable<Void> {
      *             if {@code rootDir == null || trackerProxy == null ||
      *             predicate == null || portSet == null}.
      * @throws SocketException
-     *             if a server-side socket couldn't be created.
+     *             if a localServer-side socket couldn't be created.
      */
     Subscriber(final Path rootDir, final TrackerProxy trackerProxy,
             final Predicate predicate, final PortNumberSet portSet)
@@ -172,7 +172,8 @@ final class Subscriber implements Callable<Void> {
             throw new NullPointerException();
         }
         archive = new Archive(rootDir);
-        sinkNode = new SinkNode(archive, predicate, portSet);
+        sinkNode = new SinkNode(archive, predicate, portSet, new TrackerPlumber(
+                trackerProxy));
         this.trackerProxy = trackerProxy;
         this.predicate = predicate;
     }
@@ -214,7 +215,7 @@ final class Subscriber implements Callable<Void> {
      * @throws ClassNotFoundException
      *             if the reply from the tracker can't be understood.
      * @throws ExecutionException
-     *             if the server throws an exception
+     *             if the localServer throws an exception
      * @throws IllegalStateException
      *             if {@link #isRunning()} returns {@code true}.
      * @throws InterruptedException
@@ -231,10 +232,6 @@ final class Subscriber implements Callable<Void> {
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         try {
-            final Inquisitor inquisitor = new Inquisitor(sinkNode
-                    .getServerInfo(), predicate);
-            final Plumber plumber = trackerProxy.getPlumber(inquisitor);
-            plumber.connect(sinkNode);
             sinkNode.call();
         }
         finally {
@@ -342,8 +339,9 @@ final class Subscriber implements Callable<Void> {
         }
         Subscriber subscriber = null;
         try {
-            subscriber = new Subscriber(rootDir, subscription
-                    .getTrackerAddress(), subscription.getPredicate());
+            subscriber = new Subscriber(rootDir,
+                    subscription.getTrackerAddress(),
+                    subscription.getPredicate());
         }
         catch (final Exception e) {
             logger.error("Couldn't subscribe to " + subscription, e);

@@ -152,12 +152,12 @@ public final class SubscriberApp {
     private static final String      PEER_COUNT             = "peerCount";
     /**
      * The name of the preference that's the minimum potential port number for
-     * the server.
+     * the localServer.
      */
     private static final String      MIN_PORT               = "minPort";
     /**
      * The name of the preference that's the maximum potential port number for
-     * the server.
+     * the localServer.
      */
     private static final String      MAX_PORT               = "maxPort";
     /**
@@ -217,19 +217,19 @@ public final class SubscriberApp {
      */
     private SubscriberTask           subscriberTask;
     /**
-     * The minimum potential port number for the server.
+     * The minimum potential port number for the localServer.
      */
     private int                      minPort;
     /**
-     * The maximum potential port number for the server.
+     * The maximum potential port number for the localServer.
      */
     private int                      maxPort;
     /**
-     * The text field for the minimum potential port number for the server.
+     * The text field for the minimum potential port number for the localServer.
      */
     private final JTextField         minPortField;
     /**
-     * The text field for the maximum potential port number for the server.
+     * The text field for the maximum potential port number for the localServer.
      */
     private final JTextField         maxPortField;
 

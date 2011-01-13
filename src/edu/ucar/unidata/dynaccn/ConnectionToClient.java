@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.net.Socket;
 
 /**
- * The server-side of a connection to a client.
+ * A connection to a client.
  * 
  * Instances are thread-safe.
  * 
@@ -22,8 +22,8 @@ final class ConnectionToClient extends Connection {
      * port-numbers are those of the server associated with the client.
      * 
      * @param socket
-     *            The server-side socket to add. Must have just come from a
-     *            {@link java.net.ServerSocket#accept()}.
+     *            The socket that's connected to the client. Must have just come
+     *            from a {@link java.net.ServerSocket#accept()}.
      * @throws IOException
      *             if an I/O error occurs.
      */

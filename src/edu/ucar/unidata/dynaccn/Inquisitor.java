@@ -14,7 +14,8 @@ import java.net.Socket;
 import net.jcip.annotations.NotThreadSafe;
 
 /**
- * Asks a {@link Tracker} what nodes are available.
+ * Asks a {@link Tracker} what servers are available to satisfy a subscription
+ * request.
  * 
  * Instances are thread-compatible but not thread-safe.
  * 
@@ -27,9 +28,9 @@ final class Inquisitor implements Serializable, TrackerTask {
      */
     private static final long serialVersionUID = 1L;
     /**
-     * Information on the associated server.
+     * Information on the associated sink-node's server.
      */
-    private final ServerInfo  serverInfo;
+    private final ServerInfo  sinkServerInfo;
     /**
      * The file-selection predicate.
      */
@@ -37,20 +38,20 @@ final class Inquisitor implements Serializable, TrackerTask {
 
     /**
      * Constructs from the predicate for selecting files and information on the
-     * server that will be available to retransmit the files.
+     * sink-node's server that will retransmit the files.
      * 
-     * @param serverInfo
-     *            Information on the associated server.
+     * @param sinkServerInfo
+     *            Information on the sink-node's server.
      * @param predicate
      *            The file-selection predicate.
      * @throws NullPointerException
-     *             if {@code predicate == null || serverInfo == null}.
+     *             if {@code predicate == null || sinkServerInfo == null}.
      */
-    Inquisitor(final ServerInfo serverInfo, final Predicate predicate) {
-        if (null == predicate || null == serverInfo) {
+    Inquisitor(final ServerInfo sinkServerInfo, final Predicate predicate) {
+        if (null == predicate || null == sinkServerInfo) {
             throw new NullPointerException();
         }
-        this.serverInfo = serverInfo;
+        this.sinkServerInfo = sinkServerInfo;
         this.predicate = predicate;
     }
 
@@ -71,9 +72,9 @@ final class Inquisitor implements Serializable, TrackerTask {
         final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
         try {
             // TODO: vet the predicate against the source; reject if illegal
-            final Plumber plumber = tracker.getPlumber(predicate);
-            oos.writeObject(plumber);
-            tracker.register(serverInfo, predicate);
+            final Connector connector = new Connector();
+            tracker.informConnector(predicate, sinkServerInfo, connector);
+            oos.writeObject(connector);
         }
         finally {
             try {
@@ -91,11 +92,11 @@ final class Inquisitor implements Serializable, TrackerTask {
      */
     @Override
     public String toString() {
-        return "Inquisitor [predicate=" + predicate + ", serverInfo="
-                + serverInfo + "]";
+        return "Inquisitor [predicate=" + predicate + ", sinkServerInfo="
+                + sinkServerInfo + "]";
     }
 
     private Object readResolve() {
-        return new Inquisitor(serverInfo, predicate);
+        return new Inquisitor(sinkServerInfo, predicate);
     }
 }

@@ -1,11 +1,13 @@
 package edu.ucar.unidata.dynaccn;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
@@ -17,7 +19,6 @@ import java.util.concurrent.Future;
 
 import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -30,25 +31,23 @@ public class PubSubTest {
                                                                                Executors
                                                                                        .newCachedThreadPool());
     /**
-     * The maximum size of a created file in bytes.
+     * The maximum size of a created file in bytes. A large NEXRAD2 file is
+     * about 110000 octets.
      */
-    private static int                             MAX_SIZE            = 110000;                               // largest
-    // NEXRAD2
-    // file
+    private static int                             MAX_SIZE            = 110000;
     /**
-     * The sleep interval to be used.
+     * The sleep interval to be used before checking that the files have been
+     * successfully conveyed.
      */
-    private static long                            sleepAmount         = 500;
+    private static long                            sleepAmount         = 600;
     /**
      * The root of the publisher file-tree.
      */
-    private static final Path                      PUB_ROOT            = Paths
-                                                                               .get("/tmp/dynaccn/publisher");
+    private static final Path                      PUB_ROOT            = Paths.get("/tmp/dynaccn/publisher");
     /**
      * The root of the subscriber file-trees.
      */
-    private static final Path                      SUB_ROOT            = Paths
-                                                                               .get("/tmp/dynaccn/subscriber");
+    private static final Path                      SUB_ROOT            = Paths.get("/tmp/dynaccn/subscriber");
     /**
      * The number of subscribers.
      */
@@ -91,9 +90,9 @@ public class PubSubTest {
         final ProcessBuilder builder = new ProcessBuilder(cmd);
         builder.inheritIO();
         final Process process = builder.start();
-        Assert.assertNotNull(process);
+        assertNotNull(process);
         final int status = process.waitFor();
-        Assert.assertEquals(0, status);
+        assertEquals(0, status);
     }
 
     /**
@@ -131,8 +130,7 @@ public class PubSubTest {
          * Get sleep amount.
          */
         final String sleepAmountString = System.getProperty(PubSubTest.class
-                .getName()
-                + ".sleepAmount");
+                .getName() + ".sleepAmount");
         if (null != sleepAmountString) {
             sleepAmount = Long.valueOf(sleepAmountString);
         }
@@ -270,11 +268,12 @@ public class PubSubTest {
         }
     }
 
+    @SuppressWarnings("unchecked")
     @Test
     public void testDynamicNetworking() throws IOException,
             InterruptedException, ExecutionException {
         final int MAX_SUBSCRIBERS = 3;
-        final int SLEEP_TIME = 2000;
+        final int SLEEP_TIME = 1000;
         final String SUBSCRIBER_ARCHIVE_PREFIX = "/tmp/SubscriberApp";
         final int ROUND_COUNT = 3;
         /*
@@ -282,42 +281,48 @@ public class PubSubTest {
          * archive.
          */
         final Path pubRoot = Paths.get("/tmp/publisher");
-        final Publisher publisher = new Publisher(pubRoot, PortNumberSet.ZERO);
-        final Future<Void> pubFuture = start(publisher);
-
-        final List<Future<Void>> subFutures = new ArrayList<Future<Void>>(
+        final Publisher publisher = new Publisher(pubRoot, PortNumberSet.ZERO,
                 MAX_SUBSCRIBERS);
+        final Future<Void> pubFuture = start(publisher);
+        assertNotNull(pubFuture);
+
+        final Future<?>[] subFutures = new Future<?>[MAX_SUBSCRIBERS];
         for (int round = 0; round < ROUND_COUNT; round++) {
             /*
              * For each subscriber:
              */
             for (int subIndex = 0; subIndex < MAX_SUBSCRIBERS; subIndex++) {
                 int prevClientCount = publisher.getClientCount();
+                Future<Void> future;
                 // Stop the previous instance if it exists.
-                if (subIndex < subFutures.size()) {
-                    stop(subFutures.get(subIndex));
-                    subFutures.remove(subIndex);
+                if (round == 0) {
+                    assertEquals(prevClientCount, subIndex);
+                }
+                else {
+                    assertEquals(prevClientCount, MAX_SUBSCRIBERS);
+                    future = (Future<Void>) subFutures[subIndex];
+                    assertNotNull(future);
+                    stop(future);
                     Thread.sleep(SLEEP_TIME);
-                    Assert.assertEquals(prevClientCount - 1, publisher
-                            .getClientCount());
-                    prevClientCount--;
+                    assertEquals(--prevClientCount, publisher.getClientCount());
                 }
                 final Path subRoot = Paths.get(SUBSCRIBER_ARCHIVE_PREFIX
                         + (subIndex + 1));
-                final Subscriber subscriber = new Subscriber(subRoot, publisher
-                        .getTrackerAddress(), Predicate.EVERYTHING);
-                subFutures.add(subIndex, start(subscriber));
+                final Subscriber subscriber = new Subscriber(subRoot,
+                        publisher.getTrackerAddress(), Predicate.EVERYTHING);
+                future = start(subscriber);
+                assertNotNull(future);
+                subFutures[subIndex] = future;
                 Thread.sleep(SLEEP_TIME);
-                Assert.assertEquals(prevClientCount + 1, publisher
-                        .getClientCount());
+                assertEquals(prevClientCount + 1, publisher.getClientCount());
             }
         }
 
         /*
          * Stop all subscribers.
          */
-        for (final Future<Void> subFuture : subFutures) {
-            stop(subFuture);
+        for (final Future<?> subFuture : subFutures) {
+            stop((Future<Void>) subFuture);
         }
 
         /*

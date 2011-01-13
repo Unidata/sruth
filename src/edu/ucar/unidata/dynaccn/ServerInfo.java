@@ -10,7 +10,7 @@ import java.net.InetAddress;
 import java.util.Arrays;
 
 /**
- * Information about a server
+ * Information about a localServer
  * 
  * Instances are immutable.
  * 
@@ -22,11 +22,11 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
      */
     private static final long serialVersionUID = 1L;
     /**
-     * The IP address of the host executing the client or server.
+     * The IP address of the host executing the client or localServer.
      */
     private final InetAddress inetAddress;
     /**
-     * The port numbers that the client or server is using.
+     * The port numbers that the client or localServer is using.
      */
     private final int[]       ports;
 
@@ -34,9 +34,9 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
      * Constructs from the IP address and the port numbers.
      * 
      * @param inetAddress
-     *            The IP address of the host on which the server is running.
+     *            The IP address of the host on which the localServer is running.
      * @param ports
-     *            The port numbers on which the server is listening.
+     *            The port numbers on which the localServer is listening.
      * @throws NullPointerException
      *             if {@code inetAddress == null || ports == null}.
      */
@@ -56,18 +56,18 @@ final class ServerInfo implements Serializable, Comparable<ServerInfo> {
     }
 
     /**
-     * Returns the IP address of the host on which the server is running.
+     * Returns the IP address of the host on which the localServer is running.
      * 
-     * @return The IP address of the host on which the server is running.
+     * @return The IP address of the host on which the localServer is running.
      */
     protected final InetAddress getInetAddress() {
         return inetAddress;
     }
 
     /**
-     * Returns the port numbers on which the server is listening.
+     * Returns the port numbers on which the localServer is listening.
      * 
-     * @return The port numbers on which the server is listening.
+     * @return The port numbers on which the localServer is listening.
      */
     protected final int[] getPorts() {
         return ports;

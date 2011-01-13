@@ -75,11 +75,11 @@ abstract class Connection {
     }
 
     /**
-     * Returns the server port number of a socket.
+     * Returns the localServer port number of a socket.
      * 
      * @param socket
      *            The socket
-     * @return The port number of the socket on the server.
+     * @return The port number of the socket on the localServer.
      */
     protected abstract int getServerPort(Socket socket);
 
