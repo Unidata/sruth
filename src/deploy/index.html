@@ -1,0 +1,62 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+  <HEAD>
+    <META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=iso-8859-1">
+    <TITLE>Unidata SRUTH Project</TITLE>
+    <META NAME="AUTHOR" CONTENT="Steve Emmerson">
+    <META NAME="DESCRIPTION" CONTENT="Installing and running the SRUTH
+      data-distribution package">
+    <META NAME="KEYWORDS" CONTENT="Installation, SRUTH">
+    <META NAME="BOOKMARK" CONTENT="SRUTH">
+  </HEAD>
+  <BODY LANG="en-US" DIR="LTR">
+    <center> <h2>Unidata SRUTH Project</h2> </center>
+    
+      <p>Perform the following steps to test the Unidata SRUTH project:
+      
+      <ol>
+<!--
+        <li>Install Java 7 (which is not yet a production release)
+         on your system.
+        <a href="http://download.java.net/jdk7/">Click here</a> to go to the
+        Java 7 download page.
+        
+        <li>Install the Unidata SRUTH package via Java Web Start by clicking this button
+          <script src="deployJava.js"></script>
+          <script>
+            var url = "sruth.jnlp";
+            deployJava.createWebStartLaunchButton(url);
+          </script>.
+-->
+     
+        <li><a href="http://dlc.sun.com.edgesuite.net/jdk7/binaries/index.html">
+          Install <b>Java 7</b> on your system</a>. Java 7 is not yet a
+          production release.
+        
+        <li>Install the Unidata Data Distribution system. Click on one of the
+          following and remember the installation directory:
+          <ul>
+            <li><a href="sruth_unix_0_0.sh">Unix installation</a>.
+              Have your browser use the <tt>sh</tt> shell to open 
+              the installer.
+            <li><a href="sruth_windows_0_0.exe">Windows installation</a>.
+          </ul>
+          
+        <li><p><a href="nexrad2-kftg.sruth" type="application/x-sruth">
+          Use the Unidata SRUTH client (SRUTHclient)
+          to subscribe to NEXRAD Level II radar data from station KFTG
+          (Denver).</a>
+          Have your browser open files of mime type
+          <i>application/x-sruth</i> with the just-installed
+          <tt>SRUTHclient</tt> utility, which is in the installation directory
+          of the previous step.
+      </ol>
+        
+<!--
+      <p>Or <a href="javascript:deployJava.launch('sruth.jnlp');">click here</a>.
+ 
+      <p>Or <a href="sruth.jnlp">click here</a>.
+-->
+
+  </BODY>
+</HTML>
