@@ -68,7 +68,7 @@ public class PubSubTest {
     /**
      * The number of subscribers.
      */
-    private static final int                SUB_COUNT           = 3;
+    private static final int                SUB_COUNT           = 1;
     /**
      * The number of rounds of subscribers in {@link #testDynamicNetworking}.
      */
@@ -77,11 +77,11 @@ public class PubSubTest {
     /**
      * The number of pre-subscription files.
      */
-    private static final int                PRE_SUB_FILE_COUNT  = 10;
+    private static final int                PRE_SUB_FILE_COUNT  = 1;
     /**
      * The number of post-subscription files.
      */
-    private static final int                POST_SUB_FILE_COUNT = 10;
+    private static final int                POST_SUB_FILE_COUNT = 0;
     /**
      * The sleep interval, in milliseconds, to be used before checking that the
      * files have been successfully conveyed.

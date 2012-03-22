@@ -19,7 +19,7 @@ import java.io.ObjectInputStream;
  * 
  * @author Steven R. Emmerson
  */
-final class topologyTest {
+final class TopologyExperiment {
     public static void main(final String[] args) throws IOException,
             ClassNotFoundException {
         final File file = new File(

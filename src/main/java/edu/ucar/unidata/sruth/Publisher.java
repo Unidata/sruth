@@ -128,20 +128,8 @@ public final class Publisher implements Callable<Void> {
         tracker.addNetworkTopologyChangeListener(new PropertyChangeListener() {
             @Override
             public void propertyChange(final PropertyChangeEvent evt) {
-                try {
-                    distributedTrackerFiles.distribute((FilterServerMap) evt
-                            .getNewValue());
-                }
-                catch (final FileAlreadyExistsException e) {
-                    logger.trace(
-                            "Topology being updated by another thread: {}",
-                            e.toString());
-                }
-                catch (final IOException e) {
-                    if (!Thread.currentThread().isInterrupted()) {
-                        logger.error("Couldn't save network topology", e);
-                    }
-                }
+                distributedTrackerFiles.distribute((FilterServerMap) evt
+                        .getNewValue());
             }
         });
     }

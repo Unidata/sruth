@@ -6,6 +6,7 @@
 package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
+import java.util.List;
 
 import org.junit.Assert;
 
@@ -28,6 +29,13 @@ public final class Misc {
             InterruptedException {
         final ProcessBuilder builder = new ProcessBuilder(cmd);
         builder.inheritIO();
+        System.out.print("Executing: ");
+        final List<String> args = builder.command();
+        for (final String arg : args) {
+            System.out.print(arg);
+            System.out.print(' ');
+        }
+        System.out.println();
         final Process process = builder.start();
         Assert.assertNotNull(process);
         final int status = process.waitFor();

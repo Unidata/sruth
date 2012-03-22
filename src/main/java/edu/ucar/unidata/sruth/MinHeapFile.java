@@ -8,6 +8,7 @@ package edu.ucar.unidata.sruth;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.Path;
@@ -214,13 +215,15 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * 
      * @return the first element in the heap or {@code null} if the heap is
      *         empty.
+     * @throws ClosedByInterruptException
+     *             if the current thread was interrupted
      * @throws IOException
      *             if an I/O error occurs.
      * @throws IllegalAccessException
      * @throws InstantiationException
      */
-    synchronized T peek() throws InstantiationException,
-            IllegalAccessException, IOException {
+    synchronized T peek() throws ClosedByInterruptException,
+            InstantiationException, IllegalAccessException, IOException {
         return (eltCount > 0)
                 ? readElt(0)
                 : null;
@@ -326,11 +329,13 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      *             if an element can't be created.
      * @throws InstantiationException
      *             if an element can't be created.
+     * @throws ClosedByInterruptException
+     *             if the current thread was interrupted
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private T readElt(final int index) throws InstantiationException,
-            IllegalAccessException, IOException {
+    private T readElt(final int index) throws ClosedByInterruptException,
+            InstantiationException, IllegalAccessException, IOException {
         final T instance = type.newInstance();
         instance.read(getEltBuffer(index));
         return instance;
@@ -342,12 +347,15 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @param index
      *            The index of the element.
      * @return An I/O bite-buffer for the specified element.
+     * @throws ClosedByInterruptException
+     *             if the current thread was interrupted
      * @throws IllegalArgumentException
      *             if {@code index} is too large.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private ByteBuffer getEltBuffer(final int index) throws IOException {
+    private ByteBuffer getEltBuffer(final int index)
+            throws ClosedByInterruptException, IOException {
         if (getMaxEltCount() < (index + 1)) {
             // The golden ratio is a space/time compromise
             final long newMaxEltCount = Math.round((index + 1) * 1.618034);
@@ -391,10 +399,13 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * Returns the maximum number of elements that the file can contain.
      * 
      * @return The maximum number of elements that the file can contain.
+     * @throws ClosedByInterruptException
+     *             if the current thread was interrupted
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private long getMaxEltCount() throws IOException {
+    private long getMaxEltCount() throws ClosedByInterruptException,
+            IOException {
         return (channel.size() - HEADER_SIZE) / eltSize;
     }
 

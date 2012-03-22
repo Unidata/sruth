@@ -10,7 +10,7 @@
   <version>1.0-SNAPSHOT</version>
   <name>Unidata SRUTH Data-Distribution Package</name>
   <url>http://www.unidata.ucar.edu</url>
-  <description>The Unidata SRUTH package is free and open-source software for
+  <description>The Unidata Sruth package is free and open-source software for
   the rapid dissemination of arbitrary files over the Internet. It is
   implemented in Java and integrates a publish/subscribe distribution model with
   an asynchronous, event-driven, peer-to-peer transport mechanism.</description>

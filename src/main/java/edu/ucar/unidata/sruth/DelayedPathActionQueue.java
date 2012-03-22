@@ -213,8 +213,14 @@ final class DelayedPathActionQueue {
 
     /**
      * Stops this instance. Idempotent.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
-    void stop() {
-        thread.interrupt();
+    void stop() throws InterruptedException {
+        if (thread.isAlive()) {
+            thread.interrupt();
+            thread.join();
+        }
     }
 }

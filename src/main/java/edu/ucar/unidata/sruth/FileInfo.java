@@ -84,7 +84,8 @@ final class FileInfo implements Serializable {
 
     /**
      * Constructs from information on the file. The size of the data-pieces will
-     * be the default piece size, {@link #getDefaultPieceSize()}.
+     * be the default piece size, {@link #getDefaultPieceSize()}, and the
+     * time-to-live attribute will be the default, {@link #TIME_TO_LIVE}.
      * 
      * @param fileId
      *            The file identifier.
@@ -102,7 +103,8 @@ final class FileInfo implements Serializable {
     }
 
     /**
-     * Constructs from information on the file.
+     * Constructs from information on the file. The time-to-live attribute will
+     * be the default, {@link #TIME_TO_LIVE}.
      * 
      * @param fileId
      *            The file identifier.
@@ -122,8 +124,7 @@ final class FileInfo implements Serializable {
     }
 
     /**
-     * Constructs from information on the file. The time-to-live attribute will
-     * be the default, {@link #TIME_TO_LIVE}.
+     * Constructs from information on the file.
      * 
      * @param fileId
      *            The file identifier.
@@ -179,6 +180,17 @@ final class FileInfo implements Serializable {
      */
     static int getDefaultPieceSize() {
         return PIECE_SIZE;
+    }
+
+    /**
+     * Returns the size, in bytes, of all pieces of data (except, possibly, the
+     * last).
+     * 
+     * @return the size, in bytes, of all pieces of data (except, possibly, the
+     *         last).
+     */
+    int getPieceSize() {
+        return pieceSize;
     }
 
     /**

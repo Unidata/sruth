@@ -12,7 +12,7 @@ import java.util.NoSuchElementException;
  * 
  * @author Steven R. Emmerson
  */
-class IteratorTest {
+class IteratorExperiment {
     static abstract class AbstractIterator<T> implements Iterator<T> {
         private final T next;
 

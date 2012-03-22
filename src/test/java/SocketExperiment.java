@@ -15,7 +15,7 @@ import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.atomic.AtomicInteger;
 
-class SocketTest {
+class SocketExperiment {
     static final AtomicInteger port    = new AtomicInteger();
     static final CyclicBarrier barrier = new CyclicBarrier(2);
 

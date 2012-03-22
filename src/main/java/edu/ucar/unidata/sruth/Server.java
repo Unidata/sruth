@@ -204,30 +204,31 @@ abstract class Server extends UninterruptibleTask<Void> {
                 try {
                     peer.call();
                 }
-                catch (final EOFException e) {
+                catch (final Exception e) {
                     if (!isCancelled()) {
-                        logger.info(
-                                "Connection closed by remote client: {}: {}",
-                                connection, e);
-                    }
-                }
-                catch (final ConnectException e) {
-                    if (!isCancelled()) {
-                        logger.info(
-                                "Couldn't connect to remote client: {}: {}",
-                                connection, e);
-                    }
-                }
-                catch (final SocketException e) {
-                    if (!isCancelled()) {
-                        logger.info(
-                                "Connection to remote client closed: {}: {}",
-                                connection, e);
-                    }
-                }
-                catch (final IOException e) {
-                    if (!isCancelled()) {
-                        logger.error("Servlet I/O failure: " + this, e);
+                        if (e instanceof InterruptedException) {
+                        }
+                        else if (e instanceof EOFException) {
+                            logger.info(
+                                    "Connection closed by remote client: {}: {}",
+                                    connection, e);
+                        }
+                        else if (e instanceof ConnectException) {
+                            logger.info(
+                                    "Couldn't connect to remote client: {}: {}",
+                                    connection, e);
+                        }
+                        else if (e instanceof SocketException) {
+                            logger.info(
+                                    "Connection to remote client closed: {}: {}",
+                                    connection, e);
+                        }
+                        else if (e instanceof IOException) {
+                            logger.error("Servlet I/O failure: " + this, e);
+                        }
+                        else {
+                            logger.error("Logic error", e);
+                        }
                     }
                 }
                 finally {

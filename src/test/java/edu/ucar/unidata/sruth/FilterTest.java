@@ -6,7 +6,15 @@
 package edu.ucar.unidata.sruth;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
 
 import org.junit.Test;
 
@@ -194,4 +202,37 @@ public class FilterTest {
         assertTrue(fooStarBarFilter.compareTo(fooStarBarFilter) == 0);
     }
 
+    private final Object test(final Serializable obj) throws IOException,
+            ClassNotFoundException {
+        final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        final ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(obj);
+        oos.close();
+        final ByteArrayInputStream bais = new ByteArrayInputStream(
+                baos.toByteArray());
+        final ObjectInputStream ois = new ObjectInputStream(bais);
+        final Object actual = ois.readObject();
+        assertNotNull(actual);
+        assertTrue(actual.equals(obj));
+        return actual;
+    }
+
+    private final void testExact(final Serializable obj) throws IOException,
+            ClassNotFoundException {
+        final Object actual = test(obj);
+        assertTrue(actual == obj);
+    }
+
+    @Test
+    public final void testSerialization() throws IOException,
+            ClassNotFoundException {
+        testExact(Filter.NOTHING);
+        testExact(Filter.EVERYTHING);
+        test(fooFilter);
+        test(barFilter);
+        test(fooSubFilter);
+        test(subFilter);
+        test(fooSubBarFilter);
+        test(fooStarBarFilter);
+    }
 }

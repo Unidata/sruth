@@ -19,10 +19,10 @@ import java.util.List;
  * 
  * @author Steven R. Emmerson
  */
-class newByteChannelTest {
+class NewByteChannelExperiment {
     public static void main(final String[] args) throws IOException {
         final List<SeekableByteChannel> channels = new LinkedList<SeekableByteChannel>();
-        final Path rootDir = Paths.get("/tmp/newByteChannelTest");
+        final Path rootDir = Paths.get("/tmp/NewByteChannelExperiment");
         Files.createDirectories(rootDir);
 
         for (int i = 0;; i++) {

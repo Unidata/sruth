@@ -6,7 +6,7 @@ import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 
-class ModificationTimeTest {
+class ModificationTimeExperiment {
     public static void main(final String[] args) throws IOException {
         final String homeDir = System.getProperty("user.home");
         assert homeDir != null;

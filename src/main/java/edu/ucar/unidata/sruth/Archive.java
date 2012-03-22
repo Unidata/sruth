@@ -8,6 +8,7 @@ package edu.ucar.unidata.sruth;
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
@@ -90,17 +91,23 @@ final class Archive {
             public void run() {
                 for (;;) {
                     /*
-                     * Prevent corruption by serializing access and ensuring
-                     * that the time-difference between the old and new
-                     * topologies is greater than or equal to the temporal
+                     * Prevent corruption of distributed files by serializing
+                     * access and ensuring that the time-difference between old
+                     * and new files is greater than or equal to the temporal
                      * resolution of the archive.
                      */
                     try {
                         final FilterServerMap topology = topologyLock.take();
                         final ArchiveTime now = new ArchiveTime();
-                        if (prevUpdateTime.compareTo(now) < 0) {
+
+                        if (prevUpdateTime.compareTo(now) >= 0) {
+                            logger.debug(
+                                    "Topology-file not distributed because it's not sufficiently new: {}",
+                                    topologyArchivePath);
+                        }
+                        else {
                             try {
-                                archive.save(topologyArchivePath, topology);
+                                archive.save(topologyArchivePath, topology, -1);
                             }
                             catch (final FileAlreadyExistsException e) {
                                 logger.error(
@@ -256,17 +263,18 @@ final class Archive {
         }
 
         /**
-         * Distribute the network topology throughout the network by saving the
+         * Distributes the network topology throughout the network by saving the
          * network topology object in a file that will be subsequently
-         * distributed. This method should only be called by a publisher of
-         * data.
+         * distributed if sufficient time has elapsed since the distribution of
+         * the previous topology. This method should only be called by a
+         * publisher of data.
          * 
          * @param topology
          *            The network topology.
          * @throws NullPointerException
          *             if {@code topologyFromNetwork == null}.
          */
-        void distribute(final FilterServerMap topology) throws IOException {
+        void distribute(final FilterServerMap topology) {
             if (topology == null) {
                 throw new NullPointerException();
             }
@@ -517,7 +525,8 @@ final class Archive {
                     dirs.remove(k);
                     k.cancel();
                 }
-                final FileId fileId = new FileId(archivePath);
+                final FileId fileId = new FileId(archivePath,
+                        ArchiveTime.BEGINNING_OF_TIME);
                 server.removed(fileId);
             }
         }
@@ -670,7 +679,7 @@ final class Archive {
          * The I/O channel for the file.
          */
         @GuardedBy("lock")
-        private SeekableByteChannel channel;
+        private RandomAccessFile    randomFile;
         /**
          * Whether or not the file is hidden.
          */
@@ -681,49 +690,34 @@ final class Archive {
          */
         private final ReentrantLock lock = new ReentrantLock();
         /**
-         * The archive time of the file.
-         */
-        private ArchiveTime         archiveTime;
-        /**
          * Information on the data-product.
          */
-        private final FileInfo      fileInfo;
+        private FileInfo            fileInfo;
 
         /**
-         * Constructs from a pathname, the number of pieces in the file, and the
-         * time to associate with the file. If the file exists, then it is
-         * opened read-only; otherwise, it is opened as a isComplete, but
-         * hidden, file.
+         * Constructs from information on the file. If the file exists, then its
+         * metadata is set from the file; otherwise, its metadata is set from
+         * the given file-information.
          * 
          * @param fileInfo
-         *            Information on the data-product.
-         * @throws IllegalArgumentException
-         *             if the path isn't absolute.
+         *            Information on the file.
          * @throws FileNotFoundException
          *             if the file doesn't exist and can't be created.
          * @throws FileSystemException
          *             if too many files are open.
-         * @throws NullPointerException
-         *             if {@code path == null}.
-         * @throws NullPointerException
-         *             if the file doesn't exist and {@code archiveTime == null}
-         *             .
          */
         DiskFile(final FileInfo fileInfo) throws FileSystemException,
                 IOException {
             lock.lock();
-            path = fileInfo.getAbsolutePath(rootDir);
-            this.fileInfo = fileInfo;
             try {
                 /*
                  * First, try to open a complete file in read-only mode
                  */
+                Path path = fileInfo.getAbsolutePath(rootDir);
                 if (Files.exists(path)) {
                     // The complete file exists.
-                    isComplete = true;
                     try {
-                        ensureOpen();
-                        archiveTime = new ArchiveTime(path);
+                        initFromVisibleFile(path, fileInfo);
                     }
                     catch (final NoSuchFileException e) {
                         // The file was just deleted by another thread.
@@ -733,33 +727,27 @@ final class Archive {
                     }
                 }
 
-                if (channel == null) {
+                if (randomFile == null) {
                     /*
                      * The complete file must not exist. Try opening the hidden
                      * version for writing.
                      */
                     path = pathname.hide(path);
-                    isComplete = false;
 
                     if (Files.exists(path)) {
-                        ensureOpen();
-
                         try {
-                            archiveTime = new ArchiveTime(path);
+                            initFromHiddenFile(path, fileInfo);
                         }
-                        catch (final NoSuchFileException e) {
+                        catch (final FileNotFoundException e) {
                             // The file was just deleted by another thread.
-                            throw (FileNotFoundException) new FileNotFoundException(
-                                    "Hidden archive file was just "
-                                            + "deleted by another thread: "
-                                            + path).initCause(e);
+                            logger.warn("Hidden archive file {} was just "
+                                    + "deleted by another thread. "
+                                    + "Continuing with new hidden file.", path);
                         }
                     }
-                    else {
-                        Files.createDirectories(path.getParent());
-                        ensureOpen();
-                        archiveTime = fileInfo.getTime();
-                        archiveTime.setTime(path);
+
+                    if (randomFile == null) {
+                        initByCreatingHiddenFile(path, fileInfo);
                     }
                 }
             }
@@ -794,7 +782,130 @@ final class Archive {
         }
 
         /**
-         * Ensures that the file is open for access.
+         * Initializes this instance from a complete, visible file.
+         * 
+         * @param path
+         *            The pathname of the file.
+         * @param template
+         *            Template file-information. Used to set metadata that can't
+         *            be determined from the actual file.
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        private void initFromVisibleFile(final Path path,
+                final FileInfo template) throws IOException {
+            this.path = path;
+            isComplete = true;
+            randomFile = new RandomAccessFile(path.toFile(), "r");
+            final FileId fileId = new FileId(template.getPath(),
+                    new ArchiveTime(path));
+            fileInfo = new FileInfo(fileId, randomFile.length(),
+                    template.getPieceSize(), template.getTimeToLive());
+            indexes = new CompleteBitSet(fileInfo.getPieceCount());
+        }
+
+        /**
+         * Initializes this instance by creating an empty, hidden file.
+         * 
+         * @param path
+         *            The pathname of the file
+         * @param template
+         *            Template file-information. Used to set file metadata.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private void initByCreatingHiddenFile(final Path path,
+                final FileInfo template) throws IOException {
+            this.path = path;
+            isComplete = false;
+            Files.createDirectories(path.getParent());
+            randomFile = new RandomAccessFile(path.toFile(), "rw");
+            fileInfo = template;
+            fileInfo.getTime().setTime(path);
+            indexes = new PartialBitSet(fileInfo.getPieceCount());
+        }
+
+        /**
+         * Initializes this instance from an incomplete, hidden file.
+         * 
+         * @param path
+         *            The pathname of the file
+         * @param template
+         *            Template file-information. Used to set metadata that can't
+         *            be determined from the actual file.
+         * @throws FileNotFoundException
+         *             if the file doesn't exist.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private void initFromHiddenFile(final Path path, final FileInfo template)
+                throws IOException {
+            this.path = path;
+            isComplete = false;
+            boolean closeIt = true;
+            final RandomAccessFile randomFile = new RandomAccessFile(
+                    path.toFile(), "rw");
+            try {
+                final long longSize = Long.SIZE / Byte.SIZE;
+                if (randomFile.length() <= longSize) {
+                    randomFile.close();
+                    closeIt = false;
+                    Files.deleteIfExists(path);
+                    throw new FileNotFoundException("File too short: " + path);
+                }
+                randomFile.seek(randomFile.length() - longSize);
+                randomFile.seek(randomFile.readLong());
+                final FileInputStream inputStream = new FileInputStream(
+                        randomFile.getFD());
+                try {
+                    final ObjectInputStream ois = new ObjectInputStream(
+                            inputStream);
+                    try {
+                        fileInfo = (FileInfo) ois.readObject();
+                        indexes = (FiniteBitSet) ois.readObject();
+                        this.randomFile = randomFile;
+                        closeIt = false;
+                    }
+                    catch (final ClassNotFoundException e) {
+                        throw (IOException) new IOException(
+                                "Couldn't read file metadata: " + path)
+                                .initCause(e);
+                    }
+                    finally {
+                        if (closeIt) {
+                            try {
+                                ois.close();
+                            }
+                            catch (final IOException ignored) {
+                            }
+                            closeIt = false;
+                        }
+                    }
+                }
+                finally {
+                    if (closeIt) {
+                        try {
+                            inputStream.close();
+                        }
+                        catch (final IOException ignored) {
+                        }
+                        closeIt = false;
+                    }
+                }
+            }
+            finally {
+                if (closeIt) {
+                    try {
+                        randomFile.close();
+                    }
+                    catch (final IOException ignored) {
+                    }
+                }
+            }
+        }
+
+        /**
+         * Opens the channel to the file if necessary. Idempotent.
          * 
          * @throws FileSystemException
          *             if too many files are open.
@@ -805,88 +916,24 @@ final class Archive {
          */
         private void ensureOpen() throws FileSystemException,
                 NoSuchFileException, IOException {
-            lock.lock();
-            try {
-                if (channel == null) {
-                    if (isComplete) {
-                        channel = Files.newByteChannel(path,
-                                StandardOpenOption.READ);
-                        if (indexes == null) {
-                            indexes = new CompleteBitSet(
-                                    fileInfo.getPieceCount());
-                        }
-                    }
-                    else {
-                        boolean closeIt = true;
-                        final RandomAccessFile randomFile = new RandomAccessFile(
-                                path.toString(), "rw");
-                        try {
-                            if (randomFile.length() == 0) {
-                                indexes = new PartialBitSet(
-                                        fileInfo.getPieceCount());
-                                channel = randomFile.getChannel();
-                                closeIt = false;
-                            }
-                            else {
-                                randomFile.seek(fileInfo.getSize());
-                                final FileInputStream inputStream = new FileInputStream(
-                                        randomFile.getFD());
-                                try {
-                                    final ObjectInputStream ois = new ObjectInputStream(
-                                            inputStream);
-                                    try {
-                                        indexes = (FiniteBitSet) ois
-                                                .readObject();
-                                        channel = randomFile.getChannel();
-                                        closeIt = false;
-                                    }
-                                    catch (final ClassNotFoundException e) {
-                                        throw (IOException) new IOException(
-                                                "Couldn't read piece bit-mask: "
-                                                        + path).initCause(e);
-                                    }
-                                    finally {
-                                        if (closeIt) {
-                                            try {
-                                                ois.close();
-                                            }
-                                            catch (final IOException ignored) {
-                                            }
-                                            closeIt = false;
-                                        }
-                                    }
-                                }
-                                finally {
-                                    if (closeIt) {
-                                        try {
-                                            inputStream.close();
-                                        }
-                                        catch (final IOException ignored) {
-                                        }
-                                        closeIt = false;
-                                    }
-                                }
-                            }
-                        }
-                        finally {
-                            if (closeIt) {
-                                try {
-                                    randomFile.close();
-                                }
-                                catch (final IOException ignored) {
-                                }
-                            }
-                        }
+            if (randomFile == null) {
+                if (isComplete) {
+                    randomFile = new RandomAccessFile(path.toFile(), "r");
+                }
+                else {
+                    randomFile = new RandomAccessFile(path.toFile(), "rw");
+                    if (randomFile.length() == 0) {
+                        randomFile.close();
+                        Files.deleteIfExists(path);
+                        throw new NoSuchFileException("Empty hidden file: "
+                                + path);
                     }
                 }
-            }
-            finally {
-                lock.unlock();
             }
         }
 
         /**
-         * Closes this instance. Does nothing if the file is already closed.
+         * Closes this instance if necessary. Idempotent.
          * 
          * @throws IOException
          *             if an I/O error occurs.
@@ -894,32 +941,57 @@ final class Archive {
         void close() throws IOException {
             lock.lock();
             try {
-                if (channel != null) {
-                    try {
-                        if (!pathname.isHidden(path)) {
-                            channel.close();
+                if (randomFile != null) {
+                    if (isComplete) {
+                        randomFile.close();
+                    }
+                    else {
+                        final long length = fileInfo.getSize();
+                        if (!indexes.areAllSet()) {
+                            randomFile.seek(length);
+                            final OutputStream outputStream = new FileOutputStream(
+                                    randomFile.getFD());
+                            final ObjectOutputStream oos = new ObjectOutputStream(
+                                    outputStream);
+                            oos.writeObject(fileInfo);
+                            oos.writeObject(indexes);
+                            oos.writeLong(length);
                         }
                         else {
-                            if (isComplete) {
-                                channel.truncate(fileInfo.getSize());
+                            randomFile.getChannel().truncate(length);
+                            final Path newPath = pathname.reveal(path);
+                            for (;;) {
+                                try {
+                                    Files.createDirectories(newPath.getParent());
+                                    try {
+                                        Files.move(path, newPath,
+                                                StandardCopyOption.ATOMIC_MOVE);
+                                        path = newPath;
+                                        isComplete = true;
+                                        logger.debug("Received file: {}",
+                                                fileInfo);
+                                        break;
+                                    }
+                                    catch (final NoSuchFileException e) {
+                                        // A directory in the path was just
+                                        // deleted
+                                        logger.trace(
+                                                "Directory in path just deleted by another thread: {}",
+                                                newPath);
+                                    }
+                                }
+                                catch (final NoSuchFileException e) {
+                                    // A directory in the path was just deleted
+                                    logger.trace(
+                                            "Directory in path just deleted by another thread: {}",
+                                            newPath);
+                                }
                             }
-                            else {
-                                final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                                final ObjectOutputStream oos = new ObjectOutputStream(
-                                        outputStream);
-                                oos.writeObject(indexes);
-                                final byte[] bytes = outputStream.toByteArray();
-                                final ByteBuffer buf = ByteBuffer.wrap(bytes);
-                                channel.position(fileInfo.getSize());
-                                channel.write(buf);
-                            }
-                            channel.close();
-                            archiveTime.setTime(path);
                         }
+                        randomFile.close();
+                        fileInfo.getTime().setTime(path);
                     }
-                    finally {
-                        channel = null;
-                    }
+                    randomFile = null;
                 }
             }
             finally {
@@ -933,7 +1005,28 @@ final class Archive {
          * @return the time associated with this instance.
          */
         ArchiveTime getTime() {
-            return archiveTime;
+            lock.lock();
+            try {
+                return fileInfo.getTime();
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Returns the file's metadata.
+         * 
+         * @return the file's metadata.
+         */
+        FileInfo getFileInfo() {
+            lock.lock();
+            try {
+                return fileInfo;
+            }
+            finally {
+                lock.unlock();
+            }
         }
 
         /**
@@ -962,57 +1055,16 @@ final class Archive {
                 final int index = piece.getIndex();
                 if (!indexes.isSet(index)) {
                     ensureOpen();
-                    channel.position(piece.getOffset());
-                    final ByteBuffer buf = ByteBuffer.wrap(piece.getData());
-                    while (buf.hasRemaining()) {
-                        channel.write(buf);
-                    }
+                    randomFile.seek(piece.getOffset());
+                    randomFile.write(piece.getData());
                     indexes = indexes.setBit(index);
-                    archiveTime.setTime(path);
-                    isComplete = indexes.areAllSet();
-                    if (isComplete) {
+                    if (indexes.areAllSet()) {
                         close();
-                        final Path newPath = pathname.reveal(path);
-                        for (;;) {
-                            try {
-                                Files.createDirectories(newPath.getParent());
-                                try {
-                                    Files.move(path, newPath,
-                                            StandardCopyOption.ATOMIC_MOVE);
-                                    logger.debug("Received file: {}",
-                                            piece.getFileInfo());
-                                    break;
-                                }
-                                catch (final NoSuchFileException e) {
-                                    // A directory in the path was just
-                                    // deleted
-                                    logger.trace(
-                                            "Directory in path just deleted: {}",
-                                            newPath);
-                                }
-                                catch (final IOException e) {
-                                    try {
-                                        Files.delete(path);
-                                    }
-                                    catch (final IOException ignored) {
-                                    }
-                                    throw e;
-                                }
-                            }
-                            catch (final NoSuchFileException ignored) {
-                                // A directory in the path was just deleted
-                                logger.trace(
-                                        "Directory in path just deleted: {}",
-                                        newPath);
-                            }
-                        }
                         final int timeToLive = piece.getTimeToLive();
                         if (timeToLive >= 0) {
-                            delayedPathActionQueue.actUponEventurally(newPath,
+                            delayedPathActionQueue.actUponEventurally(path,
                                     1000 * timeToLive);
                         }
-                        path = newPath;
-                        isComplete = true;
                     }
                 }
                 return isComplete;
@@ -1055,13 +1107,9 @@ final class Archive {
             lock.lock();
             try {
                 final byte[] data = new byte[pieceSpec.getSize()];
-                final ByteBuffer buf = ByteBuffer.wrap(data);
                 ensureOpen();
-                channel.position(pieceSpec.getOffset());
-                int nread;
-                do {
-                    nread = channel.read(buf);
-                } while (nread != -1 && buf.hasRemaining());
+                randomFile.seek(pieceSpec.getOffset());
+                randomFile.read(data);
                 return new Piece(pieceSpec, data);
             }
             finally {
@@ -1304,7 +1352,7 @@ final class Archive {
     }
 
     /**
-     * Deletes a file. Recursively deletes parent directories if they are now
+     * Deletes a file. Iteratively deletes parent directories if they are now
      * empty.
      * 
      * @param path
@@ -1337,22 +1385,24 @@ final class Archive {
                 }
             }
         }
+        Path dir = null;
         try {
-            for (Path dir = path.getParent(); dir != null
-                    && !Files.isSameFile(dir, rootDir); dir = dir.getParent()) {
-                if (isEmpty(dir)) {
-                    try {
-                        Files.delete(dir);
-                    }
-                    catch (final DirectoryNotEmptyException e) {
-                        // A file must have just been added.
-                        break;
-                    }
+            for (dir = path.getParent(); dir != null
+                    && !Files.isSameFile(dir, rootDir) && !isEmpty(dir); dir = dir
+                    .getParent()) {
+                try {
+                    Files.delete(dir);
+                }
+                catch (final DirectoryNotEmptyException ignored) {
+                    // A file must have just been added.
+                    logger.debug("Directory added-to by another thread: {}",
+                            dir);
                 }
             }
         }
         catch (final NoSuchFileException ignored) {
             // A parent directory, "dir", has ceased to exist
+            logger.debug("Directory deleted by another thread: {}", dir);
         }
     }
 
@@ -1422,10 +1472,10 @@ final class Archive {
     }
 
     /**
-     * Returns the on-disk file associated with a product. Creates the file if
-     * it doesn't already exist. The file is returned in a locked state. If a
+     * Returns the on-disk file associated with a file. Creates the file if it
+     * doesn't already exist. The file is returned in a locked state. If a
      * version of the file exists with an earlier associated time, then it is
-     * deleted. If a version exists with a later associated time, then
+     * first deleted. If a version exists with a later archive-time, then
      * {@code NULL} is returned.
      * <p>
      * The number of active disk-files is limited by the smaller of the
@@ -1434,64 +1484,75 @@ final class Archive {
      * files allowed by the operating system.
      * 
      * @param fileInfo
-     *            Information on the product
-     * @return The associated, locked file
+     *            Information on the file
+     * @return The associated, locked file or {@code null} if a newer version of
+     *         the file exists.
      * @throws FileSystemException
-     *             if too many files are open. The map is now empty and all
-     *             files are closed.
+     *             if too many files are open. The disk-file map is now empty
+     *             and all files are closed.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
      *             if {@code fileInfo == null}.
+     * @throws IllegalStateException
+     *             if the extant file has the same archive-time as the given
+     *             file-information but the file-informations otherwise differ.
      */
     private DiskFile getDiskFile(final FileInfo fileInfo)
             throws FileSystemException, IOException {
         DiskFile diskFile;
         synchronized (diskFiles) {
             final ArchivePath archivePath = fileInfo.getPath();
-            diskFile = diskFiles.get(archivePath);
-            if (diskFile != null) {
+            for (;;) {
+                diskFile = diskFiles.get(archivePath);
+                if (diskFile == null) {
+                    /*
+                     * Create an entry for this file.
+                     */
+                    do {
+                        try {
+                            diskFile = new DiskFile(fileInfo);
+                        }
+                        catch (final FileSystemException e) {
+                            // Too many open files
+                            if (removeLru() == null) {
+                                throw e;
+                            }
+                        }
+                    } while (diskFile == null);
+                    diskFiles.put(archivePath, diskFile);
+                }
+                if (fileInfo.equals(diskFile.getFileInfo())) {
+                    break;
+                }
+                /*
+                 * Vet the on-disk file against the given metadata
+                 */
                 final int cmp = fileInfo.getTime()
                         .compareTo(diskFile.getTime());
                 if (cmp < 0) {
-                    // The existing file by that name is a newer version of the
-                    // product
+                    // A newer version of the file exists
                     return null;
                 }
-                if (cmp > 0) {
-                    // The existing file by that name is an older version of the
-                    // product
-                    try {
-                        diskFile.delete();
-                    }
-                    catch (final NoSuchFileException e) {
-                        // The file was deleted by another thread
-                        logger.debug(
-                                "Older file was deleted by another thread: {}",
-                                archivePath);
-                    }
-                    finally {
-                        diskFiles.remove(archivePath);
-                        diskFile = null;
-                    }
+                if (cmp == 0) {
+                    // Same-name file but different metadata
+                    throw new IllegalStateException("expected="
+                            + fileInfo.toString() + ", actual="
+                            + diskFile.getFileInfo());
                 }
-            }
-            if (diskFile == null) {
-                /*
-                 * Create an entry for this product.
-                 */
-                do {
-                    try {
-                        diskFile = new DiskFile(fileInfo);
-                    }
-                    catch (final FileSystemException e) {
-                        // Too many open files
-                        if (removeLru() == null) {
-                            throw e;
-                        }
-                    }
-                } while (diskFile == null);
-                diskFiles.put(archivePath, diskFile);
+                // An older version of the file exists. Delete it.
+                try {
+                    diskFile.delete();
+                }
+                catch (final NoSuchFileException e) {
+                    // The file was deleted by another thread
+                    logger.debug(
+                            "Older file was deleted by another thread: {}",
+                            archivePath);
+                }
+                finally {
+                    diskFiles.remove(archivePath);
+                }
             }
             diskFile.lock();
         }
@@ -1680,66 +1741,51 @@ final class Archive {
     }
 
     /**
-     * Saves an object in the archive by first writing it into a hidden file and
-     * then revealing the hidden file.
+     * Saves an object in the archive.
      * 
      * @param archivePath
      *            The pathname for the object in the archive.
      * @param serializable
      *            The object to be saved in the file.
+     * @param timeToLive
+     *            The time for the file to live in seconds. A value of
+     *            {@code -1} means indefinitely.
      * @throws FileAlreadyExistsException
      *             the hidden file was created by another thread.
+     * @throws FileSystemException
+     *             if too many files are open
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void save(final ArchivePath archivePath, final Serializable serializable)
-            throws FileAlreadyExistsException, IOException {
-        Path hiddenPath = getHiddenAbsolutePath(archivePath);
-        Files.deleteIfExists(hiddenPath);
-        Files.createDirectories(hiddenPath.getParent());
-        OutputStream outStream = Files.newOutputStream(hiddenPath,
-                StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+    private void save(final ArchivePath archivePath,
+            final Serializable serializable, final int timeToLive)
+            throws FileAlreadyExistsException, FileSystemException, IOException {
+        final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        final ObjectOutputStream oos = new ObjectOutputStream(
+                byteArrayOutputStream);
+        oos.writeObject(serializable);
+        final long size = byteArrayOutputStream.size();
+        final FileId fileId = new FileId(archivePath);
+        final FileInfo fileInfo = new FileInfo(fileId, size,
+                FileInfo.getDefaultPieceSize(), timeToLive);
+        final DiskFile diskFile = getDiskFile(fileInfo);
+        boolean success = false;
         try {
-            ObjectOutputStream objOutStream = new ObjectOutputStream(outStream);
-            try {
-                objOutStream.writeObject(serializable);
-                objOutStream.close();
-                objOutStream = null;
-                outStream = null;
-                ArchiveTime.adjustTime(hiddenPath);
-                final Path visiblePath = getVisiblePath(hiddenPath);
-                Files.createDirectories(visiblePath.getParent());
-                Files.move(hiddenPath, visiblePath,
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-                hiddenPath = null;
+            final ByteBuffer byteBuf = ByteBuffer.wrap(byteArrayOutputStream
+                    .toByteArray());
+            for (int i = 0; i < fileInfo.getPieceCount(); i++) {
+                final byte[] data = new byte[fileInfo.getSize(i)];
+                final PieceSpec pieceSpec = new PieceSpec(fileInfo, i);
+                byteBuf.get(data);
+                diskFile.putPiece(new Piece(pieceSpec, data));
             }
-            finally {
-                if (objOutStream != null) {
-                    try {
-                        objOutStream.close();
-                        outStream = null;
-                    }
-                    catch (final IOException ignored) {
-                    }
-                }
-            }
+            success = true;
         }
         finally {
-            if (outStream != null) {
-                try {
-                    outStream.close();
-                }
-                catch (final IOException ignored) {
-                }
+            if (!success) {
+                diskFile.delete();
             }
-            if (hiddenPath != null) {
-                try {
-                    Files.delete(hiddenPath);
-                }
-                catch (final IOException ignored) {
-                }
-            }
+            diskFile.unlock();
         }
     }
 
@@ -2184,8 +2230,10 @@ final class Archive {
      * 
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
-    void close() throws IOException {
+    void close() throws IOException, InterruptedException {
         try {
             delayedPathActionQueue.stop();
         }

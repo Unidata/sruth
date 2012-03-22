@@ -8,6 +8,7 @@ package edu.ucar.unidata.sruth;
 import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.DateFormat;
@@ -300,6 +301,10 @@ final class PathDelayQueue {
         }
         catch (final IllegalAccessException impossible) {
             throw new AssertionError(impossible);
+        }
+        catch (final ClosedByInterruptException e) {
+            throw (InterruptedException) new InterruptedException()
+                    .initCause(e);
         }
     }
 

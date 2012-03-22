@@ -9,11 +9,11 @@ import javax.swing.UIManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public final class TestApp {
-    static private Logger  logger = LoggerFactory.getLogger(TestApp.class);
+public final class ExperimentalApp {
+    static private Logger  logger = LoggerFactory.getLogger(ExperimentalApp.class);
     private ActionListener listener;
 
-    TestApp(final JRootPane rootPane) {
+    ExperimentalApp(final JRootPane rootPane) {
         try {
             final JFileChooser chooser = new JFileChooser();
             chooser.addActionListener(new ActionListener() {
@@ -40,7 +40,7 @@ public final class TestApp {
     private static void createGuiAndDisplay() {
         final JFrame frame = new JFrame();
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        final TestApp app = new TestApp(frame.getRootPane());
+        final ExperimentalApp app = new ExperimentalApp(frame.getRootPane());
         app.setActionListener(new ActionListener() {
             @Override
             public void actionPerformed(final ActionEvent e) {

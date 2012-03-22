@@ -66,13 +66,13 @@ final class FileId implements Serializable, Comparable<FileId> {
 
     /**
      * Constructs from an archive pathname. The archive time will be
-     * {@link ArchiveTime.BEGINNING_OF_TIME}.
+     * {@link ArchiveTime#ArchiveTime()}.
      * 
      * @param archivePath
      *            The archive pathname.
      */
     FileId(final ArchivePath archivePath) {
-        this(archivePath, ArchiveTime.BEGINNING_OF_TIME);
+        this(archivePath, new ArchiveTime());
     }
 
     /**

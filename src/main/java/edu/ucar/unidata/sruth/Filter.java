@@ -148,6 +148,9 @@ public class Filter implements Comparable<Filter>, Message {
         if (glob == null) {
             return NOTHING;
         }
+        if (glob.length() == 0) {
+            return EVERYTHING;
+        }
         String[] components = glob.split(ArchivePath.SEPARATOR);
         components = canonicalize(components);
         return components.length == 0
@@ -166,7 +169,7 @@ public class Filter implements Comparable<Filter>, Message {
     private static String[] canonicalize(final String[] components) {
         int i = components.length;
         while (--i >= 0) {
-            if (!components[i].equals("*")) {
+            if (components[i].length() != 0 && !components[i].equals("*")) {
                 break;
             }
         }
@@ -188,7 +191,7 @@ public class Filter implements Comparable<Filter>, Message {
      * 
      * @param components
      *            The components of the glob pattern or {@code null}, in which
-     *            case the file will match nothing.
+     *            case the filter will match nothing.
      * @throws IllegalArgumentException
      *             if one of the component elements is the empty string.
      * @throws IllegalArgumentException
@@ -207,7 +210,8 @@ public class Filter implements Comparable<Filter>, Message {
             for (int i = 0; i < components.length; i++) {
                 final String component = components[i];
                 if (component.length() == 0) {
-                    throw new IllegalArgumentException();
+                    throw new IllegalArgumentException("component[" + i
+                            + "]=\"" + component + "\"");
                 }
                 if (component.contains("*")) {
                     if (component.length() == 1) {
@@ -383,7 +387,7 @@ public class Filter implements Comparable<Filter>, Message {
         return "Filter [glob=" + glob + "]";
     }
 
-    private Object readResolve() {
+    protected Object readResolve() {
         return getInstance(glob);
     }
 }

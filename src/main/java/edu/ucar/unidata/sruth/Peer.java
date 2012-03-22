@@ -170,6 +170,8 @@ final class Peer implements Callable<Boolean> {
      *             if a serious I/O error occurs.
      * @throws SocketException
      *             if the connection was closed by the remote peer.
+     * @throws IllegalStateException
+     *             if a logic error exists
      */
     @Override
     public final Boolean call() throws EOFException, IOException,
@@ -218,7 +220,10 @@ final class Peer implements Callable<Boolean> {
                 }
 
                 validPeer = clearingHouse.add(this);
-                if (validPeer) {
+                if (!validPeer) {
+                    logger.debug("Not a valid peer: {}", this);
+                }
+                else {
                     try {
                         Future<Void> fileScannerFuture = null;
                         if (!remoteFilter.equals(Filter.NOTHING)) {
@@ -497,7 +502,10 @@ final class Peer implements Callable<Boolean> {
                 logger.debug("Interrupted: {}", getClass().getSimpleName());
             }
             catch (final IOException e) {
-                if (!isCancelled()) {
+                if (isCancelled()) {
+                    logger.debug("Interrupted: {}", getClass().getSimpleName());
+                }
+                else {
                     throw e;
                 }
             }
