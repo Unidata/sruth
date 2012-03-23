@@ -185,8 +185,10 @@ public class FileDeleterTest {
                 delayedPathActionQueue.getActedUponCount());
         final Long stopTime = System.currentTimeMillis();
         System.out.println("Number of files: " + PERFORMANCE_FILE_COUNT);
-        System.out.println("Deletion rate: " + PERFORMANCE_FILE_COUNT
-                / (double) (stopTime - startTime) * 1000 + "/s");
+        final double interval = (stopTime - startTime) / 1000.0;
+        System.out.println("Amount of time:  " + interval + " s");
+        System.out.println("Deletion rate: "
+                + (PERFORMANCE_FILE_COUNT / interval) + "/s");
     }
 
     private Path createFile(final int i) throws IOException {
