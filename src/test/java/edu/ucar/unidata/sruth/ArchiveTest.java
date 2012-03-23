@@ -225,12 +225,15 @@ public class ArchiveTest {
     }
 
     @Test
-    public final void testToplogyDistribution() {
+    public final void testToplogyDistribution() throws InterruptedException {
         final FilterServerMap topology = new FilterServerMap();
         final DistributedTrackerFiles admin = archive
                 .getDistributedTrackerFiles(new InetSocketAddress(38800));
         admin.distribute(topology);
         admin.distribute(topology);
+        Thread.sleep(1000);
+        assertTrue(admin.getTopologyArchivePath().getAbsolutePath(TESTDIR)
+                .toFile().exists());
     }
 
     /**

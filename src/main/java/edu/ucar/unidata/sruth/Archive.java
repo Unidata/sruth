@@ -272,7 +272,7 @@ final class Archive {
          * @param topology
          *            The network topology.
          * @throws NullPointerException
-         *             if {@code topologyFromNetwork == null}.
+         *             if {@code topology == null}.
          */
         void distribute(final FilterServerMap topology) {
             if (topology == null) {
