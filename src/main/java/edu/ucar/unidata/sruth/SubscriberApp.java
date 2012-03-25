@@ -117,10 +117,6 @@ public final class SubscriberApp {
     }
 
     /**
-     * Serial version ID.
-     */
-    private static final long        serialVersionUID       = 1L;
-    /**
      * The logger for this class.
      */
     private static final Logger      logger                 = Util.getLogger();
