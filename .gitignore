@@ -3,5 +3,5 @@ Hudson
 target
 .classpath
 .project
-logging.properties
+./logging.properties
 *.swp
