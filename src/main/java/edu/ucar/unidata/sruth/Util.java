@@ -38,10 +38,20 @@ final class Util {
     }
 
     /**
-     * Launder a {@link Throwable}. If the throwable is an error, then throw it;
-     * if it's a {@link RuntimeException}, then return it; otherwise, throw the
-     * runtime-exception {@link IllegalStateException} to indicate a logic
-     * error.
+     * Launders a {@link Throwable}. If the throwable is an error, then it's
+     * thrown; if it's a {@link RuntimeException}, then it's returned;
+     * otherwise, the runtime-exception {@link IllegalStateException} is thrown
+     * to indicate a logic error.
+     * 
+     * @param t
+     *            The {@link Throwable} to be laundered
+     * @return A {@link RuntimeException} if
+     *         {@code t instanceof RuntimeException}
+     * @throws Error
+     *             if {@code t instanceof Error}
+     * @throws IllegalStateException
+     *             if the {@link Throwable} isn't a {@link RuntimeException} or
+     *             an {@link Error}
      */
     static RuntimeException launderThrowable(final Throwable t) {
         if (t instanceof RuntimeException) {

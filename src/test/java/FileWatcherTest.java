@@ -117,7 +117,7 @@ public class FileWatcherTest {
     private static final Path                      SUBDIR            = ROOT_DIR
                                                                              .resolve("subdir");
     private static final Path                      SUBFILE           = SUBDIR.resolve("subfile");
-    private static final int                       SLEEP             = 10;
+    private static final int                       SLEEP             = 20;
 
     private volatile boolean                       fileExists        = false;
     private volatile boolean                       subdirExists      = false;

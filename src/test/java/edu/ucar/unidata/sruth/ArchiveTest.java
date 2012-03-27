@@ -21,8 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
+import java.util.LinkedList;
 import java.util.Random;
 
 import org.junit.After;
@@ -57,19 +56,19 @@ public class ArchiveTest {
         }
     }
 
-    private static final Path        TESTDIR         = Paths.get(
-                                                             System.getProperty("java.io.tmpdir"))
-                                                             .resolve(
-                                                                     ArchiveTest.class
-                                                                             .getSimpleName());
-    private static final int         FILE_COUNT      = 1024;
-    protected static final int       MAX_PIECE_COUNT = 8;
-    private static final long        SEED            = System.currentTimeMillis();
-    private static final ArchiveTime archiveTime     = new ArchiveTime();
+    private static final Path           TESTDIR         = Paths.get(
+                                                                System.getProperty("java.io.tmpdir"))
+                                                                .resolve(
+                                                                        ArchiveTest.class
+                                                                                .getSimpleName());
+    private static final int            FILE_COUNT      = 512;
+    protected static final int          MAX_PIECE_COUNT = 8;
+    private static final long           SEED            = System.currentTimeMillis();
+    private static final ArchiveTime    archiveTime     = new ArchiveTime();
 
-    private Random                   random;
-    private Archive                  archive;
-    private int                      pieceIndex;
+    private Random                      random;
+    private Archive                     archive;
+    private final LinkedList<PieceSpec> pieceSpecs      = new LinkedList<PieceSpec>();
 
     private static void removeTestDirectory() throws IOException,
             InterruptedException {
@@ -97,7 +96,7 @@ public class ArchiveTest {
      */
     @Before
     public void setUp() throws Exception {
-        archive = new Archive(TESTDIR);
+        archive = new Archive(TESTDIR, FILE_COUNT / 4);
     }
 
     /**
@@ -109,78 +108,26 @@ public class ArchiveTest {
     }
 
     /**
-     * Returns a file iterator.
-     */
-    private Iterator<FileInfo> getFileIterator() {
-        random = new Random(SEED);
-        return new Iterator<FileInfo>() {
-            private int index = 0;
-
-            public boolean hasNext() {
-                return index < FILE_COUNT;
-            }
-
-            public FileInfo next() {
-                if (pieceIndex >= FILE_COUNT) {
-                    throw new NoSuchElementException();
-                }
-                final Path path = Paths.get(Integer.toString(index));
-                final ArchivePath archivePath = new ArchivePath(path);
-                final FileId fileId = new FileId(archivePath, archiveTime);
-                final long fileSize = (index == 0)
-                        ? 0
-                        : random.nextInt(FileInfo.getDefaultPieceSize()
-                                * MAX_PIECE_COUNT + 1);
-                index++;
-                return new FileInfo(fileId, fileSize);
-            }
-
-            @Override
-            public void remove() {
-                throw new UnsupportedOperationException();
-            }
-        };
-    }
-
-    /**
-     * Returns a piece iterator.
-     */
-    private Iterator<Piece> getPieceIterator(final FileInfo fileInfo) {
-        return new Iterator<Piece>() {
-            private int index = 0;
-
-            @Override
-            public boolean hasNext() {
-                return index < fileInfo.getPieceCount();
-            }
-
-            @Override
-            public Piece next() {
-                if (index >= fileInfo.getPieceCount()) {
-                    throw new NoSuchElementException();
-                }
-                final PieceSpec pieceSpec = new PieceSpec(fileInfo, index);
-                final byte[] bytes = new byte[pieceSpec.getSize()];
-                random.nextBytes(bytes);
-                index++;
-                return new Piece(pieceSpec, bytes);
-            }
-
-            @Override
-            public void remove() {
-                throw new UnsupportedOperationException();
-            }
-        };
-    }
-
-    /**
      * Returns the same first piece every time.
      * 
      * @return
      */
     private Piece firstPiece() {
         random = new Random(SEED);
-        pieceIndex = 0;
+        for (int i = 0; i < FILE_COUNT; i++) {
+            final Path path = Paths.get(Integer.toString(i));
+            final ArchivePath archivePath = new ArchivePath(path);
+            final FileId fileId = new FileId(archivePath, archiveTime);
+            final long fileSize = (i == 0)
+                    ? 0
+                    : random.nextInt(FileInfo.getDefaultPieceSize()
+                            * MAX_PIECE_COUNT + 1);
+            final FileInfo fileInfo = new FileInfo(fileId, fileSize);
+            for (int j = 0; j < fileInfo.getPieceCount(); j++) {
+                final PieceSpec pieceSpec = new PieceSpec(fileInfo, j);
+                pieceSpecs.add(pieceSpec);
+            }
+        }
         return nextPiece();
     }
 
@@ -190,20 +137,14 @@ public class ArchiveTest {
      * @return
      */
     private Piece nextPiece() {
-        if (pieceIndex >= FILE_COUNT) {
+        final int n = pieceSpecs.size();
+        if (n <= 0) {
             return null;
         }
-        final Path path = Paths.get(Integer.toString(pieceIndex));
-        final ArchivePath archivePath = new ArchivePath(path);
-        final FileId fileId = new FileId(archivePath, archiveTime);
-        final long fileSize = (pieceIndex == 0)
-                ? 0
-                : random.nextInt(FileInfo.getDefaultPieceSize() + 1);
-        final FileInfo fileInfo = new FileInfo(fileId, fileSize);
-        final PieceSpec pieceSpec = new PieceSpec(fileInfo, 0);
+        final int i = random.nextInt(n);
+        final PieceSpec pieceSpec = pieceSpecs.remove(i);
         final byte[] bytes = new byte[pieceSpec.getSize()];
         random.nextBytes(bytes);
-        pieceIndex++;
         return new Piece(pieceSpec, bytes);
     }
 
@@ -278,26 +219,27 @@ public class ArchiveTest {
      * {@link edu.ucar.unidata.sruth.Archive#putPiece(edu.ucar.unidata.sruth.Piece)}
      * .
      * 
+     * @throws FileInfoMismatchException
      * @throws IOException
      */
     @Test
-    public final void testPutPiece() throws IOException {
+    public final void testPutPiece() throws FileInfoMismatchException,
+            IOException {
         final Stopwatch stopwatch = new Stopwatch();
         int fileCount = 0;
         int pieceCount = 0;
         long byteCount = 0;
-        for (final Iterator<FileInfo> fileIter = getFileIterator(); fileIter
-                .hasNext();) {
-            fileCount++;
-            for (final Iterator<Piece> pieceIter = getPieceIterator(fileIter
-                    .next()); pieceIter.hasNext();) {
-                final Piece piece = pieceIter.next();
-                stopwatch.start();
-                archive.putPiece(piece);
-                stopwatch.stop();
-                pieceCount++;
-                byteCount += piece.getSize();
+        final FileId prevFileId = null;
+        for (Piece piece = firstPiece(); piece != null; piece = nextPiece()) {
+            final FileId fileId = piece.getFileInfo().getFileId();
+            if (!fileId.equals(prevFileId)) {
+                fileCount++;
             }
+            stopwatch.start();
+            archive.putPiece(piece);
+            stopwatch.stop();
+            pieceCount++;
+            byteCount += piece.getSize();
         }
         System.out.println("testPutPiece():");
         System.out.println("    Number of");
@@ -321,26 +263,27 @@ public class ArchiveTest {
      * .
      * 
      * @throws IOException
+     * @throws FileInfoMismatchException
      */
     @Test
-    public final void testGetPiece() throws IOException {
+    public final void testGetPiece() throws IOException,
+            FileInfoMismatchException {
         final Stopwatch stopwatch = new Stopwatch();
         int fileCount = 0;
         int pieceCount = 0;
         long byteCount = 0;
-        for (final Iterator<FileInfo> fileIter = getFileIterator(); fileIter
-                .hasNext();) {
-            fileCount++;
-            for (final Iterator<Piece> pieceIter = getPieceIterator(fileIter
-                    .next()); pieceIter.hasNext();) {
-                final Piece piece = pieceIter.next();
-                stopwatch.start();
-                final Piece savedPiece = archive.getPiece(piece.getInfo());
-                stopwatch.stop();
-                pieceCount++;
-                byteCount += savedPiece.getSize();
-                assertEquals(piece, savedPiece);
+        final FileId prevFileId = null;
+        for (Piece piece = firstPiece(); piece != null; piece = nextPiece()) {
+            final FileId fileId = piece.getFileInfo().getFileId();
+            if (!fileId.equals(prevFileId)) {
+                fileCount++;
             }
+            stopwatch.start();
+            final Piece savedPiece = archive.getPiece(piece.getInfo());
+            stopwatch.stop();
+            pieceCount++;
+            byteCount += savedPiece.getSize();
+            assertEquals(piece, savedPiece);
         }
         System.out.println("testGetPiece():");
         System.out.println("    Number of");
@@ -364,9 +307,11 @@ public class ArchiveTest {
      * .
      * 
      * @throws IOException
+     * @throws FileInfoMismatchException
      */
     @Test
-    public final void testExists() throws IOException {
+    public final void testExists() throws IOException,
+            FileInfoMismatchException {
         assertTrue(archive.exists(firstPiece().getInfo()));
         final ArchivePath archivePath = new ArchivePath(
                 Paths.get("doesn't exist"));
@@ -406,9 +351,11 @@ public class ArchiveTest {
      * .
      * 
      * @throws IOException
+     * @throws FileInfoMismatchException
      */
     @Test
-    public final void testRemove() throws IOException {
+    public final void testRemove() throws IOException,
+            FileInfoMismatchException {
         final Piece piece = firstPiece();
         assertTrue(archive.exists(piece.getInfo()));
         archive.remove(piece.getArchivePath());

@@ -1,3 +1,5 @@
+import static org.junit.Assert.assertFalse;
+
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -69,13 +71,13 @@ public class FileAccessTest {
      */
     @Test
     public void testEmptyDirectory() throws IOException {
-        final Path dir = Paths.get("/tmp/" + getClass().getSimpleName());
+        final Path dir = Paths.get(System.getProperty("java.io.tmpdir"))
+                .resolve(getClass().getSimpleName());
+        Files.deleteIfExists(dir);
         Files.createDirectory(dir);
         final DirectoryStream<Path> stream = Files.newDirectoryStream(dir);
         try {
-            for (final Path path : stream) {
-                System.out.println(path.toString());
-            }
+            assertFalse(stream.iterator().hasNext());
         }
         finally {
             stream.close();

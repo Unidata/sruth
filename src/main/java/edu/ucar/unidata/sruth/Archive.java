@@ -468,10 +468,13 @@ final class Archive {
          * 
          * @param path
          *            The pathname of the new file.
+         * @throws NoSuchFileException
+         *             if the file doesn't exist
          * @throws IOException
          *             if an I/O error occurs.
          */
-        private void newFile(final Path path) throws IOException {
+        private void newFile(final Path path) throws NoSuchFileException,
+                IOException {
             final BasicFileAttributes attributes = Files.readAttributes(path,
                     BasicFileAttributes.class);
             if (attributes.isDirectory()) {
@@ -740,9 +743,21 @@ final class Archive {
                         }
                         catch (final FileNotFoundException e) {
                             // The file was just deleted by another thread.
-                            logger.warn("Hidden archive file {} was just "
+                            logger.warn("Hidden archive file \"{}\" was just "
                                     + "deleted by another thread. "
                                     + "Continuing with new hidden file.", path);
+                        }
+                        catch (final IOException e) {
+                            logger.error(
+                                    "Couldn't access hidden archive file \""
+                                            + path
+                                            + "\". Continuing with new hidden file.",
+                                    e);
+                            try {
+                                Files.deleteIfExists(path);
+                            }
+                            catch (final IOException ignored) {
+                            }
                         }
                     }
 
@@ -839,7 +854,7 @@ final class Archive {
          *             if an I/O error occurs.
          */
         private void initFromHiddenFile(final Path path, final FileInfo template)
-                throws IOException {
+                throws FileNotFoundException, IOException {
             this.path = path;
             isComplete = false;
             boolean closeIt = true;
@@ -847,19 +862,66 @@ final class Archive {
                     path.toFile(), "rw");
             try {
                 final long longSize = Long.SIZE / Byte.SIZE;
-                if (randomFile.length() <= longSize) {
-                    randomFile.close();
-                    closeIt = false;
-                    Files.deleteIfExists(path);
-                    throw new FileNotFoundException("File too short: " + path);
-                }
-                randomFile.seek(randomFile.length() - longSize);
-                randomFile.seek(randomFile.readLong());
-                final FileInputStream inputStream = new FileInputStream(
-                        randomFile.getFD());
+                final long fileLength;
+
                 try {
-                    final ObjectInputStream ois = new ObjectInputStream(
-                            inputStream);
+                    fileLength = randomFile.length();
+                }
+                catch (final IOException e) {
+                    throw (IOException) new IOException(
+                            "Couldn't get length of file \"" + path + "\"")
+                            .initCause(e);
+                }
+
+                long pos = fileLength - longSize;
+                try {
+                    randomFile.seek(pos);
+                }
+                catch (final IOException e) {
+                    throw (IOException) new IOException(
+                            "Couldn't seek to byte " + pos + " in file \""
+                                    + path + "\"").initCause(e);
+                }
+
+                try {
+                    pos = randomFile.readLong();
+                }
+                catch (final IOException e) {
+                    throw (IOException) new IOException("Couldn't read "
+                            + "byte-offset of metadata in file \"" + path
+                            + "\"").initCause(e);
+                }
+
+                try {
+                    randomFile.seek(pos);
+                }
+                catch (final IOException e) {
+                    throw (IOException) new IOException(
+                            "Couldn't seek to byte " + pos + " in file \""
+                                    + path + "\"").initCause(e);
+                }
+
+                FileInputStream inputStream;
+                try {
+                    inputStream = new FileInputStream(randomFile.getFD());
+                }
+                catch (final IOException e) {
+                    throw (IOException) new IOException(
+                            "Couldn't get file-descriptor for file \"" + path
+                                    + "\"").initCause(e);
+                }
+
+                try {
+                    ObjectInputStream ois;
+                    try {
+                        ois = new ObjectInputStream(inputStream);
+                    }
+                    catch (final IOException e) {
+                        throw (IOException) new IOException(
+                                "Couldn't get object-input-stream for "
+                                        + "file \"" + path + "\"").initCause(e);
+                    }
+
                     try {
                         fileInfo = (FileInfo) ois.readObject();
                         indexes = (FiniteBitSet) ois.readObject();
@@ -867,6 +929,11 @@ final class Archive {
                         closeIt = false;
                     }
                     catch (final ClassNotFoundException e) {
+                        throw (IOException) new IOException(
+                                "Couldn't read file metadata: " + path)
+                                .initCause(e);
+                    }
+                    catch (final IOException e) {
                         throw (IOException) new IOException(
                                 "Couldn't read file metadata: " + path)
                                 .initCause(e);
@@ -956,6 +1023,7 @@ final class Archive {
                             oos.writeObject(fileInfo);
                             oos.writeObject(indexes);
                             oos.writeLong(length);
+                            oos.close();
                         }
                         else {
                             randomFile.getChannel().truncate(length);
@@ -968,7 +1036,7 @@ final class Archive {
                                                 StandardCopyOption.ATOMIC_MOVE);
                                         path = newPath;
                                         isComplete = true;
-                                        logger.debug("Received file: {}",
+                                        logger.debug("Complete file: {}",
                                                 fileInfo);
                                         break;
                                     }
@@ -987,8 +1055,8 @@ final class Archive {
                                             newPath);
                                 }
                             }
+                            randomFile.close();
                         }
-                        randomFile.close();
                         fileInfo.getTime().setTime(path);
                     }
                     randomFile = null;
@@ -1153,13 +1221,17 @@ final class Archive {
         @Override
         protected boolean removeEldestEntry(
                 final Map.Entry<ArchivePath, DiskFile> entry) {
-            if (size() > ACTIVE_FILE_CACHE_SIZE) {
+            if (size() > activeFileCacheSize) {
                 final DiskFile diskFile = entry.getValue();
                 try {
                     diskFile.close();
                 }
+                catch (final NoSuchFileException e) {
+                    logger.error("File deleted by another thread: \"{}\"",
+                            diskFile);
+                }
                 catch (final IOException e) {
-                    logger.error("Couldn't close file " + diskFile, e);
+                    logger.error("Couldn't close file \"" + diskFile + "\"", e);
                 }
                 return true;
             }
@@ -1185,6 +1257,7 @@ final class Archive {
     private static final int                     ACTIVE_FILE_CACHE_SIZE;
     private static final int                     ACTIVE_FILE_CACHE_SIZE_DEFAULT = 512;
     private static final String                  ACTIVE_FILE_CACHE_SIZE_KEY     = "active file cache size";
+    private final int                            activeFileCacheSize;
     /**
      * The pathname utility for hidden pathnames.
      */
@@ -1244,18 +1317,47 @@ final class Archive {
     }
 
     /**
-     * Constructs from the pathname of the root of the file-tree.
+     * Constructs from the pathname of the root of the file-tree. The maximum
+     * number of open files will be determined by the user-preference
+     * {@value #ACTIVE_FILE_CACHE_SIZE_KEY} (default
+     * {@value #ACTIVE_FILE_CACHE_SIZE_DEFAULT}).
      * 
      * @param rootDir
      *            The pathname of the root of the file-tree.
+     * @param maxNumOpenFiles
+     *            The maximum number of open files.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
      *             if {@code rootDir == null}.
      */
     Archive(final Path rootDir) throws IOException {
+        this(rootDir, ACTIVE_FILE_CACHE_SIZE);
+    }
+
+    /**
+     * Constructs from the pathname of the root of the file-tree and the maximum
+     * number of open files to have.
+     * 
+     * @param rootDir
+     *            The pathname of the root of the file-tree.
+     * @param maxNumOpenFiles
+     *            The maximum number of open files.
+     * @throws IllegalArgumentException
+     *             if {@code maxNumOpenFiles <= 0}
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null}.
+     */
+    Archive(final Path rootDir, final int maxNumOpenFiles) throws IOException {
         if (null == rootDir) {
             throw new NullPointerException();
+        }
+        activeFileCacheSize = maxNumOpenFiles;
+        if (maxNumOpenFiles <= 0) {
+            throw new IllegalArgumentException(
+                    "Invalid maximum number of open file: " + maxNumOpenFiles);
         }
         final Path hiddenDir = rootDir.resolve(HIDDEN_DIR);
         final Path fileDeletionQueuePath = hiddenDir
@@ -1388,21 +1490,23 @@ final class Archive {
         Path dir = null;
         try {
             for (dir = path.getParent(); dir != null
-                    && !Files.isSameFile(dir, rootDir) && !isEmpty(dir); dir = dir
+                    && !Files.isSameFile(dir, rootDir) && isEmpty(dir); dir = dir
                     .getParent()) {
                 try {
                     Files.delete(dir);
                 }
                 catch (final DirectoryNotEmptyException ignored) {
                     // A file must have just been added.
-                    logger.debug("Directory added-to by another thread: {}",
+                    logger.debug(
+                            "Not deleting directory because it was just added-to by another thread: {}",
                             dir);
                 }
             }
         }
         catch (final NoSuchFileException ignored) {
             // A parent directory, "dir", has ceased to exist
-            logger.debug("Directory deleted by another thread: {}", dir);
+            logger.debug("Directory was just deleted by another thread: {}",
+                    dir);
         }
     }
 
@@ -1487,19 +1591,19 @@ final class Archive {
      *            Information on the file
      * @return The associated, locked file or {@code null} if a newer version of
      *         the file exists.
+     * @throws NullPointerException
+     *             if {@code fileInfo == null}.
      * @throws FileSystemException
      *             if too many files are open. The disk-file map is now empty
      *             and all files are closed.
-     * @throws IOException
-     *             if an I/O error occurs.
-     * @throws NullPointerException
-     *             if {@code fileInfo == null}.
-     * @throws IllegalStateException
+     * @throws FileInfoMismatchException
      *             if the extant file has the same archive-time as the given
      *             file-information but the file-informations otherwise differ.
+     * @throws IOException
+     *             if an I/O error occurs.
      */
     private DiskFile getDiskFile(final FileInfo fileInfo)
-            throws FileSystemException, IOException {
+            throws FileSystemException, FileInfoMismatchException, IOException {
         DiskFile diskFile;
         synchronized (diskFiles) {
             final ArchivePath archivePath = fileInfo.getPath();
@@ -1535,10 +1639,9 @@ final class Archive {
                     return null;
                 }
                 if (cmp == 0) {
-                    // Same-name file but different metadata
-                    throw new IllegalStateException("expected="
-                            + fileInfo.toString() + ", actual="
-                            + diskFile.getFileInfo());
+                    // Same-name file but different metadata. Very strange.
+                    throw new FileInfoMismatchException(fileInfo,
+                            diskFile.getFileInfo());
                 }
                 // An older version of the file exists. Delete it.
                 try {
@@ -1592,11 +1695,14 @@ final class Archive {
      * @return {@code true} if and only if the piece of data exists.
      * @throws FileSystemException
      *             if too many files are open.
+     * @throws FileInfoMismatchException
+     *             if the file-information of the given piece doesn't match that
+     *             of the extant file except for the {@link FileId}.
      * @throws IOException
      *             if an I/O error occurs.
      */
     boolean exists(final PieceSpec pieceSpec) throws FileSystemException,
-            IOException {
+            FileInfoMismatchException, IOException {
         final DiskFile diskFile = getDiskFile(pieceSpec.getFileInfo());
         if (diskFile == null) {
             // A newer version of the file exists.
@@ -1618,11 +1724,15 @@ final class Archive {
      * @return The piece of data or {@code null} if the piece is unavailable.
      * @throws FileSystemException
      *             if too many files are open.
+     * @throws FileInfoMismatchException
+     *             if the file-information of the given piece-specification
+     *             doesn't match that of the extant file except for the
+     *             {@link FileId}.
      * @throws IOException
      *             if an I/O error occurred.
      */
     Piece getPiece(final PieceSpec pieceSpec) throws FileSystemException,
-            IOException {
+            FileInfoMismatchException, IOException {
         final DiskFile diskFile = getDiskFile(pieceSpec.getFileInfo());
         if (diskFile == null) {
             // A newer version of the file exists.
@@ -1656,13 +1766,16 @@ final class Archive {
      *             if too many files are open.
      * @throws NoSuchFileException
      *             if the destination file was deleted.
+     * @throws FileInfoMismatchException
+     *             if the file-information of the given piece doesn't match that
+     *             of the extant file except for the {@link FileId}.
      * @throws IOException
      *             if an I/O error occurred.
      * @throws NullPointerException
      *             if {@code piece == null}.
      */
     boolean putPiece(final Piece piece) throws FileSystemException,
-            NoSuchFileException, IOException {
+            NoSuchFileException, FileInfoMismatchException, IOException {
         final FileInfo fileInfo = piece.getFileInfo();
         final DiskFile diskFile = getDiskFile(fileInfo);
         if (diskFile == null) {
@@ -1768,7 +1881,13 @@ final class Archive {
         final FileId fileId = new FileId(archivePath);
         final FileInfo fileInfo = new FileInfo(fileId, size,
                 FileInfo.getDefaultPieceSize(), timeToLive);
-        final DiskFile diskFile = getDiskFile(fileInfo);
+        final DiskFile diskFile;
+        try {
+            diskFile = getDiskFile(fileInfo);
+        }
+        catch (final FileInfoMismatchException e) {
+            throw (AssertionError) new AssertionError().initCause(e);
+        }
         boolean success = false;
         try {
             final ByteBuffer byteBuf = ByteBuffer.wrap(byteArrayOutputStream
@@ -2218,6 +2337,7 @@ final class Archive {
     private static boolean isEmpty(final Path dir) throws IOException {
         final DirectoryStream<Path> stream = Files.newDirectoryStream(dir);
         try {
+            // See {@link FileAccessTest#testEmptyDirectory()}
             return !stream.iterator().hasNext();
         }
         finally {

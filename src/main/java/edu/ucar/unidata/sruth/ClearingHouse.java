@@ -215,10 +215,15 @@ final class ClearingHouse {
      *            The local peer that received the notice.
      * @param pieceSpec
      *            The specification of the piece of data.
+     * @throws FileInfoMismatchException
+     *             if the file-information of the given piece specification
+     *             doesn't match that of the extant file except for the
+     *             {@link FileId}.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void process(final Peer peer, final PieceSpec pieceSpec) throws IOException {
+    void process(final Peer peer, final PieceSpec pieceSpec)
+            throws FileInfoMismatchException, IOException {
         if (predicate.matches(pieceSpec) && !archive.exists(pieceSpec)) {
             peer.addRequest(pieceSpec);
         }
@@ -265,6 +270,9 @@ final class ClearingHouse {
      *            The piece of data to be disposed of.
      * @return a {@link PieceProcessStatus} indicating the result of the
      *         processing.
+     * @throws FileInfoMismatchException
+     *             if the file-information of the given piece doesn't match that
+     *             of the extant file except for the {@link FileId}.
      * @throws IllegalStateException
      *             if {@code peer} is unknown.
      * @throws InterruptedException
@@ -274,7 +282,7 @@ final class ClearingHouse {
      * @see PieceProcessStatus
      */
     PieceProcessStatus process(final Peer peer, final Piece piece)
-            throws IOException, InterruptedException {
+            throws FileInfoMismatchException, IOException, InterruptedException {
         PieceProcessStatus status;
         if (!predicate.matches(piece.getFileInfo())) {
             status = predicate.matchesNothing()
@@ -315,10 +323,15 @@ final class ClearingHouse {
      *            Information on the piece of data.
      * @return The piece of data or {@code null} if a newer version of the file
      *         exists.
+     * @throws FileInfoMismatchException
+     *             if the file-information of the given piece specification
+     *             doesn't match that of the extant file except for the
+     *             {@link FileId}.
      * @throws IOException
      *             if an I/O error occurred.
      */
-    Piece getPiece(final PieceSpec pieceSpec) throws IOException {
+    Piece getPiece(final PieceSpec pieceSpec) throws FileInfoMismatchException,
+            IOException {
         return archive.getPiece(pieceSpec);
     }
 

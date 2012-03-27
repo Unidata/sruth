@@ -239,6 +239,7 @@ final class Peer implements Callable<Boolean> {
                             }
                             catch (final ExecutionException e) {
                                 final Throwable cause = e.getCause();
+                                logger.debug(cause.toString());
                                 if (cause instanceof EOFException) {
                                     throw (EOFException) cause;
                                 }
@@ -360,7 +361,13 @@ final class Peer implements Callable<Boolean> {
      *             if an I/O error occurs.
      */
     void newRemoteData(final PieceSpec pieceSpec) throws IOException {
-        clearingHouse.process(this, pieceSpec);
+        try {
+            clearingHouse.process(this, pieceSpec);
+        }
+        catch (final FileInfoMismatchException e) {
+            logger.warn("Mismatched file-information: {}: {}", e.toString(),
+                    this);
+        }
     }
 
     /**
@@ -596,9 +603,15 @@ final class Peer implements Callable<Boolean> {
         protected boolean process(final PieceSpecSet request)
                 throws InterruptedException, IOException {
             for (final PieceSpec spec : request) {
-                final Piece piece = clearingHouse.getPiece(spec);
-                if (piece != null) {
-                    pieceQueue.put(piece);
+                try {
+                    final Piece piece = clearingHouse.getPiece(spec);
+                    if (piece != null) {
+                        pieceQueue.put(piece);
+                    }
+                }
+                catch (final FileInfoMismatchException e) {
+                    logger.warn("Mismatched file information: {}: {}",
+                            e.toString(), this);
                 }
             }
             return true;
@@ -611,7 +624,7 @@ final class Peer implements Callable<Boolean> {
          */
         @Override
         public String toString() {
-            return "RequestReceiver []";
+            return "RequestReceiver [peer=" + Peer.this + "]";
         }
     }
 
@@ -678,12 +691,19 @@ final class Peer implements Callable<Boolean> {
         @Override
         protected boolean process(final Piece piece) throws IOException,
                 InterruptedException {
-            final PieceProcessStatus status = clearingHouse.process(Peer.this,
-                    piece);
-            if (!counterStopped && status.wasUsed()) {
-                counter += piece.getSize();
+            try {
+                final PieceProcessStatus status = clearingHouse.process(
+                        Peer.this, piece);
+                if (!counterStopped && status.wasUsed()) {
+                    counter += piece.getSize();
+                }
+                return !status.isDone();
             }
-            return !status.isDone();
+            catch (final FileInfoMismatchException e) {
+                logger.warn("Mismatched file information: {}: {}",
+                        e.toString(), this);
+                return true;
+            }
         }
 
         /*
@@ -693,7 +713,7 @@ final class Peer implements Callable<Boolean> {
          */
         @Override
         public String toString() {
-            return "PieceReceiver []";
+            return "PieceReceiver [peer=" + Peer.this + "]";
         }
     }
 

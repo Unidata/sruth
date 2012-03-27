@@ -339,40 +339,60 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         boolean reportOffline = false;
                         try {
                             validServer = client.call().booleanValue();
-                            if (validServer) {
+                            if (!validServer) {
+                                logger.debug("Invalid server: {}", client);
+                            }
+                            else {
+                                logger.debug("Client returned normally: {}",
+                                        client);
                                 ClientManager.this.cancel(); // because all
                                                              // desired-data
                                                              // received
                             }
                         }
-                        catch (final InterruptedException ignored) {
+                        catch (final InterruptedException e) {
+                            logger.debug("Client was interrupted", e);
                         }
                         catch (final EOFException e) {
                             logger.info(
                                     "Connection closed by remote server: {}: {}",
-                                    remoteServer, e);
+                                    remoteServer, e.toString());
                             reportOffline = true;
                         }
                         catch (final ConnectException e) {
-                            if (!isCancelled()) {
+                            if (isCancelled()) {
+                                logger.debug("Client was cancelled", e);
+                            }
+                            else {
                                 logger.info(
                                         "Couldn't connect to remote server: {}: {}",
-                                        remoteServer, e);
+                                        remoteServer, e.toString());
                                 reportOffline = true;
                             }
                         }
                         catch (final SocketException e) {
-                            if (!isCancelled()) {
+                            if (isCancelled()) {
+                                logger.debug(
+                                        "Client's connection was disconnected",
+                                        e);
+                            }
+                            else {
                                 logger.info(
                                         "Connection to remote server closed: {}: {}",
-                                        remoteServer, e);
+                                        remoteServer, e.toString());
                                 reportOffline = true;
                             }
                         }
                         catch (final IOException e) {
-                            if (!isCancelled()) {
+                            if (isCancelled()) {
+                                logger.debug("Client I/O failure: " + client, e);
+                            }
+                            else {
                                 logger.error("Client I/O failure: " + client, e);
                             }
+                        }
+                        catch (final Throwable t) {
+                            throw Util.launderThrowable(t);
                         }
                         finally {
                             synchronized (ClientManager.this) {

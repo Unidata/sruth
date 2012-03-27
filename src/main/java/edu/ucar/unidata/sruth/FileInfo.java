@@ -56,7 +56,7 @@ final class FileInfo implements Serializable {
      */
     private final long          fileSize;
     /**
-     * The size of piece of the file in bytes.
+     * The size of a canonical piece of the file in bytes.
      * 
      * @serial
      */
@@ -131,7 +131,8 @@ final class FileInfo implements Serializable {
      * @param fileSize
      *            The size of the file in bytes.
      * @param pieceSize
-     *            The size of a piece of the file in bytes.
+     *            The size of a piece of the file in bytes. Ignored if
+     *            {@code fileSize == 0}.
      * @param timeToLive
      *            The time for the file to live in seconds. A value of
      *            {@code -1} means indefinitely.
@@ -154,12 +155,14 @@ final class FileInfo implements Serializable {
         }
         if (0 == fileSize) {
             lastIndex = 0;
-            pieceSize = 0;
+            pieceSize = PIECE_SIZE;
         }
         else {
             if (pieceSize <= 0) {
-                throw new IllegalArgumentException("Invalid piece-size: "
-                        + pieceSize);
+                throw new IllegalArgumentException(
+                        "Invalid piece-size: pieceSize=" + pieceSize
+                                + ", fileSize=" + fileSize + ", fileId="
+                                + fileId);
             }
             lastIndex = (int) ((fileSize - 1) / pieceSize);
         }
@@ -199,7 +202,7 @@ final class FileInfo implements Serializable {
      * @return The size of the last file-piece.
      */
     private int lastSize() {
-        return (0 == pieceSize)
+        return (0 == fileSize)
                 ? 0
                 : (int) ((fileSize - 1) % pieceSize) + 1;
     }
@@ -306,6 +309,7 @@ final class FileInfo implements Serializable {
      * @return the size of the file-piece in bytes.
      */
     int getSize(final long index) {
+        vet(index);
         return lastIndex == index
                 ? lastSize()
                 : pieceSize;
@@ -341,7 +345,9 @@ final class FileInfo implements Serializable {
      */
     long getOffset(final long index) {
         vet(index);
-        return pieceSize * index;
+        return fileSize == 0
+                ? 0
+                : pieceSize * index;
     }
 
     /**
