@@ -192,6 +192,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws IllegalAccessException
      *             if an I/O error occurs.
      * @throws InstantiationException
+     *             if the new element can't be created
      */
     synchronized void add(final T elt) throws IOException,
             InstantiationException, IllegalAccessException {

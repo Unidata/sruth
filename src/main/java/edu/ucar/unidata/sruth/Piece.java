@@ -174,8 +174,9 @@ final class Piece implements Message {
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{pieceSpec=" + pieceSpec
-                + ", size=" + data.length + "}";
+        return getClass().getSimpleName() + "[pieceSpec=" + pieceSpec
+                + ", size=" + data.length + ", dataHash="
+                + Arrays.hashCode(data) + "]";
     }
 
     private Object readResolve() throws InvalidObjectException {

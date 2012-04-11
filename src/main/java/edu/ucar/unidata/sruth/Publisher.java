@@ -7,11 +7,15 @@ package edu.ucar.unidata.sruth;
 
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -236,30 +240,24 @@ public final class Publisher implements Callable<Void> {
      *            Pathname for the data in the archive.
      * @param data
      *            the data.
+     * @param timeToLive
+     *            Lifetime of the data in seconds. A negative value means
+     *            indefinitely.
      * @throws FileAlreadyExistsException
      *             the file is being actively written by another thread.
+     * @throws FileInfoMismatchException
+     *             if the file information conflicts with an existing archive
+     *             file.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    public void publish(final ArchivePath path, final ByteBuffer data)
-            throws FileAlreadyExistsException, IOException {
-        archive.save(path, data);
-    }
-
-    /**
-     * Returns a handle on a new, unpublished file that's ready for content.
-     * 
-     * @param path
-     *            The pathname of the file relative to the root of the
-     *            file-tree.
-     * @return A handle on the new file.
-     * @throws IOException
-     *             if an I/O error occurs.
-     * @throws IllegalArgumentException
-     *             if {@code path.isAbsolute()}.
-     */
-    PubFile newPubFile(final Path path) throws IOException {
-        return sourceNode.newPubFile(path);
+    public void publish(final ArchivePath path, final ByteBuffer data,
+            final int timeToLive) throws FileAlreadyExistsException,
+            IOException, FileInfoMismatchException {
+        final byte[] bytes = data.array();
+        final InputStream inputStream = new ByteArrayInputStream(bytes);
+        final ReadableByteChannel channel = Channels.newChannel(inputStream);
+        archive.save(path, channel, timeToLive);
     }
 
     /**

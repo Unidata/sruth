@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
@@ -59,11 +60,12 @@ public class FileModificationTimeTest {
     }
 
     @Test
-    public void testCreationTime() throws Exception {
+    public void testModificationTime() throws Exception {
         Path path;
         BasicFileAttributeView view;
         BasicFileAttributes attributes;
-        FileTime time;
+        FileTime time1;
+        FileTime time2;
 
         path = Paths.get(System.getProperty("java.io.tmpdir"));
         assertNotNull(path);
@@ -72,11 +74,12 @@ public class FileModificationTimeTest {
         assertNotNull(view);
         attributes = view.readAttributes();
         assertNotNull(attributes);
-        time = attributes.lastModifiedTime();
-        assertNotNull(time);
+        time1 = attributes.lastModifiedTime();
+        assertNotNull(time1);
 
-        time = (FileTime) Files.getAttribute(path, "lastModifiedTime");
-        assertNotNull(time);
+        time2 = (FileTime) Files.getAttribute(path, "lastModifiedTime");
+        assertNotNull(time2);
+        assertEquals(time1, time2);
         final Path testDir = Paths.get("/tmp/FileModificationTimeTest");
         assertEquals(0, Misc.system("rm", "-rf", testDir.toString()));
         Files.createDirectory(testDir);
@@ -87,16 +90,18 @@ public class FileModificationTimeTest {
         assertNotNull(view);
         attributes = view.readAttributes();
         assertNotNull(attributes);
-        time = attributes.lastModifiedTime();
-        assertNotNull(time);
-        time = (FileTime) Files.getAttribute(path, "lastModifiedTime");
-        assertNotNull(time);
+        time1 = attributes.lastModifiedTime();
+        assertNotNull(time1);
+        time2 = (FileTime) Files.getAttribute(path, "lastModifiedTime");
+        assertNotNull(time2);
+        assertEquals(time1, time2);
         Thread.sleep(2000);
         final Path newPath = testDir.resolve("newFile");
-        Files.move(path, newPath);
+        Files.move(path, newPath, StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
         assertFalse(Files.exists(path));
         assertTrue(Files.exists(newPath));
-        assertEquals(time, Files.getAttribute(newPath, "lastModifiedTime"));
+        assertEquals(time1, Files.getAttribute(newPath, "lastModifiedTime"));
         assertEquals(0, Misc.system("rm", "-rf", testDir.toString()));
     }
 }

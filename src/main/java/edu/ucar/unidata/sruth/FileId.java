@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.io.ObjectStreamException;
 import java.io.Serializable;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -86,6 +87,8 @@ final class FileId implements Serializable, Comparable<FileId> {
      *             if {@code !path.isAbsolute()}
      * @throws IllegalArgumentException
      *             if {@code !rootDir.isAbsolute()}
+     * @throws NoSuchFileException
+     *             if the file doesn't exist
      * @throws IOException
      *             if an I/O error occurs.
      */

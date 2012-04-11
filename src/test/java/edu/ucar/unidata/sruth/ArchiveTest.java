@@ -16,11 +16,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.net.InetSocketAddress;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
+import java.nio.file.FileSystemException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.attribute.FileTime;
 import java.util.LinkedList;
 import java.util.Random;
 
@@ -61,9 +59,9 @@ public class ArchiveTest {
                                                                 .resolve(
                                                                         ArchiveTest.class
                                                                                 .getSimpleName());
-    private static final int            FILE_COUNT      = 512;
+    private static final int            FILE_COUNT      = 256;
     protected static final int          MAX_PIECE_COUNT = 8;
-    private static final long           SEED            = System.currentTimeMillis();
+    private static final long           SEED            = Long.MAX_VALUE;                         // System.currentTimeMillis();
     private static final ArchiveTime    archiveTime     = new ArchiveTime();
 
     private Random                      random;
@@ -88,7 +86,7 @@ public class ArchiveTest {
      */
     @AfterClass
     public static void tearDownAfterClass() throws Exception {
-        removeTestDirectory();
+        // removeTestDirectory();
     }
 
     /**
@@ -149,6 +147,22 @@ public class ArchiveTest {
     }
 
     /**
+     * Tests deleting a non-existent file
+     * 
+     * @throws FileSystemException
+     *             if too many files are open
+     * @throws IOException
+     *             if an I/O error occurs
+     */
+    @Test
+    public final void testDeleteMissing() throws FileSystemException,
+            IOException {
+        final ArchivePath archivePath = new ArchivePath("doesn't exist");
+        final FileId fileId = new FileId(archivePath);
+        archive.remove(fileId);
+    }
+
+    /**
      * Tests getting new topology
      * 
      * @throws IOException
@@ -178,43 +192,6 @@ public class ArchiveTest {
     }
 
     /**
-     * Tests hiding a file in the archive.
-     * 
-     * @throws FileAlreadyExistsException
-     * @throws IOException
-     */
-    @Test
-    public final void testHide() throws FileAlreadyExistsException, IOException {
-        final ArchivePath archivePath = new ArchivePath("hiddenFile");
-        archive.hide(archivePath, archivePath);
-        final Path path = archive.getHiddenAbsolutePath(archivePath.getPath());
-        assertTrue(Files.exists(path));
-        archive.removeHidden(archivePath);
-        assertFalse(Files.exists(path));
-    }
-
-    /**
-     * Tests purging the hidden directory.
-     * 
-     * @throws FileAlreadyExistsException
-     * @throws IOException
-     * @throws InterruptedException
-     *             if the current thread is interrupted
-     */
-    @Test
-    public final void testPurgeHiddenDir() throws FileAlreadyExistsException,
-            IOException, InterruptedException {
-        final ArchivePath archivePath = new ArchivePath("hiddenFile");
-        archive.hide(archivePath, archivePath);
-        archive.close();
-        archive = new Archive(TESTDIR);
-        Path path = archive.getHiddenAbsolutePath(archivePath.getPath());
-        assertFalse(Files.exists(path));
-        path = path.getParent();
-        assertTrue(Files.exists(path));
-    }
-
-    /**
      * Test method for
      * {@link edu.ucar.unidata.sruth.Archive#putPiece(edu.ucar.unidata.sruth.Piece)}
      * .
@@ -226,15 +203,9 @@ public class ArchiveTest {
     public final void testPutPiece() throws FileInfoMismatchException,
             IOException {
         final Stopwatch stopwatch = new Stopwatch();
-        int fileCount = 0;
         int pieceCount = 0;
         long byteCount = 0;
-        final FileId prevFileId = null;
         for (Piece piece = firstPiece(); piece != null; piece = nextPiece()) {
-            final FileId fileId = piece.getFileInfo().getFileId();
-            if (!fileId.equals(prevFileId)) {
-                fileCount++;
-            }
             stopwatch.start();
             archive.putPiece(piece);
             stopwatch.stop();
@@ -243,7 +214,7 @@ public class ArchiveTest {
         }
         System.out.println("testPutPiece():");
         System.out.println("    Number of");
-        System.out.println("      Files  = " + fileCount);
+        System.out.println("      Files  = " + FILE_COUNT);
         System.out.println("      Pieces = " + pieceCount);
         System.out.println("      Bytes  = " + byteCount);
         System.out.println("    Net elapsed time = "
@@ -269,15 +240,9 @@ public class ArchiveTest {
     public final void testGetPiece() throws IOException,
             FileInfoMismatchException {
         final Stopwatch stopwatch = new Stopwatch();
-        int fileCount = 0;
         int pieceCount = 0;
         long byteCount = 0;
-        final FileId prevFileId = null;
         for (Piece piece = firstPiece(); piece != null; piece = nextPiece()) {
-            final FileId fileId = piece.getFileInfo().getFileId();
-            if (!fileId.equals(prevFileId)) {
-                fileCount++;
-            }
             stopwatch.start();
             final Piece savedPiece = archive.getPiece(piece.getInfo());
             stopwatch.stop();
@@ -287,7 +252,7 @@ public class ArchiveTest {
         }
         System.out.println("testGetPiece():");
         System.out.println("    Number of");
-        System.out.println("      Files  = " + fileCount);
+        System.out.println("      Files  = " + FILE_COUNT);
         System.out.println("      Pieces = " + pieceCount);
         System.out.println("      Bytes  = " + byteCount);
         System.out.println("    Net Elapsed time = "
@@ -315,9 +280,7 @@ public class ArchiveTest {
         assertTrue(archive.exists(firstPiece().getInfo()));
         final ArchivePath archivePath = new ArchivePath(
                 Paths.get("doesn't exist"));
-        final FileTime fileTime = FileTime.fromMillis(System
-                .currentTimeMillis());
-        final ArchiveTime archiveTime = new ArchiveTime(fileTime);
+        final ArchiveTime archiveTime = new ArchiveTime();
         final FileId fileId = new FileId(archivePath, archiveTime);
         assertFalse(archive.exists(new PieceSpec(new FileInfo(fileId, 1), 0)));
     }
@@ -347,7 +310,7 @@ public class ArchiveTest {
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.Archive#remove(edu.ucar.unidata.sruth.ArchivePath)}
+     * {@link edu.ucar.unidata.sruth.Archive#remove(edu.ucar.unidata.sruth.FileId)}
      * .
      * 
      * @throws IOException
@@ -357,8 +320,9 @@ public class ArchiveTest {
     public final void testRemove() throws IOException,
             FileInfoMismatchException {
         final Piece piece = firstPiece();
+        archive.putPiece(piece);
         assertTrue(archive.exists(piece.getInfo()));
-        archive.remove(piece.getArchivePath());
+        archive.remove(piece.getFileInfo().getFileId());
         assertFalse(archive.exists(piece.getInfo()));
     }
 }

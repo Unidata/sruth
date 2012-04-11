@@ -13,11 +13,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.SeekableByteChannel;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -241,13 +238,11 @@ public class NodeTest {
 
     @Test
     public void testNodeDelivery() throws IOException, InterruptedException,
-            ExecutionException {
+            ExecutionException, FileInfoMismatchException {
         System.out.println();
         System.out.println("SourceNode Delivery Test:");
         final Path SINK_DIR_1 = SINK_DIR.resolve("_1");
         final Path SINK_DIR_2 = SINK_DIR.resolve("_2");
-        Misc.system("mkdir", "-p", SINK_DIR_1.toString());
-        Misc.system("mkdir", "-p", SINK_DIR_2.toString());
         /*
          * Create and start the source node.
          */
@@ -303,20 +298,14 @@ public class NodeTest {
         /*
          * Test dropping a large file into the source directory.
          */
-        final Path LARGE_FILE = Paths.get(SUBFILE.toString() + "-2");
-        final Path path = serverArchive.getHiddenPath(SOURCE_DIR
-                .resolve(LARGE_FILE));
-        Files.createDirectories(path.getParent());
-        final SeekableByteChannel channel = Files.newByteChannel(path,
-                StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
-        channel.write(ByteBuffer.wrap(new byte[1000000]));
-        channel.close();
-        Files.move(path, serverArchive.getVisiblePath(path));
+        final Path largeFilePath = SUBDIR.resolve("largeFile");
+        final ByteBuffer byteBuf = ByteBuffer.wrap(new byte[1000000]);
+        serverArchive.save(new ArchivePath(largeFilePath), byteBuf);
 
         Thread.sleep(500);
 
         for (final Path sinkDir : new Path[] { SINK_DIR_1, SINK_DIR_2 }) {
-            final File file = sinkDir.resolve(LARGE_FILE).toFile();
+            final File file = sinkDir.resolve(largeFilePath).toFile();
             assertTrue(file.exists());
             assertTrue(file.length() == 1000000);
         }

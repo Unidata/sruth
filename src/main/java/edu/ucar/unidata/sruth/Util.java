@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.io.StreamCorruptedException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.List;
@@ -157,12 +158,14 @@ final class Util {
      * @param length
      *            The number of bytes to read.
      * @return The corresponding object.
-     * @throws ClassNotFoundException
-     *             if the byte-array specifies an unknown class.
-     * @throws IOException
-     *             if an I/O error occurs.
      * @throws NullPointerException
      *             if {@code buf == null}.
+     * @throws StreamCorruptedException
+     *             if the file is corrupt.
+     * @throws ClassNotFoundException
+     *             if the type of the restored object is unknown.
+     * @throws IOException
+     *             if an I/O error occurs.
      */
     static Object deserialize(final byte[] buf, final int offset,
             final int length) throws IOException, ClassNotFoundException {
@@ -185,6 +188,7 @@ final class Util {
         final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
         oos.writeObject(obj);
+        oos.close();
         return outputStream.toByteArray();
     }
 

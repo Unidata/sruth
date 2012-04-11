@@ -170,14 +170,17 @@ public class PubSubTest {
      *             the file is being actively written by another thread.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws FileInfoMismatchException
+     *             if the file-information is inconsistent with that of an
+     *             existing archive-file
      */
     private static void publishFile(final Publisher publisher)
-            throws IOException {
+            throws IOException, FileInfoMismatchException {
         final int size = random.nextInt(MAX_SIZE);
         final byte[] bytes = new byte[size];
         random.nextBytes(bytes);
         final ByteBuffer buf = ByteBuffer.wrap(bytes);
-        publisher.publish(nextPath(), buf);
+        publisher.publish(nextPath(), buf, -1);
     }
 
     /**
@@ -234,7 +237,7 @@ public class PubSubTest {
 
     @Test
     public void testPubSub() throws IOException, InterruptedException,
-            ExecutionException {
+            ExecutionException, FileInfoMismatchException {
         /*
          * Create and start the publisher.
          */
@@ -302,7 +305,7 @@ public class PubSubTest {
     @SuppressWarnings("unchecked")
     @Test
     public void testDynamicNetworking() throws IOException,
-            InterruptedException, ExecutionException {
+            InterruptedException, ExecutionException, FileInfoMismatchException {
         /*
          * Create and start the publisher.
          */

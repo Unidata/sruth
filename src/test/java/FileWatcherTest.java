@@ -1,8 +1,10 @@
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardWatchEventKinds;
@@ -162,19 +164,38 @@ public class FileWatcherTest {
         executor.shutdownNow();
     }
 
+    /**
+     * This method shows that each directory must be registered separately with
+     * the watch service.
+     * 
+     * @throws IOException
+     * @throws InterruptedException
+     */
     @Test
     public void test() throws IOException, InterruptedException {
         Thread.sleep(SLEEP);
         Assert.assertFalse(fileWatcherFuture.isDone());
+
+        assertFalse(Files.exists(FILE));
+        assertFalse(fileExists);
         assertTrue(FILE.toFile().createNewFile());
+        assertTrue(Files.exists(FILE));
         Thread.sleep(SLEEP);
-        Assert.assertTrue(fileExists);
+        assertTrue(fileExists);
+
+        assertFalse(Files.exists(SUBDIR));
+        assertFalse(subdirExists);
         assertTrue(SUBDIR.toFile().mkdir());
+        assertTrue(Files.exists(SUBDIR));
         Thread.sleep(SLEEP);
-        Assert.assertTrue(subdirExists);
+        assertTrue(subdirExists);
+
+        assertFalse(Files.exists(SUBFILE));
+        assertFalse(subFileExists);
         assertTrue(SUBFILE.toFile().createNewFile());
+        assertTrue(Files.exists(SUBFILE));
         Thread.sleep(SLEEP);
-        Assert.assertFalse(subFileExists);
+        assertFalse(subFileExists); // NB
     }
 
     void created(final Path path) {

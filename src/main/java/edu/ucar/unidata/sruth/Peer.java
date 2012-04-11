@@ -547,8 +547,8 @@ final class Peer implements Callable<Boolean> {
                 final Object obj = stream.receiveObject(0);
                 return obj;
             }
-            catch (final SocketTimeoutException e) {
-                throw new AssertionError(e);
+            catch (final SocketTimeoutException impossible) {
+                throw new AssertionError(impossible);
             }
         }
 
@@ -610,7 +610,7 @@ final class Peer implements Callable<Boolean> {
                     }
                 }
                 catch (final FileInfoMismatchException e) {
-                    logger.warn("Mismatched file information: {}: {}",
+                    logger.warn("Mismatched file-information: {}: {}",
                             e.toString(), this);
                 }
             }
@@ -700,7 +700,7 @@ final class Peer implements Callable<Boolean> {
                 return !status.isDone();
             }
             catch (final FileInfoMismatchException e) {
-                logger.warn("Mismatched file information: {}: {}",
+                logger.warn("Mismatched file-information: {}: {}",
                         e.toString(), this);
                 return true;
             }

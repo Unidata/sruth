@@ -23,7 +23,11 @@ public class MultiClientTest {
     /**
      * The test directory.
      */
-    private static final String       TESTDIR         = "/tmp/MultiClientTest";
+    private static final Path         TESTDIR         = Paths.get(
+                                                              System.getProperty("java.io.tmpdir"))
+                                                              .resolve(
+                                                                      MultiClientTest.class
+                                                                              .getSimpleName());
     /**
      * The task completion service.
      */
@@ -48,19 +52,20 @@ public class MultiClientTest {
 
     private static void removeTestDirectory() throws IOException,
             InterruptedException {
-        system(new String[] { "rm", "-rf", TESTDIR });
+        system(new String[] { "rm", "-rf", TESTDIR.toString() });
     }
 
     @BeforeClass
     public static void setUpBeforeClass() throws Exception {
         removeTestDirectory();
-        Files.createDirectories(Paths.get(TESTDIR + "/server/subdir"));
+        final Path serverDir = TESTDIR.resolve("server");
+        Files.createDirectories(serverDir.resolve("subdir"));
         system(new String[] { "sh", "-c",
-                "date > " + TESTDIR + "/server/server-file-1" });
+                "date > " + serverDir.resolve("file-1") });
         system(new String[] { "sh", "-c",
-                "date > " + TESTDIR + "/server/server-file-2" });
+                "date > " + serverDir.resolve("file-2") });
         system(new String[] { "sh", "-c",
-                "date > " + TESTDIR + "/server/subdir/server-subfile" });
+                "date > " + serverDir.resolve("subdir").resolve("subfile") });
         final String sleepAmountString = System
                 .getProperty(MultiClientTest.class.getName() + ".sleepAmount");
         if (null != sleepAmountString) {
@@ -109,18 +114,16 @@ public class MultiClientTest {
     public void testParallelDelivery() throws IOException,
             InterruptedException, ExecutionException {
         System.out.println("Parallel Delivery Test:");
-        final Path testDir = Paths.get(TESTDIR);
+        final Path testDir = TESTDIR;
         final Path clientDir = testDir.resolve("client");
         final Path parallelDir = clientDir.resolve("parallel");
-        final Path testDir1 = parallelDir.resolve("1");
-        final Path testDir2 = parallelDir.resolve("2");
-        testDir1.toFile().mkdirs();
-        testDir2.toFile().mkdirs();
+        final Path clientDir1 = parallelDir.resolve("1");
+        final Path clientDir2 = parallelDir.resolve("2");
 
         /*
          * Create the source.
          */
-        Archive archive = new Archive(TESTDIR + "/server");
+        Archive archive = new Archive(TESTDIR.resolve("server"));
         final Server sourceServer = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
         final Future<Void> sourceServerFuture = start(sourceServer);
@@ -130,19 +133,19 @@ public class MultiClientTest {
         /*
          * Create the first client that gets data from the source.
          */
-        archive = new Archive(testDir1);
+        archive = new Archive(clientDir1);
         final ClearingHouse clearingHouse_1 = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
-        final Client client_1 = new Client(sourceServerAddress,
+        final Client client_1 = new Client(new InetSocketAddress(1),
                 sourceServerAddress, Filter.EVERYTHING, clearingHouse_1);
 
         /*
          * Create the second client that gets data from the source.
          */
-        archive = new Archive(testDir2);
+        archive = new Archive(clientDir2);
         final ClearingHouse clearingHouse_2 = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
-        final Client client_2 = new Client(new InetSocketAddress(0),
+        final Client client_2 = new Client(new InetSocketAddress(2),
                 sourceServerAddress, Filter.EVERYTHING, clearingHouse_2);
 
         /*
@@ -157,14 +160,14 @@ public class MultiClientTest {
         stop(client_2_Future);
         stop(sourceServerFuture);
 
-        for (final Path path : new Path[] { testDir1, testDir2 }) {
-            File file = path.resolve("server-file-1").toFile();
+        for (final Path path : new Path[] { clientDir1, clientDir2 }) {
+            File file = path.resolve("file-1").toFile();
             Assert.assertTrue(file.exists());
             Assert.assertTrue(file.length() > 0);
-            file = path.resolve("server-file-2").toFile();
+            file = path.resolve("file-2").toFile();
             Assert.assertTrue(file.exists());
             Assert.assertTrue(file.length() > 0);
-            file = path.resolve("subdir").resolve("server-subfile").toFile();
+            file = path.resolve("subdir").resolve("subfile").toFile();
             Assert.assertTrue(file.exists());
             Assert.assertTrue(file.length() > 0);
         }
@@ -175,23 +178,25 @@ public class MultiClientTest {
             InterruptedException, ExecutionException {
         System.out.println();
         System.out.println("Sequential Delivery Test:");
-        system(new String[] { "mkdir", "-p", TESTDIR + "/client/series/1" });
-        system(new String[] { "mkdir", "-p", TESTDIR + "/client/series/2" });
+        final Path commonArchivePath = TESTDIR.resolve("client").resolve(
+                "series");
+        final Path archive1Path = commonArchivePath.resolve("1");
+        final Path archive2Path = commonArchivePath.resolve("2");
 
         /*
-         * Create first server.
+         * Create the source server.
          */
-        Archive archive = new Archive(TESTDIR + "/server");
+        Archive archive = new Archive(TESTDIR.resolve("server"));
         Server server = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
         final Future<Void> server_1_Future = start(server);
         final InetSocketAddress server_1_Address = server.getSocketAddress();
 
         /*
-         * Create client/server pair that gets data from the first server and
-         * sends data to the second client.
+         * Create the client/server pair that gets data from the first server
+         * and sends data to the second client.
          */
-        archive = new Archive(TESTDIR + "/client/series/1");
+        archive = new Archive(archive1Path);
         ClearingHouse clearingHouse = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
         server = new SinkServer(clearingHouse, new InetSocketAddressSet());
@@ -202,11 +207,12 @@ public class MultiClientTest {
         final Future<Boolean> client_1_Future = start(client);
 
         /*
-         * Create second client that receives data from the second server.
+         * Create the second client that receives data from the client/server
+         * pair.
          */
-        archive = new Archive(TESTDIR + "/client/series/2");
+        archive = new Archive(archive2Path);
         clearingHouse = new ClearingHouse(archive, Predicate.EVERYTHING);
-        client = new Client(server_2_Address, server_2_Address,
+        client = new Client(new InetSocketAddress(2), server_2_Address,
                 Filter.EVERYTHING, clearingHouse);
         final Future<Boolean> client_2_Future = start(client);
 
@@ -218,31 +224,17 @@ public class MultiClientTest {
         stop(server_1_Future);
         stop(server_2_Future);
 
-        Assert.assertTrue(new File(TESTDIR + "/client/series/1/server-file-1")
-                .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/series/1/server-file-1")
-                .length() > 0);
-        Assert.assertTrue(new File(TESTDIR + "/client/series/1/server-file-2")
-                .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/series/1/server-file-2")
-                .length() > 0);
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/series/1/subdir/server-subfile").exists());
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/series/1/subdir/server-subfile").length() > 0);
-
-        Assert.assertTrue(new File(TESTDIR + "/client/series/2/server-file-1")
-                .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/series/2/server-file-1")
-                .length() > 0);
-        Assert.assertTrue(new File(TESTDIR + "/client/series/2/server-file-2")
-                .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/series/2/server-file-2")
-                .length() > 0);
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/series/2/subdir/server-subfile").exists());
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/series/2/subdir/server-subfile").length() > 0);
+        for (final Path archivePath : new Path[] { archive1Path, archive2Path }) {
+            File file;
+            for (int i = 1; i <= 2; i++) {
+                file = archivePath.resolve("file-" + i).toFile();
+                Assert.assertTrue(file.exists());
+                Assert.assertTrue(file.length() > 0);
+            }
+            file = archivePath.resolve("subdir").resolve("subfile").toFile();
+            Assert.assertTrue(file.exists());
+            Assert.assertTrue(file.length() > 0);
+        }
     }
 
     @Test
@@ -326,30 +318,22 @@ public class MultiClientTest {
         stop(sinkServerFuture1);
         stop(sinkServerFuture2);
 
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/server-file-1")
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/file-1").exists());
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/file-1").length() > 0);
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/file-2").exists());
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/file-2").length() > 0);
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/subdir/subfile")
                 .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/server-file-1")
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/subdir/subfile")
                 .length() > 0);
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/server-file-2")
-                .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/1/server-file-2")
-                .length() > 0);
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/peer/1/subdir/server-subfile").exists());
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/peer/1/subdir/server-subfile").length() > 0);
 
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/server-file-1")
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/file-1").exists());
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/file-1").length() > 0);
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/file-2").exists());
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/file-2").length() > 0);
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/subdir/subfile")
                 .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/server-file-1")
+        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/subdir/subfile")
                 .length() > 0);
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/server-file-2")
-                .exists());
-        Assert.assertTrue(new File(TESTDIR + "/client/peer/2/server-file-2")
-                .length() > 0);
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/peer/2/subdir/server-subfile").exists());
-        Assert.assertTrue(new File(TESTDIR
-                + "/client/peer/2/subdir/server-subfile").length() > 0);
     }
 }

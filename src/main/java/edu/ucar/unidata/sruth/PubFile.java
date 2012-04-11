@@ -11,6 +11,7 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 
 import net.jcip.annotations.ThreadSafe;
@@ -87,6 +88,7 @@ final class PubFile {
         channel.close();
         final Path newPath = archive.getVisiblePath(hiddenPath);
         Files.createDirectories(newPath.getParent());
-        Files.move(hiddenPath, newPath);
+        Files.move(hiddenPath, newPath, StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
     }
 }

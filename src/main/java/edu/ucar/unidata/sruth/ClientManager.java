@@ -221,7 +221,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws NoSuchFileException
-     *             if the tracker couldn't be contacted and there no
+     *             if the tracker couldn't be contacted and there's no
      *             tracker-specific topology-file in the archive.
      */
     public Void call() throws NoSuchFileException, InterruptedException {
@@ -351,7 +351,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
                             }
                         }
                         catch (final InterruptedException e) {
-                            logger.debug("Client was interrupted", e);
+                            logger.debug("Client was interrupted", e.toString());
                         }
                         catch (final EOFException e) {
                             logger.info(
@@ -361,7 +361,8 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         }
                         catch (final ConnectException e) {
                             if (isCancelled()) {
-                                logger.debug("Client was cancelled", e);
+                                logger.debug("Client was cancelled",
+                                        e.toString());
                             }
                             else {
                                 logger.info(
@@ -374,7 +375,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
                             if (isCancelled()) {
                                 logger.debug(
                                         "Client's connection was disconnected",
-                                        e);
+                                        e.toString());
                             }
                             else {
                                 logger.info(
@@ -385,14 +386,15 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         }
                         catch (final IOException e) {
                             if (isCancelled()) {
-                                logger.debug("Client I/O failure: " + client, e);
+                                logger.debug("Client I/O failure: " + client,
+                                        e.toString());
                             }
                             else {
                                 logger.error("Client I/O failure: " + client, e);
                             }
                         }
                         catch (final Throwable t) {
-                            throw Util.launderThrowable(t);
+                            logger.warn("Unexpected client failure", t);
                         }
                         finally {
                             synchronized (ClientManager.this) {

@@ -86,7 +86,8 @@ abstract class FiniteBitSet implements Serializable {
      */
     protected final void vetIndex(final int index) {
         if (0 > index || size <= index) {
-            throw new IllegalArgumentException();
+            throw new IllegalArgumentException("numBits=" + size + ", index="
+                    + index);
         }
     }
 

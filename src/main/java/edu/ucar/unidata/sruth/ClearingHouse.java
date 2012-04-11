@@ -59,15 +59,15 @@ final class ClearingHouse {
          * @see java.util.Comparator#compare(java.lang.Object, java.lang.Object)
          */
         @Override
-        public int compare(final Peer o1, final Peer o2) {
+        public int compare(final Peer p1, final Peer p2) {
             int cmp;
-            if (o1 == o2) {
+            if (p1 == p2) {
                 cmp = 0;
             }
             else {
-                cmp = o1.getConnection().compareTo(o2.getConnection());
+                cmp = p1.getConnection().compareTo(p2.getConnection());
                 if (cmp == 0) {
-                    cmp = o1.getLocalFilter().compareTo(o2.getLocalFilter());
+                    cmp = p1.getLocalFilter().compareTo(p2.getLocalFilter());
                 }
             }
             return cmp;
@@ -161,8 +161,8 @@ final class ClearingHouse {
      * Adds a peer. Makes the peer's
      * {@link Peer#notifyRemoteIfDesired(PieceSpec)} method eligible for
      * calling. A peer will not be added if it equals one that has already been
-     * added. Peers are considered equal if their connections are equal and
-     * their data-filters for locally-desired data are equal.
+     * added. Peers are considered equal if they receive the same data from the
+     * same remote node.
      * 
      * @param peer
      *            The peer to be added.
@@ -324,9 +324,8 @@ final class ClearingHouse {
      * @return The piece of data or {@code null} if a newer version of the file
      *         exists.
      * @throws FileInfoMismatchException
-     *             if the file-information of the given piece specification
-     *             doesn't match that of the extant file except for the
-     *             {@link FileId}.
+     *             if the file-information of the archive-file is inconsistent
+     *             with that of the given piece specification
      * @throws IOException
      *             if an I/O error occurred.
      */
@@ -373,7 +372,7 @@ final class ClearingHouse {
     }
 
     /**
-     * Removes a file.
+     * Removes a file if it exists.
      * 
      * @param fileId
      *            Identifier of the file to be removed.
