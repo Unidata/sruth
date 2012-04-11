@@ -156,7 +156,7 @@ public class ClientTest {
                 serverSocketAddress, Filter.EVERYTHING, clearingHouse);
         final Future<Boolean> clientFuture = start(client);
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
         stop(clientFuture);
         stop(serverFuture);

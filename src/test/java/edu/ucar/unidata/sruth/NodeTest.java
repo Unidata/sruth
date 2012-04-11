@@ -207,7 +207,7 @@ public class NodeTest {
         final Future<Void> sinkFuture = start(sinkNode);
 
         // Thread.sleep(Long.MAX_VALUE);
-        Thread.sleep(1000);
+        Thread.sleep(2000);
 
         assertEquals(0, sourceNode.getClientCount());
         assertEquals(1, sourceNode.getServletCount());
