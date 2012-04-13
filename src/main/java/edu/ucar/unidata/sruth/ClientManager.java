@@ -245,7 +245,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         throw e;
                     }
                     catch (final Exception e) {
-                        logger.warn("Couldn't add new client: ", e);
+                        logger.warn("Couldn't add new client: ", e.toString());
                         waitUntilDoneOrTimeout(false);
                     }
                 }
@@ -321,7 +321,8 @@ final class ClientManager extends UninterruptibleTask<Void> {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private boolean addClient() throws ClassNotFoundException, IOException {
+    private boolean addClient() throws ClassNotFoundException,
+            NoSuchFileException, IOException {
         boolean clientAdded = false;
         FilterServerMap network = trackerProxy.getNetwork();
         network = new FilterServerMap(network);
@@ -351,7 +352,8 @@ final class ClientManager extends UninterruptibleTask<Void> {
                             }
                         }
                         catch (final InterruptedException e) {
-                            logger.debug("Client was interrupted", e.toString());
+                            logger.debug("Client was interrupted: {}",
+                                    e.toString());
                         }
                         catch (final EOFException e) {
                             logger.info(
@@ -361,7 +363,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         }
                         catch (final ConnectException e) {
                             if (isCancelled()) {
-                                logger.debug("Client was cancelled",
+                                logger.debug("Client was cancelled: {}",
                                         e.toString());
                             }
                             else {
@@ -374,7 +376,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         catch (final SocketException e) {
                             if (isCancelled()) {
                                 logger.debug(
-                                        "Client's connection was disconnected",
+                                        "Client's connection was disconnected: {}",
                                         e.toString());
                             }
                             else {
@@ -386,8 +388,8 @@ final class ClientManager extends UninterruptibleTask<Void> {
                         }
                         catch (final IOException e) {
                             if (isCancelled()) {
-                                logger.debug("Client I/O failure: " + client,
-                                        e.toString());
+                                logger.debug("Client I/O failure: {}: {}",
+                                        client, e.toString());
                             }
                             else {
                                 logger.error("Client I/O failure: " + client, e);
@@ -413,7 +415,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
                                 catch (final IOException e) {
                                     logger.warn(
                                             "Couldn't report {} as being offline: {}",
-                                            remoteServer, e);
+                                            remoteServer, e.toString());
                                 }
                             }
                         }
@@ -465,7 +467,9 @@ final class ClientManager extends UninterruptibleTask<Void> {
             }
         }
         network.remove(localServer);
-        return network.getBestServer(filter);
+        final InetSocketAddress bestServer = network.getBestServer(filter);
+        logger.debug("Best server is {}", bestServer);
+        return bestServer;
     }
 
     /**

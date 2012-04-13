@@ -1271,6 +1271,11 @@ final class Archive {
                                 + "\"").initCause(e);
                     }
 
+                    if (pos < 0 || pos >= fileLength) {
+                        throw new BadHiddenFileException(path,
+                                "Invalid metadata offset: " + pos);
+                    }
+
                     try {
                         randomFile.seek(pos);
                     }
