@@ -7,12 +7,37 @@
 	<artifactId>sruth</artifactId>
 	<packaging>jar</packaging>
 	<version>1.0-SNAPSHOT</version>
-	<name>Unidata SRUTH Data-Distribution Package</name>
-	<url>http://www.unidata.ucar.edu</url>
+	<name>Unidata Sruth Data-Distribution Package</name>
+	<url>http://www.unidata.ucar.edu/software/sruth</url>
 	<description>The Unidata Sruth package is free and open-source software for
   the rapid dissemination of arbitrary files over the Internet. It is
   implemented in Java and integrates a publish/subscribe distribution model with
   an asynchronous, event-driven, peer-to-peer transport mechanism.</description>
+	<organization>
+		<name>University Corporation for Atmospheric Research</name>
+		<url>http://www.ucar.edu</url></organization>
+	<licenses>
+		<license>
+			<name>Software License</name><url>LICENSE.txt</url>
+			</license></licenses>
+	<ciManagement>
+		<system>Jenkins</system>
+		<url>http://spock:8080/jenkins/job/Sruth/</url></ciManagement>
+	<scm>
+		<connection>scm:git://github.com/Unidata/sruth.git</connection>
+		<developerConnection>scm:git://github.com/Unidata/sruth.git</developerConnection>
+		<url>https://github.com/Unidata/sruth</url></scm>
+	<issueManagement>
+		<system>GitHub</system>
+		<url>https://github.com/Unidata/sruth/issues</url></issueManagement>
+	<developers>
+		<developer>
+			<email>emmerson@ucar.edu</email>
+			<name>Steve Emmerson</name>
+			<organization>Unidata Program Center of the University Corporation for Atmospheric Research</organization>
+			<organizationUrl>http://www.unidata.ucar.edu</organizationUrl>
+			<roles>
+				<role>Grand High Exalted Poo-Bah</role></roles></developer></developers>
 
 	<dependencies>
 		<dependency>
@@ -86,4 +111,11 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 	</properties>
+	<reporting>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-project-info-reports-plugin</artifactId>
+				<version>2.4</version></plugin></plugins></reporting>
+	
 </project>
