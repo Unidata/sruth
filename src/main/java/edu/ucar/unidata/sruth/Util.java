@@ -8,6 +8,7 @@ package edu.ucar.unidata.sruth;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
@@ -28,14 +29,59 @@ import org.slf4j.LoggerFactory;
  */
 final class Util {
     /**
+     * The logger for this package.
+     */
+    private static final Logger logger;
+    /**
      * The name of the package.
      */
-    static final String PACKAGE_NAME;
+    static final String         PACKAGE_NAME;
 
     static {
         final String packagePath = Util.class.getPackage().getName();
         PACKAGE_NAME = packagePath.substring(packagePath.lastIndexOf('.') + 1)
                 .toUpperCase();
+
+        final String JDK14_LOGGING_CONFIG_FILE = "logging.properties";
+
+        InputStream inStream = null;
+        final String path = System.getProperty("java.util.logging.config.file");
+        if (path != null) {
+            try {
+                inStream = new FileInputStream(path);
+            }
+            catch (final FileNotFoundException ignored) {
+            }
+        }
+        if (inStream == null) {
+            try {
+                inStream = new FileInputStream(JDK14_LOGGING_CONFIG_FILE);
+            }
+            catch (final FileNotFoundException e) {
+                inStream = Util.class.getClassLoader().getResourceAsStream(
+                        JDK14_LOGGING_CONFIG_FILE);
+            }
+        }
+        try {
+            java.util.logging.LogManager.getLogManager().readConfiguration(
+                    inStream);
+            logger = LoggerFactory.getLogger(Util.class);
+        }
+        catch (final SecurityException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+        catch (final IOException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+        finally {
+            if (inStream != null) {
+                try {
+                    inStream.close();
+                }
+                catch (final IOException ignored) {
+                }
+            }
+        }
     }
 
     /**
@@ -196,6 +242,6 @@ final class Util {
      * Returns the logger for this package.
      */
     static Logger getLogger() {
-        return LoggerFactory.getLogger(Util.class);
+        return logger;
     }
 }
