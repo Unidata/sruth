@@ -189,7 +189,7 @@ final class Archive {
                     .lastIndexOf('.') + 1);
             packageName = packageName.toUpperCase();
             final ArchivePath path = new ArchivePath(Paths.get(
-                    trackerAddress.getHostString() + ":"
+                    trackerAddress.getHostString() + "-"
                             + trackerAddress.getPort()).resolve(
                     "FilterServerMap"));
             topologyArchivePath = archive.getAdminDir().resolve(path);
