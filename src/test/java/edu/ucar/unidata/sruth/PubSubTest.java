@@ -302,6 +302,82 @@ public class PubSubTest {
         stop(pubFuture);
     }
 
+    @Test
+    public void testPublisherRestart() throws IOException,
+            InterruptedException, ExecutionException, FileInfoMismatchException {
+        /*
+         * Create and start the publisher.
+         */
+        Publisher publisher = new Publisher(PUB_ROOT);
+        Future<Void> pubFuture = start(publisher);
+        publisher.waitUntilRunning();
+
+        System.out.println("Tracker address: " + publisher.getTrackerAddress());
+        System.out.println("Source address: " + publisher.getSourceAddress());
+
+        /*
+         * Publish some files before the subscribers are started.
+         */
+        for (int i = 0; i < PRE_SUB_FILE_COUNT; i++) {
+            publishFile(publisher);
+        }
+
+        /*
+         * Create the subscribers.
+         */
+        final List<Subscriber> subscribers = new LinkedList<Subscriber>();
+        for (final Path rootDir : absSubRootDirs) {
+            subscribers
+                    .add(new Subscriber(rootDir, publisher.getTrackerAddress(),
+                            Predicate.EVERYTHING, new Processor()));
+        }
+        /*
+         * Start the subscribers.
+         */
+        final List<Future<Void>> subFutures = new LinkedList<Future<Void>>();
+        for (final Subscriber subscriber : subscribers) {
+            subFutures.add(start(subscriber));
+        }
+
+        Thread.sleep(sleepAmount);
+        // Thread.sleep(Long.MAX_VALUE);
+
+        /*
+         * Restart the publisher.
+         */
+        stop(pubFuture);
+        publisher = new Publisher(PUB_ROOT);
+        pubFuture = start(publisher);
+        publisher.waitUntilRunning();
+        Thread.sleep(sleepAmount);
+
+        /*
+         * Publish some more files.
+         */
+        for (int i = 0; i < POST_SUB_FILE_COUNT; i++) {
+            publishFile(publisher);
+        }
+
+        Thread.sleep(sleepAmount);
+        // Thread.sleep(Long.MAX_VALUE);
+
+        /*
+         * Verify transmission of published files.
+         */
+        for (final Subscriber subscriber : subscribers) {
+            diffDirs(subscriber.getRootDir());
+        }
+
+        /*
+         * Stop the subscribers and then the publisher.
+         */
+        for (final Future<Void> future : subFutures) {
+            stop(future);
+        }
+        Thread.sleep(sleepAmount);
+        stop(pubFuture);
+    }
+
     @SuppressWarnings("unchecked")
     @Test
     public void testDynamicNetworking() throws IOException,
