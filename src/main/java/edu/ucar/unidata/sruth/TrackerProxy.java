@@ -127,6 +127,8 @@ final class TrackerProxy {
      * <p>
      * This method is uninterruptible and potentially slow.
      * 
+     * @apram refresh Whether or not to refresh knowledge about the network from
+     *        the remote tracker.
      * @return The current state of the network.
      * @throws NoSuchFileException
      *             if the tracker couldn't be contacted and there's no
@@ -136,11 +138,12 @@ final class TrackerProxy {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    synchronized FilterServerMap getNetwork() throws IOException {
+    synchronized FilterServerMap getNetwork(boolean refresh) throws IOException {
         if (isClosed) {
             throw new IllegalStateException("Closed: " + this);
         }
-        if (filterServerMap == null) {
+        refresh |= (filterServerMap == null);
+        if (refresh) {
             if (!setTopologyFromTracker()) {
                 setTopologyFromFile();
                 logger.warn(

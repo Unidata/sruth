@@ -324,7 +324,7 @@ final class ClientManager extends UninterruptibleTask<Void> {
     private boolean addClient() throws ClassNotFoundException,
             NoSuchFileException, IOException {
         boolean clientAdded = false;
-        FilterServerMap network = trackerProxy.getNetwork();
+        FilterServerMap network = trackerProxy.getNetwork(clients.size() == 0);
         network = new FilterServerMap(network);
         final InetSocketAddress remoteServer = computeBestServer(network);
 
