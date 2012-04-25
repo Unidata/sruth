@@ -200,9 +200,18 @@ abstract class Connection implements Comparable<Connection> {
             }
 
             /**
-             * Closes this instance.
+             * Closes this instance. Idempotent.
              */
-            void close() {
+            synchronized void close() {
+                if (!socket.isOutputShutdown()) {
+                    try {
+                        socket.shutdownOutput();
+                    }
+                    catch (final IOException e) {
+                        logger.debug("Couldn't close socket output: {}",
+                                e.toString());
+                    }
+                }
                 /*
                  * The following is commented-out because it causes the
                  * associated input stream to return EOF.
@@ -284,9 +293,18 @@ abstract class Connection implements Comparable<Connection> {
             }
 
             /**
-             * Closes this instance.
+             * Closes this instance. Idempotent.
              */
-            void close() {
+            synchronized void close() {
+                if (!socket.isOutputShutdown()) {
+                    try {
+                        socket.shutdownInput();
+                    }
+                    catch (final IOException e) {
+                        logger.debug("Couldn't close socket input: {}",
+                                e.toString());
+                    }
+                }
                 /*
                  * The following is commented-out because it causes the
                  * associated output stream to throw an IOException.
