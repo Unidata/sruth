@@ -326,8 +326,13 @@ public final class Publisher implements Callable<Void> {
      * 
      * @param args
      *            Invocation arguments.
+     * @throws IOException
+     *             if an I/O error occurs
+     * @throws SecurityException
+     *             if a security exception occurs
      */
-    public static void main(final String[] args) {
+    public static void main(final String[] args) throws SecurityException,
+            IOException {
         int status = 0;
         Path rootDir = null;
         int port = 0;
@@ -395,8 +400,7 @@ public final class Publisher implements Callable<Void> {
             }
         }
         catch (final IllegalArgumentException e) {
-            logger.error("Usage: java ... "
-                    + Publisher.class.getCanonicalName() + " [-p port] rootDir");
+            logger.info("Usage: ... [-p port] rootDir");
             status = 1;
         }
 

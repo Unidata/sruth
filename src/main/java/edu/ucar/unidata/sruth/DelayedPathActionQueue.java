@@ -107,9 +107,10 @@ final class DelayedPathActionQueue {
                     logger.trace("Interrupted: {}", this);
                 }
                 catch (final IOException e) {
-                    synchronized (DelayedPathActionQueue.this) {
-                        exception = e;
-                        logger.error("DelayedPathActionQueue failure", e);
+                    if (!isInterrupted()) {
+                        synchronized (DelayedPathActionQueue.this) {
+                            exception = e;
+                        }
                     }
                 }
             }
@@ -216,11 +217,18 @@ final class DelayedPathActionQueue {
      * 
      * @throws InterruptedException
      *             if the current thread is interrupted.
+     * @throws IOException
+     *             if an I/O error occurs.
      */
-    void stop() throws InterruptedException {
+    void stop() throws InterruptedException, IOException {
         if (thread.isAlive()) {
-            thread.interrupt();
-            thread.join();
+            try {
+                queue.close();
+            }
+            finally {
+                thread.interrupt();
+                thread.join();
+            }
         }
     }
 }

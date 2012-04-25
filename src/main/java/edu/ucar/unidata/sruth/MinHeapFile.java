@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.ClosedByInterruptException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.Path;
@@ -237,6 +238,8 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * 
      * @return The first element in the heap or {@code null} if the heap is
      *         empty.
+     * @throws ClosedChannelException
+     *             if the channel to the file is closed
      * @throws IOException
      *             if an I/O error occurs.
      * @throws IllegalAccessException
@@ -244,8 +247,8 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws InstantiationException
      *             if an element can't be created.
      */
-    synchronized T remove() throws IOException, InstantiationException,
-            IllegalAccessException {
+    synchronized T remove() throws ClosedChannelException, IOException,
+            InstantiationException, IllegalAccessException {
         T firstElt;
         if (eltCount <= 0) {
             firstElt = null;
@@ -325,17 +328,17 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * 
      * @param index
      *            Index of the element to return.
-     * @return
+     * @return The element at the corresponding position
      * @throws IllegalAccessException
      *             if an element can't be created.
      * @throws InstantiationException
      *             if an element can't be created.
-     * @throws ClosedByInterruptException
-     *             if the current thread was interrupted
+     * @throws ClosedChannelException
+     *             if the channel to the file is closed
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private T readElt(final int index) throws ClosedByInterruptException,
+    private T readElt(final int index) throws ClosedChannelException,
             InstantiationException, IllegalAccessException, IOException {
         final T instance = type.newInstance();
         instance.read(getEltBuffer(index));
@@ -348,15 +351,15 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @param index
      *            The index of the element.
      * @return An I/O bite-buffer for the specified element.
-     * @throws ClosedByInterruptException
-     *             if the current thread was interrupted
+     * @throws ClosedChannelException
+     *             if the channel to the file is closed
      * @throws IllegalArgumentException
      *             if {@code index} is too large.
      * @throws IOException
      *             if an I/O error occurs.
      */
     private ByteBuffer getEltBuffer(final int index)
-            throws ClosedByInterruptException, IOException {
+            throws ClosedChannelException, IOException {
         if (getMaxEltCount() < (index + 1)) {
             // The golden ratio is a space/time compromise
             final long newMaxEltCount = Math.round((index + 1) * 1.618034);
@@ -400,13 +403,12 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * Returns the maximum number of elements that the file can contain.
      * 
      * @return The maximum number of elements that the file can contain.
-     * @throws ClosedByInterruptException
-     *             if the current thread was interrupted
+     * @throws ClosedChannelException
+     *             if the channel to the file is closed
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private long getMaxEltCount() throws ClosedByInterruptException,
-            IOException {
+    private long getMaxEltCount() throws ClosedChannelException, IOException {
         return (channel.size() - HEADER_SIZE) / eltSize;
     }
 

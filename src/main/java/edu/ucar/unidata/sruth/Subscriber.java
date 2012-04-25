@@ -316,8 +316,13 @@ public final class Subscriber implements Callable<Void> {
      * 
      * @param args
      *            Program arguments.
+     * @throws IOException
+     *             if an I/O error occurs
+     * @throws SecurityException
+     *             if a security exception occurs
      */
-    public static void main(final String[] args) {
+    public static void main(final String[] args) throws SecurityException,
+            IOException {
         final int INVALID_INVOCATION = 1;
         final int RUNTIME_ERROR = 2;
         Path archivePath = Paths.get(System.getProperty("user.home")
@@ -418,8 +423,7 @@ public final class Subscriber implements Callable<Void> {
             }
         }
         catch (final IllegalArgumentException e) {
-            logger.error("Usage: " + Subscriber.class.getCanonicalName()
-                    + " [-a actions] [-d archive] subscription");
+            logger.info("Usage: ... [-a actions] [-d archive] subscription");
             System.exit(INVALID_INVOCATION);
         }
 

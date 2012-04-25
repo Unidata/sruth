@@ -94,13 +94,13 @@ final class Tracker extends UninterruptibleTask<Void> {
             public Void call() {
                 try {
                     connection.open();
-                    logger.trace("Connection to server succeeded: {}",
+                    logger.debug("Connection to server succeeded: {}",
                             serverAddress);
                     connection.close();
                 }
                 catch (final IOException e) {
                     filterServerMap.remove(serverAddress);
-                    logger.trace("Removed server: {}", serverAddress);
+                    logger.debug("Removed server: {}", serverAddress);
                 }
                 return null;
             }
@@ -304,14 +304,11 @@ final class Tracker extends UninterruptibleTask<Void> {
             }
             catch (final IOException e) {
                 if (!isCancelled()) {
-                    logger.error("I/O error on socket " + socket, e);
+                    logger.error("I/O error on {}: {}", socket, e.toString());
                 }
             }
-            catch (final ClassNotFoundException e) {
-                logger.error("Unknown request on socket " + socket, e);
-            }
             catch (final Throwable t) {
-                logger.error("Unexpected error on socket " + socket, t);
+                logger.error("Unexpected error on {}: {}", socket, t.toString());
             }
             finally {
                 Thread.currentThread().setName(origThreadName);
