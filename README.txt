@@ -5,4 +5,4 @@ publish/subscribe distribution model integrated with an asynchronous,
 event-driven, peer-to-peer transport mechanism.
 
 The official website for this package is
-<http://www.unidata.ucar.edu/software/sruth>.
+<http://www.unidata.ucar.edu/projects/sruth>.
