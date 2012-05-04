@@ -147,6 +147,10 @@ final class Archive {
          */
         private final Path                        topologyAbsolutePath;
         /**
+         * The archive-pathname of the reporting-port file.
+         */
+        private final ArchivePath                 reportingPortArchivePath;
+        /**
          * The object-lock for distributing the topology. NB: This is a
          * single-element, discarding queue rather than a Hoare monitor.
          */
@@ -188,12 +192,12 @@ final class Archive {
             String packageName = packagePath.substring(packagePath
                     .lastIndexOf('.') + 1);
             packageName = packageName.toUpperCase();
-            final ArchivePath path = new ArchivePath(Paths.get(
-                    trackerAddress.getHostString() + "-"
-                            + trackerAddress.getPort()).resolve(
-                    "FilterServerMap"));
-            topologyArchivePath = archive.getAdminDir().resolve(path);
+            final ArchivePath trackerPath = archive.getAdminDir().resolve(
+                    new ArchivePath(Paths.get(trackerAddress.getHostString()
+                            + "-" + trackerAddress.getPort())));
+            topologyArchivePath = trackerPath.resolve("topology");
             topologyAbsolutePath = archive.resolve(topologyArchivePath);
+            reportingPortArchivePath = trackerPath.resolve("reportingPort");
         }
 
         /**
@@ -292,6 +296,21 @@ final class Archive {
                 distributor.setDaemon(true);
                 distributor.start();
             }
+        }
+
+        /**
+         * Distributes the port number for reporting server unavailability.
+         * 
+         * @param port
+         *            The port number for reporting server unavailability
+         * @throws FileSystemException
+         *             if too many files are open
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        void distribute(final int port) throws FileAlreadyExistsException,
+                FileSystemException, IOException {
+            archive.save(reportingPortArchivePath, new Integer(port));
         }
 
         /**
@@ -2409,15 +2428,12 @@ final class Archive {
      *            The object to be saved in the file.
      * @throws FileSystemException
      *             if too many files are open
-     * @throws FileInfoMismatchException
-     *             if the given file information is inconsistent with an
-     *             existing archive file
      * @throws IOException
      *             if an I/O error occurs.
      */
     private void save(final ArchivePath archivePath,
-            final Serializable serializable) throws FileAlreadyExistsException,
-            FileSystemException, IOException, FileInfoMismatchException {
+            final Serializable serializable) throws FileSystemException,
+            IOException {
         final byte[] bytes = Util.serialize(serializable);
         final InputStream inputStream = new ByteArrayInputStream(bytes);
         final ReadableByteChannel channel = Channels.newChannel(inputStream);
@@ -2455,15 +2471,12 @@ final class Archive {
      *            The channel from which to read the data for the file.
      * @throws FileSystemException
      *             if too many files are open
-     * @throws FileInfoMismatchException
-     *             if the file information conflicts with an existing archive
-     *             file.
      * @throws IOException
      *             if an I/O error occurs, including insufficient data in the
      *             channel
      */
     void save(final ArchivePath path, final ReadableByteChannel channel)
-            throws FileSystemException, FileInfoMismatchException, IOException {
+            throws FileSystemException, IOException {
         save(path, channel, -1);
     }
 
@@ -2479,15 +2492,11 @@ final class Archive {
      *            means indefinitely.
      * @throws FileSystemException
      *             if too many files are open
-     * @throws FileInfoMismatchException
-     *             if the file information conflicts with an existing archive
-     *             file.
      * @throws IOException
      *             if an I/O error occurs
      */
     void save(final ArchivePath archivePath, final ReadableByteChannel channel,
-            final int timeToLive) throws FileSystemException,
-            FileInfoMismatchException, IOException {
+            final int timeToLive) throws FileSystemException, IOException {
         final BulkArchiveFile file = archiveFileManager
                 .getForWriting(archivePath);
         boolean success = false;
