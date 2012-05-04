@@ -126,18 +126,31 @@ final class Tracker extends UninterruptibleTask<Void> {
         private final DatagramSocket     socket;
 
         /**
-         * Constructs from nothing. Opens a UDP socket next to the tracker's TCP
-         * socket (i.e., same port, different protocol).
+         * Constructs from nothing. Opens a UDP socket.
          * 
          * @throws SocketException
          *             if a UDP socket couldn't be created.
          */
         ServerCheckerTask() throws SocketException {
-            final InetSocketAddress serverAddress = getServerAddress();
+            /*
+             * Create an Internet socket address that uses the tracker's
+             * Internet address but an ephemeral port number.
+             */
+            final InetSocketAddress reportingAddress = new InetSocketAddress(
+                    getServerAddress().getAddress(), 0);
             /*
              * Create a UDP socket.
              */
-            socket = new DatagramSocket(serverAddress);
+            socket = new DatagramSocket(reportingAddress);
+        }
+
+        /**
+         * Returns the Internet socket address on which this instance listens.
+         * 
+         * @return The Internet socket address
+         */
+        InetSocketAddress getInetSocketAddress() {
+            return (InetSocketAddress) socket.getLocalSocketAddress();
         }
 
         @Override
@@ -495,6 +508,15 @@ final class Tracker extends UninterruptibleTask<Void> {
     InetSocketAddress getServerAddress() {
         return new InetSocketAddress(trackerSocket.getInetAddress(),
                 trackerSocket.getLocalPort());
+    }
+
+    /**
+     * Returns the Internet socket address for reporting unavailable servers.
+     * 
+     * @return The Internet socket address for reporting unavailable servers.
+     */
+    InetSocketAddress getReportingAddress() {
+        return serverCheckerTask.getInetSocketAddress();
     }
 
     /**

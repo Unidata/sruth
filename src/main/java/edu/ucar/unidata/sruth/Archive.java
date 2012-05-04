@@ -147,9 +147,10 @@ final class Archive {
          */
         private final Path                        topologyAbsolutePath;
         /**
-         * The archive-pathname of the reporting-port file.
+         * The archive-pathname of the Internet address for reporting
+         * unavailable servers.
          */
-        private final ArchivePath                 reportingPortArchivePath;
+        private final ArchivePath                 reportingAddressArchivePath;
         /**
          * The object-lock for distributing the topology. NB: This is a
          * single-element, discarding queue rather than a Hoare monitor.
@@ -197,7 +198,8 @@ final class Archive {
                             + "-" + trackerAddress.getPort())));
             topologyArchivePath = trackerPath.resolve("topology");
             topologyAbsolutePath = archive.resolve(topologyArchivePath);
-            reportingPortArchivePath = trackerPath.resolve("reportingPort");
+            reportingAddressArchivePath = trackerPath
+                    .resolve("reportingAddress");
         }
 
         /**
@@ -299,18 +301,20 @@ final class Archive {
         }
 
         /**
-         * Distributes the port number for reporting server unavailability.
+         * Distributes the Internet socket address for reporting server
+         * unavailability.
          * 
-         * @param port
-         *            The port number for reporting server unavailability
+         * @param reportingAddress
+         *            The Internet socket address for reporting server
+         *            unavailability
          * @throws FileSystemException
          *             if too many files are open
          * @throws IOException
          *             if an I/O error occurs.
          */
-        void distribute(final int port) throws FileAlreadyExistsException,
-                FileSystemException, IOException {
-            archive.save(reportingPortArchivePath, new Integer(port));
+        void distribute(final InetSocketAddress reportingAddress)
+                throws FileSystemException, IOException {
+            archive.save(reportingAddressArchivePath, reportingAddress);
         }
 
         /**

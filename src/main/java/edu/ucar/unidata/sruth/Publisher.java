@@ -136,6 +136,7 @@ public final class Publisher implements Callable<Void> {
                         .getNewValue());
             }
         });
+        distributedTrackerFiles.distribute(tracker.getReportingAddress());
     }
 
     /**
