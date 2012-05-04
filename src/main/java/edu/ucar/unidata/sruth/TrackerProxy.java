@@ -127,8 +127,9 @@ final class TrackerProxy {
      * <p>
      * This method is uninterruptible and potentially slow.
      * 
-     * @apram refresh Whether or not to refresh knowledge about the network from
-     *        the remote tracker.
+     * @param refresh
+     *            Whether or not to refresh knowledge about the network from the
+     *            remote tracker.
      * @return The current state of the network.
      * @throws NoSuchFileException
      *             if the tracker couldn't be contacted and there's no
