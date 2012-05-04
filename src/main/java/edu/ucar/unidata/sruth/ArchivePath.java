@@ -196,6 +196,18 @@ public final class ArchivePath implements Comparable<ArchivePath>, Serializable 
     }
 
     /**
+     * Resolves a {@link Path} representation of a relative pathname against
+     * this instance.
+     * 
+     * @param relPath
+     *            The {@link Path} representation of a relative pathname.
+     * @return The pathname resolved against this instance.
+     */
+    private ArchivePath resolve(final Path relPath) {
+        return new ArchivePath(path.resolve(relPath));
+    }
+
+    /**
      * Resolves another instance against this instance.
      * 
      * @param subPath
@@ -203,7 +215,25 @@ public final class ArchivePath implements Comparable<ArchivePath>, Serializable 
      * @return The other instance resolved against this instance.
      */
     ArchivePath resolve(final ArchivePath subPath) {
-        return new ArchivePath(path.resolve(subPath.path));
+        return resolve(subPath.path);
+    }
+
+    /**
+     * Resolves a string representation of a relative pathname against this
+     * instance.
+     * 
+     * @param string
+     *            The string representation of a relative pathname
+     * @return The relative pathname resolved against this instance
+     * @throws IllegalArgumentException
+     *             if the pathname isn't relative
+     */
+    ArchivePath resolve(final String string) {
+        final Path relPath = Paths.get(string);
+        if (relPath.isAbsolute()) {
+            throw new IllegalArgumentException(relPath.toString());
+        }
+        return resolve(relPath);
     }
 
     /**
