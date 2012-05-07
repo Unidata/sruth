@@ -42,11 +42,6 @@ final class TrackerProxy {
     @GuardedBy("this")
     private boolean                       isClosed;
     /**
-     * The filter/server map specific to this instance's filter.
-     */
-    @GuardedBy("this")
-    private FilterServerMap               filterServerMap;
-    /**
      * The filter/server map for all filters.
      */
     private FilterServerMap               rawFilterServerMap;
@@ -145,7 +140,7 @@ final class TrackerProxy {
         if (isClosed) {
             throw new IllegalStateException("Closed: " + this);
         }
-        refresh |= (filterServerMap == null);
+        refresh |= (rawFilterServerMap == null);
         if (refresh) {
             if (!setTopologyFromTracker(filter, localServer)) {
                 setTopologyFromFile();
