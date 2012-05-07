@@ -95,7 +95,6 @@ final class TrackerProxy {
         this.trackerAddress = trackerAddress;
         this.distributedTrackerFiles = distributedTrackerFiles;
         datagramSocket = new DatagramSocket();
-        datagramSocket.connect(trackerAddress);
         packet = new DatagramPacket(new byte[1], 1); // buffer is irrelevant
     }
 
@@ -226,13 +225,6 @@ final class TrackerProxy {
     }
 
     /**
-     * Returns the Internet socket address for reporting unavailable servers.
-     */
-    synchronized InetSocketAddress getReportingAddress() {
-        return reportingAddress;
-    }
-
-    /**
      * Ensures that the tracker-specific network topology information is current
      * by updating it from the external file.
      * 
@@ -265,6 +257,7 @@ final class TrackerProxy {
             throws IOException {
         logger.debug("Reporting offline server {} to {}", serverAddress,
                 trackerAddress);
+        datagramSocket.connect(reportingAddress);
         final byte[] buf = Util.serialize(serverAddress);
         packet.setData(buf);
         datagramSocket.send(packet);
