@@ -80,6 +80,8 @@ final class NetworkGetter extends TrackerTask {
      * 
      * @param socket
      *            The client socket to the tracker.
+     * @param trackerProxy
+     *            The proxy for the tracker
      * @throws ClassCastException
      *             if the tracker returns the wrong type.
      * @throws ClassNotFoundException
@@ -87,9 +89,11 @@ final class NetworkGetter extends TrackerTask {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    FilterServerMap getNetworkAndRegister(final Socket socket)
-            throws ClassNotFoundException, IOException {
-        return (FilterServerMap) callTracker(socket);
+    void getNetworkAndRegister(final Socket socket,
+            final TrackerProxy trackerProxy) throws ClassNotFoundException,
+            IOException {
+        final FilterServerMap topology = (FilterServerMap) callTracker(socket);
+        trackerProxy.setTopolology(topology);
     }
 
     @Override

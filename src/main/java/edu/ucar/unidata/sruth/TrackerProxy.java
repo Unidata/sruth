@@ -176,7 +176,7 @@ final class TrackerProxy {
             final Socket socket = new Socket();
             socket.connect(trackerAddress, Connection.SO_TIMEOUT);
             try {
-                filterServerMap = networkGetter.getNetworkAndRegister(socket);
+                networkGetter.getNetworkAndRegister(socket, this);
                 return true;
             }
             finally {
@@ -192,6 +192,16 @@ final class TrackerProxy {
                     trackerAddress, e);
             return false;
         }
+    }
+
+    /**
+     * Sets the network topology property.
+     * 
+     * @param topology
+     *            The network topology or {@code null}
+     */
+    void setTopolology(final FilterServerMap topology) {
+        this.filterServerMap = topology;
     }
 
     /**

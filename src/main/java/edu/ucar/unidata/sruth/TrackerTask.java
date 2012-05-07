@@ -49,7 +49,6 @@ abstract class TrackerTask implements Serializable {
         socket.setKeepAlive(true);
         socket.setSoLinger(false, 0); // because flush() always called
         socket.setTcpNoDelay(false); // because flush() called when appropriate
-        socket.setKeepAlive(true);
 
         final OutputStream outputStream = socket.getOutputStream();
         final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
