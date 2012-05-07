@@ -21,6 +21,8 @@ import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
 
+import edu.ucar.unidata.sruth.Archive.DistributedTrackerFiles;
+
 /**
  * An interior or leaf node of a distribution graph. A sink-node has a
  * {@link Server} and one or more {@link ClientManager}-s.
@@ -52,6 +54,10 @@ final class SinkNode extends AbstractNode {
      */
     @GuardedBy("itself")
     private final ArrayList<ClientManager>        clientManagers;
+    /**
+     * The proxy for the tracker
+     */
+    private final TrackerProxy                    trackerProxy;
     /**
      * The logging service.
      */
@@ -136,13 +142,17 @@ final class SinkNode extends AbstractNode {
             }
         };
 
+        final DistributedTrackerFiles distributedTrackerFiles = clearingHouse
+                .getDistributedTrackerFiles(trackerAddress);
+        trackerProxy = new TrackerProxy(trackerAddress,
+                localServer.getSocketAddress(), distributedTrackerFiles);
         clientManagers = new ArrayList<ClientManager>(getPredicate()
                 .getFilterCount());
         synchronized (clientManagers) {
             for (final Filter filter : getPredicate()) {
                 final ClientManager clientManager = new ClientManager(
                         localServer.getSocketAddress(), clearingHouse, filter,
-                        trackerAddress);
+                        trackerProxy);
                 clientManagers.add(clientManager);
             }
         }

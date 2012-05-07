@@ -14,8 +14,9 @@ import java.net.Socket;
 import net.jcip.annotations.ThreadSafe;
 
 /**
- * Gets the current state of the network from a tracker and registers a node.
- * 
+ * Gets the current state of the network from a tracker and registers a
+ * filter-specific node.
+ * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
@@ -27,24 +28,22 @@ final class NetworkGetter extends TrackerTask {
      */
     private static final long       serialVersionUID = 1L;
     /**
-     * The data-selection filter.
-     * 
-     * @serial
-     */
-    private final Filter            filter;
-    /**
      * The address of the server of the node that wants data.
      * 
      * @serial
      */
     private final InetSocketAddress localServer;
+    /**
+     * Specification of locally-desired data
+     */
+    private final Filter            filter;
 
     /**
      * Constructs from the data-filter to use and the address of the local
      * server.
      * 
      * @param filter
-     *            The data-filter to use.
+     *            Specification of locally-desired data
      * @param localServer
      *            The address of the local server.
      * @throws NullPointerException
@@ -64,15 +63,6 @@ final class NetworkGetter extends TrackerTask {
     }
 
     /**
-     * Returns the data-filter.
-     * 
-     * @return the data-filter.
-     */
-    Filter getFilter() {
-        return filter;
-    }
-
-    /**
      * Gets the state of the network from a tracker and registers with the
      * tracker.
      * <p>
@@ -80,6 +70,8 @@ final class NetworkGetter extends TrackerTask {
      * 
      * @param socket
      *            The client socket to the tracker.
+     * @param filter
+     *            The specification of locally-desired data
      * @param trackerProxy
      *            The proxy for the tracker
      * @throws ClassCastException
@@ -93,7 +85,7 @@ final class NetworkGetter extends TrackerTask {
             final TrackerProxy trackerProxy) throws ClassNotFoundException,
             IOException {
         final FilterServerMap topology = (FilterServerMap) callTracker(socket);
-        trackerProxy.setTopolology(topology);
+        trackerProxy.setRawTopology(topology);
     }
 
     @Override

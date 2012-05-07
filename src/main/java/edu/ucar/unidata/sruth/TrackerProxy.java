@@ -37,10 +37,6 @@ final class TrackerProxy {
      */
     private final InetSocketAddress       trackerAddress;
     /**
-     * The getter of the tracker's filter/server map.
-     */
-    private final NetworkGetter           networkGetter;
-    /**
      * Whether or not this instance is closed.
      */
     @GuardedBy("this")
@@ -66,6 +62,11 @@ final class TrackerProxy {
      * The manager of tracker-specific administrative files.
      */
     private final DistributedTrackerFiles distributedTrackerFiles;
+    /**
+     * The Internet address of the socket on which to report unavailable
+     * servers.
+     */
+    private InetSocketAddress             reportingAddress;
 
     /**
      * Constructs from the address of the tracker, the data-filter to use, and
@@ -73,8 +74,6 @@ final class TrackerProxy {
      * 
      * @param trackerAddress
      *            The address of the tracker.
-     * @param filter
-     *            The data-filter to use.
      * @param localServer
      *            The address of the local server.
      * @param distributedTrackerFiles
@@ -84,20 +83,15 @@ final class TrackerProxy {
      * @throws NullPointerException
      *             if {@code trackerAddress == null}.
      * @throws NullPointerException
-     *             if {@code filter == null}.
-     * @throws NullPointerException
      *             if {@code localServer == null}.
      * @throws NullPointerException
      *             if {@code distributedTrackerFiles == null}.
      */
-    TrackerProxy(final InetSocketAddress trackerAddress, final Filter filter,
+    TrackerProxy(final InetSocketAddress trackerAddress,
             final InetSocketAddress localServer,
             final DistributedTrackerFiles distributedTrackerFiles)
             throws IOException {
         if (null == trackerAddress) {
-            throw new NullPointerException();
-        }
-        if (null == filter) {
             throw new NullPointerException();
         }
         if (null == distributedTrackerFiles) {
@@ -105,7 +99,6 @@ final class TrackerProxy {
         }
         this.trackerAddress = trackerAddress;
         this.distributedTrackerFiles = distributedTrackerFiles;
-        networkGetter = new NetworkGetter(filter, localServer);
         datagramSocket = new DatagramSocket();
         datagramSocket.connect(trackerAddress);
         packet = new DatagramPacket(new byte[1], 1); // buffer is irrelevant
@@ -130,6 +123,10 @@ final class TrackerProxy {
      * @param refresh
      *            Whether or not to refresh knowledge about the network from the
      *            remote tracker.
+     * @param filter
+     *            The specification of locally-desired data
+     * @param localServer
+     *            The Internet socket address of the local server
      * @return The current state of the network.
      * @throws NoSuchFileException
      *             if the tracker couldn't be contacted and there's no
@@ -139,13 +136,18 @@ final class TrackerProxy {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    synchronized FilterServerMap getNetwork(boolean refresh) throws IOException {
+    synchronized FilterServerMap getNetwork(boolean refresh,
+            final Filter filter, final InetSocketAddress localServer)
+            throws IOException {
+        if (localServer == null) {
+            throw new NullPointerException();
+        }
         if (isClosed) {
             throw new IllegalStateException("Closed: " + this);
         }
         refresh |= (filterServerMap == null);
         if (refresh) {
-            if (!setTopologyFromTracker()) {
+            if (!setTopologyFromTracker(filter, localServer)) {
                 setTopologyFromFile();
                 logger.warn(
                         "Using stale network topology file {}; last modified {}",
@@ -162,20 +164,28 @@ final class TrackerProxy {
                         distributedTrackerFiles.getTopologyArchivePath());
             }
         }
-        return filterServerMap;
+        return rawFilterServerMap.subset(filter);
     }
 
     /**
      * Tries to set the tracker-specific network topology information by
      * contacting the tracker.
      * 
+     * @param filter
+     *            The specification of locally-desired data
+     * @param localServer
+     *            The Internet socket address of the local server
+     * 
      * @return {@code true} if and only if the attempt was successful.
      */
-    private synchronized boolean setTopologyFromTracker() {
+    private synchronized boolean setTopologyFromTracker(final Filter filter,
+            final InetSocketAddress localServer) {
         try {
             final Socket socket = new Socket();
             socket.connect(trackerAddress, Connection.SO_TIMEOUT);
             try {
+                final NetworkGetter networkGetter = new NetworkGetter(filter,
+                        localServer);
                 networkGetter.getNetworkAndRegister(socket, this);
                 return true;
             }
@@ -195,13 +205,37 @@ final class TrackerProxy {
     }
 
     /**
-     * Sets the network topology property.
+     * Sets the raw network topology property. Used by {@link NetworkGetter}.
      * 
      * @param topology
      *            The network topology or {@code null}
      */
-    void setTopolology(final FilterServerMap topology) {
-        this.filterServerMap = topology;
+    void setRawTopology(final FilterServerMap topology) {
+        this.rawFilterServerMap = topology;
+    }
+
+    /**
+     * Sets the Internet address of the socket for reporting unavailable
+     * servers. Used by {@link NetworkGetter}.
+     * 
+     * @param reportingAddress
+     *            The Internet address of the reporting socket
+     * @throws NullPointerException
+     *             if {@code reportingAddress == null}
+     */
+    void setReportingAddress(final InetSocketAddress reportingAddress) {
+        if (reportingAddress == null) {
+            throw new NullPointerException();
+        }
+        this.reportingAddress = reportingAddress;
+    }
+
+    /**
+     * Returns the Internet address of the socket for report unavailable
+     * servers.
+     */
+    InetSocketAddress getReportingAddress() {
+        return reportingAddress;
     }
 
     /**
@@ -221,8 +255,6 @@ final class TrackerProxy {
                 .getTopology();
         if (currFilterServerMap != rawFilterServerMap) {
             // new filter/server map
-            final Filter filter = networkGetter.getFilter();
-            filterServerMap = currFilterServerMap.subset(filter);
             this.rawFilterServerMap = currFilterServerMap;
         }
     }

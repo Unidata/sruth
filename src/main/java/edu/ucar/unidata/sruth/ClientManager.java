@@ -25,11 +25,9 @@ import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
 
-import edu.ucar.unidata.sruth.Archive.DistributedTrackerFiles;
-
 /**
- * Manages a set of clients. Populates the set, removes poor performing members,
- * and adds new members as appropriate.
+ * Manages a set of filter-specific clients. Populates the set, removes poor
+ * performing members, and adds new members as appropriate.
  * <p>
  * Instances are thread-safe.
  * 
@@ -181,8 +179,8 @@ final class ClientManager extends UninterruptibleTask<Void> {
      *            The address of the local server.
      * @param filter
      *            The data filter to use.
-     * @param trackerAddress
-     *            The address of the tracker.
+     * @param trackerProxy
+     *            The proxy for the tracker.
      * @throws IOException
      *             if an I/O error occurs.
      * @throws NullPointerException
@@ -192,23 +190,21 @@ final class ClientManager extends UninterruptibleTask<Void> {
      * @throws NullPointerException
      *             if {@code serverSocketAddress == null}.
      * @throws NullPointerException
-     *             if {@code filter == null}.
-     * @throws NullPointerException
-     *             if {@code trackerAddress == null}.
+     *             if {@code trackerProxy == null}.
      */
     ClientManager(final InetSocketAddress localServer,
             final ClearingHouse clearingHouse, final Filter filter,
-            final InetSocketAddress trackerAddress) throws IOException {
+            final TrackerProxy trackerProxy) throws IOException {
         if (localServer == null) {
             throw new NullPointerException();
         }
         if (clearingHouse == null) {
             throw new NullPointerException();
         }
-        final DistributedTrackerFiles distributedTrackerFiles = clearingHouse
-                .getDistributedTrackerFiles(trackerAddress);
-        trackerProxy = new TrackerProxy(trackerAddress, filter, localServer,
-                distributedTrackerFiles);
+        if (trackerProxy == null) {
+            throw new NullPointerException();
+        }
+        this.trackerProxy = trackerProxy;
         this.localServer = localServer;
         this.filter = filter;
         this.clearingHouse = clearingHouse;
@@ -324,7 +320,8 @@ final class ClientManager extends UninterruptibleTask<Void> {
     private boolean addClient() throws ClassNotFoundException,
             NoSuchFileException, IOException {
         boolean clientAdded = false;
-        FilterServerMap network = trackerProxy.getNetwork(clients.size() == 0);
+        FilterServerMap network = trackerProxy.getNetwork(clients.size() == 0,
+                filter, localServer);
         network = new FilterServerMap(network);
         final InetSocketAddress remoteServer = computeBestServer(network);
 
