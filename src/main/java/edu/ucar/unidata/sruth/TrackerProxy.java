@@ -109,9 +109,8 @@ final class TrackerProxy {
     }
 
     /**
-     * Returns the current state of the network -- specific to this instance's
-     * filter -- and registers with the tracker. The actual state is returned --
-     * not a copy.
+     * Returns the filter-specific state of the network and registers with the
+     * tracker. The actual state is returned -- not a copy.
      * <p>
      * This method is uninterruptible and potentially slow.
      * 
@@ -122,7 +121,7 @@ final class TrackerProxy {
      *            The specification of locally-desired data
      * @param localServer
      *            The Internet socket address of the local server
-     * @return The current state of the network.
+     * @return The current, filter-specific state of the network.
      * @throws NoSuchFileException
      *             if the tracker couldn't be contacted and there's no
      *             tracker-specific topology file in the archive.
@@ -177,11 +176,9 @@ final class TrackerProxy {
             final InetSocketAddress localServer) {
         try {
             final Socket socket = new Socket();
-            socket.connect(trackerAddress, Connection.SO_TIMEOUT);
             try {
-                final NetworkGetter networkGetter = new NetworkGetter(filter,
-                        localServer);
-                networkGetter.getNetworkAndRegister(socket, this);
+                socket.connect(trackerAddress, Connection.SO_TIMEOUT);
+                NetworkGetter.execute(filter, localServer, socket, this);
                 return true;
             }
             finally {
@@ -193,6 +190,8 @@ final class TrackerProxy {
             }
         }
         catch (final Exception e) {
+            // logger.error("Couldn't set network topology from tracker: "
+            // + trackerAddress.toString(), e);
             logger.warn("Couldn't set network topology from tracker: {}: {}",
                     trackerAddress, e);
             return false;
@@ -205,8 +204,7 @@ final class TrackerProxy {
      * @param topology
      *            The network topology or {@code null}
      */
-    void setRawTopology(final FilterServerMap topology) {
-        assert Thread.holdsLock(this);
+    synchronized void setRawTopology(final FilterServerMap topology) {
         this.rawFilterServerMap = topology;
     }
 
@@ -219,8 +217,8 @@ final class TrackerProxy {
      * @throws NullPointerException
      *             if {@code reportingAddress == null}
      */
-    void setReportingAddress(final InetSocketAddress reportingAddress) {
-        assert Thread.holdsLock(this);
+    synchronized void setReportingAddress(
+            final InetSocketAddress reportingAddress) {
         if (reportingAddress == null) {
             throw new NullPointerException();
         }
@@ -263,7 +261,7 @@ final class TrackerProxy {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void reportOffline(final InetSocketAddress serverAddress)
+    synchronized void reportOffline(final InetSocketAddress serverAddress)
             throws IOException {
         logger.debug("Reporting offline server {} to {}", serverAddress,
                 trackerAddress);

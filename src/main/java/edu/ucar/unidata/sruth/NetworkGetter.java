@@ -7,9 +7,13 @@ package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
 import java.io.InvalidObjectException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.ObjectStreamException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketException;
 
 import net.jcip.annotations.ThreadSafe;
 
@@ -34,7 +38,9 @@ final class NetworkGetter extends TrackerTask {
      */
     private final InetSocketAddress localServer;
     /**
-     * Specification of locally-desired data
+     * Specification of data desired by the client
+     * 
+     * @serial
      */
     private final Filter            filter;
 
@@ -46,12 +52,20 @@ final class NetworkGetter extends TrackerTask {
      *            Specification of locally-desired data
      * @param localServer
      *            The address of the local server.
+     * @param trackerSocket
+     *            The socket that's connected to the tracker
+     * @throws SocketException
+     *             if the socket can't be configured correctly
      * @throws NullPointerException
      *             if {@code filter == null}.
      * @throws NullPointerException
      *             if {@code localServer == null}.
+     * @throws NullPointerException
+     *             if {@code socket == null}.
      */
-    NetworkGetter(final Filter filter, final InetSocketAddress localServer) {
+    NetworkGetter(final Filter filter, final InetSocketAddress localServer,
+            final Socket socket) throws SocketException {
+        super(socket);
         if (filter == null) {
             throw new NullPointerException();
         }
@@ -63,13 +77,36 @@ final class NetworkGetter extends TrackerTask {
     }
 
     /**
+     * Executes an instance. Creates an instance and has it do its thing.
+     * 
+     * @param filter
+     *            Specification of locally-desired data
+     * @param localServer
+     *            Internet socket address of the local server
+     * @param socket
+     *            Socket to the tracker
+     * @param trackerProxy
+     *            Local proxy for the tracker
+     * @throws IOException
+     *             if an I/O error occurs
+     * @throws ClassNotFoundException
+     *             if the response from the tracker is invalid
+     */
+    static void execute(final Filter filter,
+            final InetSocketAddress localServer, final Socket socket,
+            final TrackerProxy trackerProxy) throws ClassNotFoundException,
+            IOException {
+        final NetworkGetter networkGetter = new NetworkGetter(filter,
+                localServer, socket);
+        networkGetter.getNetworkAndRegister(trackerProxy);
+    }
+
+    /**
      * Gets the state of the network from a tracker and registers with the
      * tracker.
      * <p>
      * This method is uninterruptible and potentially slow.
      * 
-     * @param socket
-     *            The client socket to the tracker.
      * @param trackerProxy
      *            The proxy for the tracker
      * @throws ClassCastException
@@ -79,19 +116,57 @@ final class NetworkGetter extends TrackerTask {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void getNetworkAndRegister(final Socket socket,
-            final TrackerProxy trackerProxy) throws ClassNotFoundException,
-            IOException {
-        final FilterServerMap topology = (FilterServerMap) callTracker(socket);
-        trackerProxy.setRawTopology(topology);
+    private void getNetworkAndRegister(final TrackerProxy trackerProxy)
+            throws ClassNotFoundException, IOException {
+        try {
+            callTracker();
+            processResponse(trackerProxy);
+        }
+        finally {
+            close();
+        }
     }
 
+    /**
+     * Processes the response from the tracker.
+     * 
+     * @param trackerProxy
+     *            The proxy for the tracker
+     */
+    private void processResponse(final TrackerProxy trackerProxy)
+            throws ClassNotFoundException, IOException {
+        final ObjectInputStream ois = new ObjectInputStream(
+                trackerSocket.getInputStream());
+        final FilterServerMap topology = (FilterServerMap) ois.readObject();
+        trackerProxy.setRawTopology(topology);
+        final InetSocketAddress reportingAddress = (InetSocketAddress) ois
+                .readObject();
+        trackerProxy.setReportingAddress(reportingAddress);
+    }
+
+    /**
+     * Replies to the client. This method is executed by the tracker.
+     * <p>
+     * This method is uninterruptible and potentially slow.
+     * 
+     * @param tracker
+     *            The tracker
+     * @param socket
+     *            The socket on which to reply.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code socket == null}.
+     */
     @Override
     public void process(final Tracker tracker, final Socket socket)
             throws IOException {
+        final OutputStream outputStream = socket.getOutputStream();
+        final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
         final FilterServerMap network = tracker.getNetwork();
-        reply(socket, network);
-        socket.close();
+        oos.writeObject(network);
+        oos.writeObject(tracker.getReportingAddress());
+        oos.flush();
         tracker.register(localServer, filter);
     }
 
@@ -106,13 +181,13 @@ final class NetworkGetter extends TrackerTask {
                 + localServer + "]";
     }
 
-    private Object readResolve() throws ObjectStreamException {
+    private Object readResolve() throws ObjectStreamException, SocketException {
         try {
-            return new NetworkGetter(filter, localServer);
+            return new NetworkGetter(filter, localServer, null);
         }
         catch (final NullPointerException e) {
             throw (InvalidObjectException) new InvalidObjectException(
-                    "Null response from tracker").initCause(e);
+                    this.toString()).initCause(e);
         }
     }
 }
