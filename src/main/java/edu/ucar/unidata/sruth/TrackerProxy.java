@@ -206,6 +206,7 @@ final class TrackerProxy {
      *            The network topology or {@code null}
      */
     void setRawTopology(final FilterServerMap topology) {
+        assert Thread.holdsLock(this);
         this.rawFilterServerMap = topology;
     }
 
@@ -219,6 +220,7 @@ final class TrackerProxy {
      *             if {@code reportingAddress == null}
      */
     void setReportingAddress(final InetSocketAddress reportingAddress) {
+        assert Thread.holdsLock(this);
         if (reportingAddress == null) {
             throw new NullPointerException();
         }
@@ -226,10 +228,9 @@ final class TrackerProxy {
     }
 
     /**
-     * Returns the Internet address of the socket for report unavailable
-     * servers.
+     * Returns the Internet socket address for reporting unavailable servers.
      */
-    InetSocketAddress getReportingAddress() {
+    synchronized InetSocketAddress getReportingAddress() {
         return reportingAddress;
     }
 

@@ -70,8 +70,6 @@ final class NetworkGetter extends TrackerTask {
      * 
      * @param socket
      *            The client socket to the tracker.
-     * @param filter
-     *            The specification of locally-desired data
      * @param trackerProxy
      *            The proxy for the tracker
      * @throws ClassCastException
@@ -91,7 +89,7 @@ final class NetworkGetter extends TrackerTask {
     @Override
     public void process(final Tracker tracker, final Socket socket)
             throws IOException {
-        final FilterServerMap network = tracker.getNetwork(filter);
+        final FilterServerMap network = tracker.getNetwork();
         reply(socket, network);
         socket.close();
         tracker.register(localServer, filter);

@@ -654,6 +654,16 @@ final class Tracker extends UninterruptibleTask<Void> {
     }
 
     /**
+     * Returns the current state of the network. The returned object is not a
+     * copy.
+     * 
+     * @return The current state of the network.
+     */
+    FilterServerMap getNetwork() {
+        return filterServerMap;
+    }
+
+    /**
      * Returns the current, filter-specific, state of the network. The returned
      * object isn't backed-up by this instance. Each server in the returned
      * instance will be able to satisfy, at least, the given filter.
