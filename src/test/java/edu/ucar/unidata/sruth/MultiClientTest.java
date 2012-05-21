@@ -6,8 +6,9 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -23,24 +24,21 @@ public class MultiClientTest {
     /**
      * The test directory.
      */
-    private static final Path         TESTDIR         = Paths.get(
-                                                              System.getProperty("java.io.tmpdir"))
-                                                              .resolve(
-                                                                      MultiClientTest.class
-                                                                              .getSimpleName());
+    private static final Path          TESTDIR     = Paths.get(
+                                                           System.getProperty("java.io.tmpdir"))
+                                                           .resolve(
+                                                                   MultiClientTest.class
+                                                                           .getSimpleName());
     /**
-     * The task completion service.
+     * The task execution services
      */
-    private static CancellingExecutor executorService = new CancellingExecutor(
-                                                              0,
-                                                              Integer.MAX_VALUE,
-                                                              0,
-                                                              TimeUnit.SECONDS,
-                                                              new SynchronousQueue<Runnable>());
+    private CancellingExecutor         executor;
+    private CompletionService<Void>    voidCompleter;
+    private CompletionService<Boolean> booleanCompleter;
     /**
      * The sleep interval, in milliseconds, to be used.
      */
-    private static long               sleepAmount     = 2000;
+    private static long                sleepAmount = 2000;
 
     private static void system(final String[] cmd) throws IOException,
             InterruptedException {
@@ -80,34 +78,19 @@ public class MultiClientTest {
 
     @Before
     public void setUp() throws Exception {
+        executor = new CancellingExecutor(0, Integer.MAX_VALUE, 0,
+                TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
+        voidCompleter = new ExecutorCompletionService<Void>(executor);
+        booleanCompleter = new ExecutorCompletionService<Boolean>(executor);
+        voidCompleter.submit(Misc.newReportingTask(voidCompleter));
+        booleanCompleter.submit(Misc.newReportingTask(booleanCompleter));
     }
 
     @After
     public void tearDown() throws Exception {
-    }
-
-    /**
-     * Starts a task.
-     */
-    private static <T> Future<T> start(final Callable<T> task) {
-        return executorService.submit(task);
-    }
-
-    /**
-     * Stops a task.
-     * 
-     * @param future
-     *            The future of the task to stop.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws ExecutionException
-     *             if the task terminated due to an error.
-     */
-    private static <T> void stop(final Future<T> future)
-            throws InterruptedException, ExecutionException {
-        if (!future.cancel(true)) {
-            future.get();
-        }
+        executor.shutdownNow();
+        Thread.interrupted();
+        executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     @Test
@@ -126,7 +109,8 @@ public class MultiClientTest {
         Archive archive = new Archive(TESTDIR.resolve("server"));
         final Server sourceServer = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
-        final Future<Void> sourceServerFuture = start(sourceServer);
+        final Future<Void> sourceServerFuture = voidCompleter
+                .submit(sourceServer);
         final InetSocketAddress sourceServerAddress = sourceServer
                 .getSocketAddress();
 
@@ -151,14 +135,16 @@ public class MultiClientTest {
         /*
          * Start the clients.
          */
-        final Future<Boolean> client_1_Future = start(client_1);
-        final Future<Boolean> client_2_Future = start(client_2);
+        final Future<Boolean> client_1_Future = booleanCompleter
+                .submit(client_1);
+        final Future<Boolean> client_2_Future = booleanCompleter
+                .submit(client_2);
 
         Thread.sleep(sleepAmount);
 
-        stop(client_1_Future);
-        stop(client_2_Future);
-        stop(sourceServerFuture);
+        client_1_Future.cancel(true);
+        client_2_Future.cancel(true);
+        sourceServerFuture.cancel(true);
 
         for (final Path path : new Path[] { clientDir1, clientDir2 }) {
             File file = path.resolve("file-1").toFile();
@@ -189,7 +175,7 @@ public class MultiClientTest {
         Archive archive = new Archive(TESTDIR.resolve("server"));
         Server server = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
-        final Future<Void> server_1_Future = start(server);
+        final Future<Void> server_1_Future = voidCompleter.submit(server);
         final InetSocketAddress server_1_Address = server.getSocketAddress();
 
         /*
@@ -200,11 +186,11 @@ public class MultiClientTest {
         ClearingHouse clearingHouse = new ClearingHouse(archive,
                 Predicate.EVERYTHING);
         server = new SinkServer(clearingHouse, new InetSocketAddressSet());
-        final Future<Void> server_2_Future = start(server);
+        final Future<Void> server_2_Future = voidCompleter.submit(server);
         final InetSocketAddress server_2_Address = server.getSocketAddress();
         Client client = new Client(server_2_Address, server_1_Address,
                 Filter.EVERYTHING, clearingHouse);
-        final Future<Boolean> client_1_Future = start(client);
+        final Future<Boolean> client_1_Future = booleanCompleter.submit(client);
 
         /*
          * Create the second client that receives data from the client/server
@@ -214,15 +200,15 @@ public class MultiClientTest {
         clearingHouse = new ClearingHouse(archive, Predicate.EVERYTHING);
         client = new Client(new InetSocketAddress(2), server_2_Address,
                 Filter.EVERYTHING, clearingHouse);
-        final Future<Boolean> client_2_Future = start(client);
+        final Future<Boolean> client_2_Future = booleanCompleter.submit(client);
 
         Thread.sleep(sleepAmount);
         // Thread.sleep(Long.MAX_VALUE);
 
-        stop(client_1_Future);
-        stop(client_2_Future);
-        stop(server_1_Future);
-        stop(server_2_Future);
+        client_1_Future.cancel(true);
+        client_2_Future.cancel(true);
+        server_1_Future.cancel(true);
+        server_2_Future.cancel(true);
 
         for (final Path archivePath : new Path[] { archive1Path, archive2Path }) {
             File file;
@@ -252,7 +238,8 @@ public class MultiClientTest {
         final ClearingHouse sourceClearingHouse = new ClearingHouse(archive,
                 Predicate.NOTHING);
         final Server sourceServer = new SourceServer(sourceClearingHouse);
-        final Future<Void> sourceServerFuture = start(sourceServer);
+        final Future<Void> sourceServerFuture = voidCompleter
+                .submit(sourceServer);
         final InetSocketAddress sourceServerAddress = sourceServer
                 .getSocketAddress();
 
@@ -264,7 +251,8 @@ public class MultiClientTest {
                 Predicate.EVERYTHING);
         final Server sinkServer1 = new SinkServer(clearingHouse1,
                 new InetSocketAddressSet());
-        final Future<Void> sinkServerFuture1 = start(sinkServer1);
+        final Future<Void> sinkServerFuture1 = voidCompleter
+                .submit(sinkServer1);
         final InetSocketAddress sinkServerAddress1 = sinkServer1
                 .getSocketAddress();
 
@@ -276,7 +264,8 @@ public class MultiClientTest {
                 Predicate.EVERYTHING);
         final Server sinkServer2 = new SinkServer(clearingHouse2,
                 new InetSocketAddressSet());
-        final Future<Void> sinkServerFuture2 = start(sinkServer2);
+        final Future<Void> sinkServerFuture2 = voidCompleter
+                .submit(sinkServer2);
         final InetSocketAddress sinkServerAddress2 = sinkServer2
                 .getSocketAddress();
 
@@ -295,10 +284,14 @@ public class MultiClientTest {
         /*
          * Start the sink clients.
          */
-        final Future<Boolean> peerClientFuture1 = start(peerClient1);
-        final Future<Boolean> peerClientFuture2 = start(peerClient2);
-        final Future<Boolean> sourceClientFuture1 = start(sourceClient1);
-        final Future<Boolean> sourceClientFuture2 = start(sourceClient2);
+        final Future<Boolean> peerClientFuture1 = booleanCompleter
+                .submit(peerClient1);
+        final Future<Boolean> peerClientFuture2 = booleanCompleter
+                .submit(peerClient2);
+        final Future<Boolean> sourceClientFuture1 = booleanCompleter
+                .submit(sourceClient1);
+        final Future<Boolean> sourceClientFuture2 = booleanCompleter
+                .submit(sourceClient2);
 
         Thread.sleep(sleepAmount);
         // Thread.sleep(Long.MAX_VALUE);
@@ -310,13 +303,13 @@ public class MultiClientTest {
         Assert.assertEquals(3, clearingHouse1.getPeerCount());
         Assert.assertEquals(3, clearingHouse2.getPeerCount());
 
-        stop(peerClientFuture1);
-        stop(peerClientFuture2);
-        stop(sourceClientFuture1);
-        stop(sourceClientFuture2);
-        stop(sourceServerFuture);
-        stop(sinkServerFuture1);
-        stop(sinkServerFuture2);
+        peerClientFuture1.cancel(true);
+        peerClientFuture2.cancel(true);
+        sourceClientFuture1.cancel(true);
+        sourceClientFuture2.cancel(true);
+        sourceServerFuture.cancel(true);
+        sinkServerFuture1.cancel(true);
+        sinkServerFuture2.cancel(true);
 
         Assert.assertTrue(new File(TESTDIR + "/client/peer/1/file-1").exists());
         Assert.assertTrue(new File(TESTDIR + "/client/peer/1/file-1").length() > 0);

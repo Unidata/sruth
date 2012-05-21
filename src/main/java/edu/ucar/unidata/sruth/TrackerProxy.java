@@ -6,11 +6,16 @@
 package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.file.NoSuchFileException;
+import java.util.Comparator;
+import java.util.Set;
+import java.util.TreeSet;
 
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
@@ -29,9 +34,182 @@ import edu.ucar.unidata.sruth.Archive.DistributedTrackerFiles;
 @ThreadSafe
 final class TrackerProxy {
     /**
+     * Gets filter-specific information on the network topology.
+     */
+    class FilteredProxy {
+        /**
+         * The specification of the locally-desired data
+         */
+        private final Filter            filter;
+        /**
+         * The Internet socket address of the local server
+         */
+        private final InetSocketAddress localServer;
+        /**
+         * The associated client-manager
+         */
+        private final ClientManager     clientManager;
+        /**
+         * The raw network topology that was used to compute the filter-specific
+         * network topology
+         */
+        @GuardedBy("this")
+        private Topology                rawTopology;
+        /**
+         * The filter-specific network topology
+         */
+        @GuardedBy("TrackerProxy.this")
+        private Topology                filteredTopology;
+        /**
+         * The socket for communicating with the tracker
+         */
+        @GuardedBy("this")
+        private Socket                  socket;
+        /**
+         * Whether or not this instance has been de-registered
+         */
+        @GuardedBy("this")
+        private boolean                 deregistered;
+
+        /**
+         * Constructs from the associated client-manager.
+         * 
+         * @param clientManager
+         *            the associated client-manager
+         */
+        FilteredProxy(final ClientManager clientManager) {
+            filter = clientManager.getFilter();
+            localServer = clientManager.getLocalServerAddress();
+            this.clientManager = clientManager;
+            TrackerProxy.this.register(clientManager);
+        }
+
+        /**
+         * Opens the socket. Idempotent.
+         */
+        private synchronized void openSocket() {
+            if (socket == null) {
+                socket = new Socket();
+            }
+        }
+
+        /**
+         * Closes the socket. Idempotent.
+         */
+        private synchronized void closeSocket() {
+            if (socket != null) {
+                try {
+                    socket.close();
+                }
+                catch (final IOException ignored) {
+                }
+                socket = null;
+            }
+        }
+
+        /**
+         * Registers the associated client-manager. Causes the client-manager to
+         * be registered with the tracker and also allows the tracker proxy to
+         * determine if information on the network topology is being distributed
+         * via the network, which will occur if any client-manager registered
+         * with the tracker proxy has at least one client.
+         * <p>
+         * This method is potentially slow and uninterruptible.
+         * 
+         * @throws ConnectException
+         *             if the tracker can't be contacted
+         * @throws SocketException
+         *             if {@link #deregister()} is called by another thread
+         *             while this method is executing
+         * @throws IOException
+         *             if an I/O error occurs
+         * @throws InvalidMessageException
+         *             if the response from the tracker is invalid
+         * @throws IllegalStateException
+         *             if {@link #deregister()} has been called
+         * @see TrackerProxy#register(ClientManager)
+         */
+        void register() throws ConnectException, SocketException, IOException,
+                InvalidMessageException {
+            synchronized (this) {
+                if (deregistered) {
+                    throw new IllegalStateException();
+                }
+                openSocket();
+            }
+            try {
+                socket.connect(trackerAddress, Connection.SO_TIMEOUT);
+                TopologyGetter.execute(filter, localServer, socket,
+                        TrackerProxy.this);
+                setTopology(TrackerProxy.this.getTopology());
+                TrackerProxy.this.register(clientManager);
+            }
+            finally {
+                closeSocket();
+            }
+        }
+
+        /**
+         * De-registers the associated client-manager with the tracker proxy.
+         * Closes this instance. Immediately stops it from executing.
+         * <p>
+         * Idempotent.
+         * 
+         * @see TrackerProxy#deregister(ClientManager)
+         */
+        synchronized void deregister() {
+            if (!deregistered) {
+                TrackerProxy.this.deregister(clientManager);
+                closeSocket();
+                deregistered = true;
+            }
+        }
+
+        /**
+         * Returns the filter-specific information on the network topology.
+         * <p>
+         * This method is potentially slow and uninterruptible.
+         * 
+         * @return the filter-specific information on the network topology
+         * @throws SocketException
+         *             if {@link #deregister()} is called by another thread
+         *             while this method is executing
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        Topology getTopology() throws IOException {
+            openSocket();
+            try {
+                final Topology latestTopology = TrackerProxy.this.getTopology(
+                        filter, localServer, socket);
+                synchronized (this) {
+                    if (rawTopology != latestTopology) {
+                        setTopology(latestTopology);
+                    }
+                    return filteredTopology;
+                }
+            }
+            finally {
+                closeSocket();
+            }
+        }
+
+        /**
+         * Sets the filter-specific information on the network topology.
+         * 
+         * @param rawTopology
+         *            The raw network topology
+         */
+        private synchronized void setTopology(final Topology rawTopology) {
+            filteredTopology = rawTopology.subset(filter);
+            this.rawTopology = rawTopology;
+        }
+    }
+
+    /**
      * The logger for this class.
      */
-    private static Logger                 logger = Util.getLogger();
+    private static Logger                 logger         = Util.getLogger();
     /**
      * The address of the tracker's socket.
      */
@@ -42,9 +220,15 @@ final class TrackerProxy {
     @GuardedBy("this")
     private boolean                       isClosed;
     /**
-     * The filter/server map for all filters.
+     * The version of the raw topology
      */
-    private FilterServerMap               rawFilterServerMap;
+    @GuardedBy("this")
+    public int                            currentVersion;
+    /**
+     * The raw topology
+     */
+    @GuardedBy("this")
+    private Topology                      rawTopology;
     /**
      * The datagram socket for reporting offline servers.
      */
@@ -62,6 +246,21 @@ final class TrackerProxy {
      * servers.
      */
     private InetSocketAddress             reportingAddress;
+    /**
+     * The set of {@link ClientManager}s that use this instance.
+     */
+    @GuardedBy("this")
+    private final Set<ClientManager>      clientManagers = new TreeSet<ClientManager>(
+                                                                 new Comparator<ClientManager>() {
+                                                                     public int compare(
+                                                                             final ClientManager o1,
+                                                                             final ClientManager o2) {
+                                                                         return o1
+                                                                                 .getFilter()
+                                                                                 .compareTo(
+                                                                                         o2.getFilter());
+                                                                     }
+                                                                 });
 
     /**
      * Constructs from the address of the tracker, the data-filter to use, and
@@ -108,19 +307,63 @@ final class TrackerProxy {
     }
 
     /**
-     * Returns the filter-specific state of the network and registers with the
-     * tracker. The actual state is returned -- not a copy.
-     * <p>
-     * This method is uninterruptible and potentially slow.
+     * Registers a client-manager with this instance. Allows this instance to
+     * determine if information on the network topology is being distributed via
+     * the network, which will occur if any registered client-manager has at
+     * least one client.
      * 
-     * @param refresh
-     *            Whether or not to refresh knowledge about the network from the
-     *            remote tracker.
+     * @param clientManager
+     *            The client-manager to be registered
+     */
+    synchronized void register(final ClientManager clientManager) {
+        clientManagers.add(clientManager);
+    }
+
+    /**
+     * De-registers a {@link ClientManager}. Idempotent.
+     * 
+     * @param clientManager
+     *            The client-manager to de-register
+     */
+    synchronized void deregister(final ClientManager clientManager) {
+        clientManagers.remove(clientManager);
+    }
+
+    /**
+     * Returns a filter-specific proxy for the tracker.
+     * 
+     * @param clientManager
+     *            The client-manager that wants the filtered proxy
+     * @return a filter-specific proxy for the tracker
+     */
+    FilteredProxy getFilteredProxy(final ClientManager clientManager) {
+        return new FilteredProxy(clientManager);
+    }
+
+    /**
+     * Returns the raw state of the network.
+     * 
+     * @return the raw state of the network or {@code null}.
+     */
+    synchronized Topology getTopology() {
+        return rawTopology;
+    }
+
+    /**
+     * Returns the raw state of the network. Communicates with the tracker if
+     * necessary. The actual state is returned -- not a copy.
+     * <p>
+     * This method is potentially uninterruptible and slow.
+     * 
      * @param filter
-     *            The specification of locally-desired data
+     *            The specification of locally-desired data. Only used during
+     *            registration with the tracker.
      * @param localServer
      *            The Internet socket address of the local server
-     * @return The current, filter-specific state of the network.
+     * @param socket
+     *            The socket to use to communicate with the tracker, if
+     *            necessary
+     * @return The current, raw state of the network.
      * @throws NoSuchFileException
      *             if the tracker couldn't be contacted and there's no
      *             tracker-specific topology file in the archive.
@@ -129,8 +372,8 @@ final class TrackerProxy {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    synchronized FilterServerMap getNetwork(boolean refresh,
-            final Filter filter, final InetSocketAddress localServer)
+    private synchronized Topology getTopology(final Filter filter,
+            final InetSocketAddress localServer, final Socket socket)
             throws IOException {
         if (localServer == null) {
             throw new NullPointerException();
@@ -138,9 +381,8 @@ final class TrackerProxy {
         if (isClosed) {
             throw new IllegalStateException("Closed: " + this);
         }
-        refresh |= (rawFilterServerMap == null);
-        if (refresh) {
-            if (!setTopologyFromTracker(filter, localServer)) {
+        if ((rawTopology == null) || !topologyIsBeingReceived()) {
+            if (!setTopologyFromTracker(filter, localServer, socket)) {
                 setTopologyFromFile();
                 logger.warn(
                         "Using stale network topology file {}; last modified {}",
@@ -157,36 +399,46 @@ final class TrackerProxy {
                         distributedTrackerFiles.getTopologyArchivePath());
             }
         }
-        return rawFilterServerMap.subset(filter);
+        return rawTopology;
+    }
+
+    /**
+     * Indicates if information on the network topology is being received via
+     * the network.
+     * 
+     * @return {@code true} if and only if information on the network topology
+     *         is being received via the network
+     */
+    private synchronized boolean topologyIsBeingReceived() {
+        for (final ClientManager manager : clientManagers) {
+            if (manager.getClientCount() > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Tries to set the tracker-specific network topology information by
      * contacting the tracker.
+     * <p>
+     * This method is potentially uninterruptible and slow.
      * 
      * @param filter
      *            The specification of locally-desired data
      * @param localServer
      *            The Internet socket address of the local server
+     * @param socket
+     *            The socket to use to communicate with the tracker
      * 
      * @return {@code true} if and only if the attempt was successful.
      */
     private synchronized boolean setTopologyFromTracker(final Filter filter,
-            final InetSocketAddress localServer) {
+            final InetSocketAddress localServer, final Socket socket) {
         try {
-            final Socket socket = new Socket();
-            try {
-                socket.connect(trackerAddress, Connection.SO_TIMEOUT);
-                NetworkGetter.execute(filter, localServer, socket, this);
-                return true;
-            }
-            finally {
-                try {
-                    socket.close();
-                }
-                catch (final IOException ignored) {
-                }
-            }
+            socket.connect(trackerAddress, Connection.SO_TIMEOUT);
+            TopologyGetter.execute(filter, localServer, socket, this);
+            return true;
         }
         catch (final Exception e) {
             // logger.error("Couldn't set network topology from tracker: "
@@ -198,18 +450,18 @@ final class TrackerProxy {
     }
 
     /**
-     * Sets the raw network topology property. Used by {@link NetworkGetter}.
+     * Sets the raw network topology property. Used by {@link FilteredProxy}.
      * 
      * @param topology
      *            The network topology or {@code null}
      */
-    synchronized void setRawTopology(final FilterServerMap topology) {
-        this.rawFilterServerMap = topology;
+    synchronized void setRawTopology(final Topology topology) {
+        this.rawTopology = topology;
     }
 
     /**
      * Sets the Internet address of the socket for reporting unavailable
-     * servers. Used by {@link NetworkGetter}.
+     * servers. Used by {@link FilteredProxy}.
      * 
      * @param reportingAddress
      *            The Internet address of the reporting socket
@@ -237,11 +489,11 @@ final class TrackerProxy {
      *             if a severe I/O error occurs.
      */
     private synchronized void setTopologyFromFile() throws IOException {
-        final FilterServerMap currFilterServerMap = distributedTrackerFiles
+        final Topology currFilterServerMap = distributedTrackerFiles
                 .getTopology();
-        if (currFilterServerMap != rawFilterServerMap) {
+        if (currFilterServerMap != rawTopology) {
             // new filter/server map
-            this.rawFilterServerMap = currFilterServerMap;
+            this.rawTopology = currFilterServerMap;
         }
     }
 
@@ -256,10 +508,11 @@ final class TrackerProxy {
     synchronized void reportOffline(final InetSocketAddress serverAddress)
             throws IOException {
         logger.debug("Reporting offline server {} to {}", serverAddress,
-                trackerAddress);
+                reportingAddress);
         datagramSocket.connect(reportingAddress);
         final byte[] buf = Util.serialize(serverAddress);
         packet.setData(buf);
+        packet.setSocketAddress(reportingAddress);
         datagramSocket.send(packet);
     }
 

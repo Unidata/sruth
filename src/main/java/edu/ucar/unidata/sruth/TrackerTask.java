@@ -58,6 +58,8 @@ abstract class TrackerTask implements Serializable {
      * <p>
      * This method is uninterruptible and potentially slow.
      * 
+     * @throws SocketException
+     *             if the socket is closed
      * @throws IOException
      *             if an I/O error occurs.
      */

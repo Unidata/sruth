@@ -4,8 +4,9 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Paths;
-import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -27,20 +28,17 @@ public class ClientTest {
     /**
      * The test directory.
      */
-    private static final String       TESTDIR         = "/tmp/ClientTest";
+    private static final String        TESTDIR = "/tmp/ClientTest";
     /**
      * The logging service.
      */
-    private static final Logger       logger          = Util.getLogger();
+    private static final Logger        logger  = Util.getLogger();
     /**
-     * The executor service.
+     * The execution service.
      */
-    private static CancellingExecutor executorService = new CancellingExecutor(
-                                                              0,
-                                                              Integer.MAX_VALUE,
-                                                              0,
-                                                              TimeUnit.SECONDS,
-                                                              new SynchronousQueue<Runnable>());
+    private CancellingExecutor         executorService;
+    private CompletionService<Void>    voidCompleter;
+    private CompletionService<Boolean> booleanCompleter;
 
     private static void system(final String[] cmd) throws IOException,
             InterruptedException {
@@ -73,34 +71,20 @@ public class ClientTest {
 
     @Before
     public void setUp() throws Exception {
+        executorService = new CancellingExecutor(0, Integer.MAX_VALUE, 0,
+                TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
+        voidCompleter = new ExecutorCompletionService<Void>(executorService);
+        booleanCompleter = new ExecutorCompletionService<Boolean>(
+                executorService);
+        voidCompleter.submit(Misc.newReportingTask(voidCompleter));
+        booleanCompleter.submit(Misc.newReportingTask(booleanCompleter));
     }
 
     @After
     public void tearDown() throws Exception {
-    }
-
-    /**
-     * Starts a task.
-     */
-    private static <T> Future<T> start(final Callable<T> task) {
-        return executorService.submit(task);
-    }
-
-    /**
-     * Stops a task.
-     * 
-     * @param future
-     *            The future of the task to stop.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws ExecutionException
-     *             if the task terminated due to an error.
-     */
-    private static <T> void stop(final Future<T> future)
-            throws InterruptedException, ExecutionException {
-        if (!future.cancel(true)) {
-            future.get();
-        }
+        executorService.shutdownNow();
+        Thread.interrupted();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     @Test
@@ -112,7 +96,7 @@ public class ClientTest {
         Archive archive = new Archive(Paths.get(TESTDIR + "/localServer"));
         final Server server = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
-        final Future<Void> serverFuture = start(server);
+        final Future<Void> serverFuture = voidCompleter.submit(server);
         final InetSocketAddress serverSocketAddress = server.getSocketAddress();
 
         final Filter filter = Filter.getInstance("localServer-file-2");
@@ -122,10 +106,10 @@ public class ClientTest {
                 predicate);
         final Client client = new Client(serverSocketAddress,
                 serverSocketAddress, filter, clearingHouse);
-        final Future<Boolean> clientFuture = start(client);
+        final Future<Boolean> clientFuture = booleanCompleter.submit(client);
 
         clientFuture.get();
-        stop(serverFuture);
+        serverFuture.cancel(true);
 
         Assert.assertFalse(new File(TESTDIR + "/client/term/localServer-file-1")
                 .exists());
@@ -146,7 +130,7 @@ public class ClientTest {
         Archive archive = new Archive(TESTDIR + "/localServer");
         final Server server = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
-        final Future<Void> serverFuture = start(server);
+        final Future<Void> serverFuture = voidCompleter.submit(server);
         final InetSocketAddress serverSocketAddress = server.getSocketAddress();
 
         archive = new Archive(TESTDIR + "/client/nonterm");
@@ -154,12 +138,12 @@ public class ClientTest {
                 Predicate.EVERYTHING);
         final Client client = new Client(serverSocketAddress,
                 serverSocketAddress, Filter.EVERYTHING, clearingHouse);
-        final Future<Boolean> clientFuture = start(client);
+        final Future<Boolean> clientFuture = booleanCompleter.submit(client);
 
         Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
-        stop(clientFuture);
-        stop(serverFuture);
+        clientFuture.cancel(true);
+        serverFuture.cancel(true);
 
         Assert.assertTrue(new File(TESTDIR
                 + "/client/nonterm/localServer-file-1").exists());

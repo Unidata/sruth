@@ -11,17 +11,13 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.file.InvalidPathException;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,43 +41,27 @@ public final class Subscriber implements Callable<Void> {
     /**
      * The logger for this class.
      */
-    private static final Logger              logger          = Util.getLogger();
+    private static final Logger logger    = Util.getLogger();
     /**
      * The sink-node.
      */
-    private final SinkNode                   sinkNode;
+    private final SinkNode      sinkNode;
     /**
      * The data-selection predicate.
      */
-    private final Predicate                  predicate;
+    private final Predicate     predicate;
     /**
      * Whether or not this instance is running.
      */
-    private final AtomicBoolean              isRunning       = new AtomicBoolean(
-                                                                     false);
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
     /**
      * The archive.
      */
-    private final Archive                    archive;
+    private final Archive       archive;
     /**
      * The processor of data-products.
      */
-    private final Processor                  processor;
-    /**
-     * The queue for data-products to be processed.
-     */
-    // TODO: Use a more limited queue -- possibly a user preference
-    private final BlockingQueue<DataProduct> processingQueue = new LinkedBlockingQueue<DataProduct>();
-    /**
-     * The execution service for the sink node and data-product processing
-     * tasks.
-     */
-    private final CancellingExecutor         executor        = new CancellingExecutor(
-                                                                     2,
-                                                                     2,
-                                                                     0,
-                                                                     TimeUnit.SECONDS,
-                                                                     new SynchronousQueue<Runnable>());
+    private final Processor     processor;
 
     /**
      * Constructs from the pathname of the archive, the Internet address of the
@@ -123,26 +103,26 @@ public final class Subscriber implements Callable<Void> {
         }
         archive = new Archive(rootDir);
         /*
-         * Ensure reception of the administrative files.
+         * Ensure reception of the distributed tracker files.
          */
         final DistributedTrackerFiles distributedTrackerFiles = new DistributedTrackerFiles(
                 archive, trackerAddress);
         final Filter filterServerMapFilter = distributedTrackerFiles
-                .getFilterServerMapFilter();
+                .getFilter();
         predicate = predicate.add(filterServerMapFilter);
 
         archive.addDataProductListener(new DataProductListener() {
             @Override
             public void process(final DataProduct dataProduct) {
-                if (!processingQueue.offer(dataProduct)) {
-                    logger.error("Couldn't add to processing queue: "
-                            + dataProduct);
+                if (!processor.offer(dataProduct)) {
+                    logger.error("Couldn't process data-product: {}",
+                            dataProduct);
                 }
             }
         });
         sinkNode = new SinkNode(archive, predicate, trackerAddress);
         this.predicate = predicate;
-        this.processor = processor;
+        this.processor = new Processor();
     }
 
     /**
@@ -174,77 +154,109 @@ public final class Subscriber implements Callable<Void> {
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws IOException
-     *             if a severe I/O error occurs.
-     * @throws NoSuchFileException
-     *             if the tracker can't be contacted and there's no
-     *             tracker-specific topology-file in the archive.
+     *             if non-networking I/O error occurs
      */
-    public Void call() throws InterruptedException, IOException,
-            NoSuchFileException {
+    public Void call() throws InterruptedException, IOException {
+        logger.trace("Starting up: {}", this);
         if (!isRunning.compareAndSet(false, true)) {
             throw new IllegalStateException();
         }
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
+        final CancellingExecutor executor = new CancellingExecutor(2, 2, 0,
+                TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
         try {
             /*
              * A {@link CompletionService} is used so that both the sink-node
-             * task and the data-product processing task can be waited on
+             * task and the data-processing task can be waited on
              * simultaneously.
              */
             final CompletionService<Void> completionService = new ExecutorCompletionService<Void>(
                     executor);
-            // Start the data-product processing task.
-            // TODO: Use one processing thread per disk controller.
-            completionService.submit(new Callable<Void>() {
-                @Override
-                public Void call() throws InterruptedException {
-                    for (;;) {
-                        final DataProduct product = processingQueue.take();
-                        try {
-                            processor.process(product);
+            /*
+             * Start the data-processing task. TODO: Use one processing thread
+             * per disk controller.
+             */
+            final Future<Void> processingFuture = completionService
+                    .submit(processor);
+            /*
+             * Start the sink-node task.
+             */
+            final Future<Void> sinkNodeFuture = completionService
+                    .submit(sinkNode);
+            /*
+             * Wait for one of the tasks to complete.
+             */
+            for (int i = 0; i < 2; i++) {
+                final Future<Void> future = completionService.take();
+                if (future.isCancelled()) {
+                    break;
+                }
+                if (future == processingFuture) {
+                    /*
+                     * The local-processing task completed -- ideally because it
+                     * was cancelled
+                     */
+                    try {
+                        future.get();
+                        throw new AssertionError();
+                    }
+                    catch (final ExecutionException e) {
+                        throw new RuntimeException("Unexpected error: "
+                                + processor, e.getCause());
+                    }
+                }
+                else {
+                    assert future == sinkNodeFuture;
+                    /*
+                     * The sink-node task completed -- ideally because all the
+                     * data was received
+                     */
+                    try {
+                        future.get();
+                        // All desired data was received
+                        processingFuture.cancel(true);
+                    }
+                    catch (final ExecutionException e) {
+                        final Throwable cause = e.getCause();
+                        logger.trace("Execution exception: {}",
+                                cause.toString());
+                        if (cause instanceof IOException) {
+                            throw new IOException("IO error: " + sinkNode,
+                                    cause);
                         }
-                        catch (final IOException e) {
-                            logger.error("Couldn't process data-product: "
-                                    + product, e);
-                        }
+                        throw new RuntimeException("Unexpected error: "
+                                + sinkNode, cause);
                     }
-                }
-            });
-            // Start the sink-node task.
-            completionService.submit(sinkNode);
-            // Wait for one of the tasks to complete.
-            final Future<Void> future = completionService.take();
-            if (!future.isCancelled()) {
-                try {
-                    future.get();
-                    throw new AssertionError();
-                }
-                catch (final CancellationException e) {
-                    throw new AssertionError(e);
-                }
-                catch (final ExecutionException e) {
-                    final Throwable cause = e.getCause();
-                    if (cause instanceof InterruptedException) {
-                        throw (InterruptedException) cause;
-                    }
-                    if (cause instanceof NoSuchFileException) {
-                        throw (NoSuchFileException) cause;
-                    }
-                    throw Util.launderThrowable(cause);
                 }
             }
         }
         finally {
             executor.shutdownNow();
+            Thread.interrupted();
+            executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
             try {
                 archive.close();
             }
             catch (final IOException ignored) {
             }
             Thread.currentThread().setName(origThreadName);
+            logger.trace("Done: {}", this);
         }
         return null;
+    }
+
+    /**
+     * Waits until this instance is running.
+     * <p>
+     * This method is potentially slow.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     */
+    public void waitUntilRunning() throws InterruptedException {
+        processor.waitUntilRunning();
+        sinkNode.waitUntilRunning();
     }
 
     /**
@@ -311,7 +323,6 @@ public final class Subscriber implements Callable<Void> {
      * <pre>
      *   0  Success: all subscribed-to data was received and processed.
      *   1  Invalid invocation
-     *   2  Runtime error
      * </pre>
      * 
      * @param args
@@ -324,7 +335,6 @@ public final class Subscriber implements Callable<Void> {
     public static void main(final String[] args) throws SecurityException,
             IOException {
         final int INVALID_INVOCATION = 1;
-        final int RUNTIME_ERROR = 2;
         Path archivePath = Paths.get(System.getProperty("user.home")
                 + File.separatorChar + Util.PACKAGE_NAME);
         Processor processor = new Processor();
@@ -431,15 +441,9 @@ public final class Subscriber implements Callable<Void> {
          * Create the subscriber.
          */
         Subscriber subscriber = null;
-        try {
-            subscriber = new Subscriber(archivePath,
-                    subscription.getTrackerAddress(),
-                    subscription.getPredicate(), processor);
-        }
-        catch (final Exception e) {
-            logger.error("Couldn't subscribe to " + subscription, e);
-            System.exit(INVALID_INVOCATION);
-        }
+        subscriber = new Subscriber(archivePath,
+                subscription.getTrackerAddress(), subscription.getPredicate(),
+                processor);
 
         /*
          * Execute the subscriber.
@@ -448,16 +452,6 @@ public final class Subscriber implements Callable<Void> {
             subscriber.call();
         }
         catch (final InterruptedException ignored) {
-        }
-        catch (final NoSuchFileException e) {
-            logger.error(
-                    "Tracker was unavailable and there's no corresponding topology-file in the archive: {}",
-                    subscription.getTrackerAddress());
-            System.exit(RUNTIME_ERROR);
-        }
-        catch (final Exception e) {
-            logger.error("Error executing " + subscriber, e);
-            System.exit(RUNTIME_ERROR);
         }
 
         System.exit(0);

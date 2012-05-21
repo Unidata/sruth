@@ -7,8 +7,13 @@ package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 import org.junit.Assert;
+import org.slf4j.Logger;
 
 /**
  * Miscellaneous utility functions.
@@ -16,6 +21,8 @@ import org.junit.Assert;
  * @author Steven R. Emmerson
  */
 public final class Misc {
+    private static final Logger logger = Util.getLogger();
+
     /**
      * Executes a system command.
      * 
@@ -29,16 +36,46 @@ public final class Misc {
             InterruptedException {
         final ProcessBuilder builder = new ProcessBuilder(cmd);
         builder.inheritIO();
-        System.out.print("Executing: ");
+        final StringBuilder msg = new StringBuilder("Executing: ");
         final List<String> args = builder.command();
         for (final String arg : args) {
-            System.out.print(arg);
-            System.out.print(' ');
+            msg.append(arg);
+            msg.append(' ');
         }
-        System.out.println();
+        logger.info(msg.toString());
         final Process process = builder.start();
         Assert.assertNotNull(process);
         final int status = process.waitFor();
         return status;
+    }
+
+    /**
+     * Returns a reporting task.
+     * 
+     * @param completionService
+     *            The {@link CompletionService} on whose tasks to report
+     * @return a reporting task
+     */
+    public static <T> Callable<T> newReportingTask(
+            final CompletionService<T> completionService) {
+        return new Callable<T>() {
+            @Override
+            public T call() throws InterruptedException {
+                for (;;) {
+                    final Future<T> future = completionService.take();
+                    if (!future.isCancelled()) {
+                        try {
+                            future.get();
+                        }
+                        catch (final ExecutionException e) {
+                            final Throwable cause = e.getCause();
+                            if (!(cause instanceof InterruptedException)) {
+                                logger.error("Unexpected error", cause);
+                            }
+                        }
+                    }
+                }
+            }
+        };
     }
 }

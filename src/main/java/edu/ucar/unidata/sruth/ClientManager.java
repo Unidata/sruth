@@ -16,38 +16,356 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.prefs.Preferences;
 
 import net.jcip.annotations.GuardedBy;
+import net.jcip.annotations.Immutable;
 import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
 
+import edu.ucar.unidata.sruth.TrackerProxy.FilteredProxy;
+
 /**
- * Manages a set of filter-specific clients. Populates the set, removes poor
- * performing members, and adds new members as appropriate.
+ * Manages a set of clients for a specific filter. Populates the set, removes
+ * poor performing members, and adds new members as appropriate.
  * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class ClientManager extends UninterruptibleTask<Void> {
+final class ClientManager implements Callable<Void> {
     /**
-     * The logger for this class.
+     * The client-creation task.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
      */
-    private static Logger logger = Util.getLogger();
+    @ThreadSafe
+    private final class ClientCreator extends UninterruptibleTask<Void> {
+        /**
+         * The filter-specific proxy for the tracker
+         */
+        private final FilteredProxy  filteredProxy;
+        /**
+         * The "isRunning" latch.
+         */
+        private final CountDownLatch isRunningLatch = new CountDownLatch(1);
+
+        /**
+         * Constructs from nothing.
+         */
+        ClientCreator() {
+            filteredProxy = trackerProxy.getFilteredProxy(ClientManager.this);
+        }
+
+        /**
+         * Manages clients. Populates the set of clients and replaces poorly
+         * performing ones. Registers the client-manager with the
+         * filter-specific tracker proxy.
+         * <p>
+         * This method is potentially slow and uninterruptible
+         * 
+         * @throws InterruptedException
+         *             if the current thread is interrupted
+         * @throws SocketException
+         *             if {@link #stop()} is called by another thread
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        @Override
+        public Void call() throws InterruptedException, IOException {
+            int timeout = 0;
+            for (boolean registered = false; !registered
+                    && !Thread.currentThread().isInterrupted();) {
+                try {
+                    filteredProxy.register();
+                    registered = true;
+                }
+                catch (final ConnectException e) {
+                    logger.debug(
+                            "Couldn't connect to tracker {}: {}. Continuing...",
+                            trackerProxy.getAddress(), e.toString());
+                }
+                catch (final InvalidMessageException e) {
+                    logger.debug(
+                            "Invalid communication with tracker {}: {}. Continuing...",
+                            trackerProxy.getAddress(), e.toString());
+                }
+                timeout = waitUntilDoneOrTimeout(false, timeout);
+            }
+            try {
+                isRunningLatch.countDown();
+                while (!Thread.currentThread().isInterrupted()) {
+                    if (enoughClients()) {
+                        rankClients();
+                        do {
+                            removeWorstClient();
+                        } while (!Thread.currentThread().isInterrupted()
+                                && enoughClients());
+                    }
+                    while (!Thread.currentThread().isInterrupted()
+                            && !enoughClients()) {
+                        try {
+                            if (!addClient()) {
+                                timeout = waitUntilDoneOrTimeout(false, timeout);
+                            }
+                        }
+                        catch (final NoSuchFileException e) {
+                            timeout = waitUntilDoneOrTimeout(false, timeout);
+                            logger.debug("Continuing...");
+                        }
+                        catch (final IOException e) {
+                            logger.warn("Couldn't add new client: {}",
+                                    e.toString());
+                            timeout = waitUntilDoneOrTimeout(false, timeout);
+                        }
+                    }
+                    if (!Thread.currentThread().isInterrupted()) {
+                        restartClientCounters();
+                        timeout = waitUntilDoneOrTimeout(true,
+                                REPLACEMENT_PERIOD);
+                    }
+                }
+            }
+            finally {
+                filteredProxy.deregister();
+            }
+            return null;
+        }
+
+        /**
+         * Waits until this instance is running.
+         * <p>
+         * This method is potentially slow.
+         * 
+         * @throws InterruptedException
+         *             if the current thread is interrupted
+         */
+        void waitUntilRunning() throws InterruptedException {
+            isRunningLatch.await();
+        }
+
+        @Override
+        protected void stop() {
+            filteredProxy.deregister();
+        }
+
+        /**
+         * Indicates if this instance has enough clients.
+         * 
+         * @return {@code true} if and only if this instance has enough clients.
+         */
+        private boolean enoughClients() {
+            return getClientCount() >= MINIMUM_NUMBER_OF_CLIENTS_PER_FILTER;
+        }
+
+        /**
+         * Ranks the clients from worst-performing to best-performing.
+         */
+        private synchronized void rankClients() {
+            rankedClients.clear();
+            for (final Client client : clients) {
+                final RankedClient rankedClient = new RankedClient(client);
+                rankedClients.add(rankedClient);
+            }
+        }
+
+        /**
+         * Removes the worst-performing client.
+         */
+        private synchronized void removeWorstClient() {
+            if (!rankedClients.isEmpty()) {
+                final RankedClient rankedClient = rankedClients.first();
+                rankedClients.remove(rankedClient);
+                final Client client = rankedClient.client;
+                client.cancel();
+                clients.remove(client);
+            }
+        }
+
+        /**
+         * Adds a new client.
+         * <p>
+         * This method is potentially uninterruptible and slow.
+         * 
+         * @return {@code true} if and only if a new client was successfully
+         *         added.
+         * @throws NoSuchFileException
+         *             if the tracker was not helpful and no tracker-specific
+         *             topology-file exists in the archive.
+         * @throws SocketException
+         *             if {@link #stop()} is called by another thread
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private boolean addClient() throws NoSuchFileException, IOException {
+            boolean clientAdded = false;
+            final Topology topology = filteredProxy.getTopology();
+            final InetSocketAddress remoteServer = computeBestServer(topology);
+
+            if (remoteServer != null) {
+                final Client client = new Client(localServer, remoteServer,
+                        filter, clearingHouse);
+                synchronized (this) {
+                    clients.add(client);
+                }
+                clientCompletionService.submit(new ClientWrapper(client));
+                clientAdded = true;
+            }
+            return clientAdded;
+        }
+
+        /**
+         * Returns information on the best server to connect to next.
+         * 
+         * @param topology
+         *            The current state of the network. May be modified by this
+         *            method.
+         * @return Address of the next server to connect to or {@code null} if
+         *         no such server exists.
+         */
+        private InetSocketAddress computeBestServer(final Topology topology) {
+            /*
+             * Remove servers from the network that should not be considered.
+             */
+            synchronized (this) {
+                for (final Client client : clients) {
+                    topology.remove(client.getServerAddress());
+                }
+                topology.remove(invalidServers);
+                final Collection<Peer> extantPeers = clearingHouse
+                        .getPeers(filter);
+                for (final Peer peer : extantPeers) {
+                    topology.remove(peer.getRemoteServerSocketAddress());
+                }
+            }
+            topology.remove(localServer);
+            final InetSocketAddress bestServer = topology.getBestServer(filter);
+            logger.debug("Best server is {}", bestServer);
+            return bestServer;
+        }
+
+        /**
+         * Waits until done or a timeout occurs or (optionally) a new client is
+         * needed.
+         * <p>
+         * This operation is potentially slow.
+         * 
+         * @param returnIfNeedClient
+         *            Whether or not to return if {@link #enoughClients()} is
+         *            false.
+         * @param timeout
+         *            Timeout in seconds
+         * @return The timeout for the next time
+         * @throws InterruptedException
+         *             if the current thread is interrupted.
+         */
+        private synchronized int waitUntilDoneOrTimeout(
+                final boolean returnIfNeedClient, final int timeout)
+                throws InterruptedException {
+            long delay = 1000 * timeout;
+            while (!Thread.currentThread().isInterrupted()
+                    && (!returnIfNeedClient || enoughClients()) && delay > 0) {
+                final long start = System.currentTimeMillis();
+                wait(delay); // notified by terminating client and stop()
+                delay -= (System.currentTimeMillis() - start);
+            }
+            return (delay > 0)
+                    ? 0
+                    : Math.min(Math.max(2 * timeout, 1), REPLACEMENT_PERIOD);
+        }
+
+        /**
+         * Restarts the client counters.
+         */
+        private synchronized void restartClientCounters() {
+            for (final Client client : clients) {
+                client.restartCounter();
+            }
+        }
+    }
 
     /**
-     * A ranking of a client. The natural order of this class is from poorer
+     * Reaps completed clients.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class ClientReaper implements Callable<Void> {
+        /**
+         * The "isRunning" latch.
+         */
+        private final CountDownLatch isRunningLatch = new CountDownLatch(1);
+
+        /**
+         * Reaps clients. Returns if and only if all desired data has been
+         * received.
+         * 
+         * @throws InterruptedException
+         *             if the current thread is interrupted
+         * @throws IOException
+         *             if a non-networking error occurs
+         */
+        @Override
+        public Void call() throws IOException, InterruptedException {
+            isRunningLatch.countDown();
+            for (;;) {
+                final Future<Boolean> clientFuture = clientCompletionService
+                        .take();
+                if (clientFuture.isCancelled()) {
+                    throw new InterruptedException();
+                }
+                try {
+                    if (clientFuture.get()) {
+                        // All desired-data received
+                        return null;
+                    }
+                }
+                catch (final ExecutionException e) {
+                    final Throwable cause = e.getCause();
+                    if (cause instanceof IOException) {
+                        throw (IOException) cause;
+                    }
+                    throw new RuntimeException("Unexpected error", cause);
+                }
+            }
+        }
+
+        /**
+         * Waits until this instance is running.
+         * <p>
+         * This method is potentially slow.
+         * 
+         * @throws InterruptedException
+         *             if the current thread is interrupted
+         */
+        void waitUntilRunning() throws InterruptedException {
+            isRunningLatch.await();
+        }
+    }
+
+    /**
+     * A ranked client. The natural order of this class is from poorer
      * performing clients to higher performing ones.
      * <p>
      * Instances are Immutable.
      * 
      * @author Steven R. Emmerson
      */
+    @Immutable
     private static final class RankedClient implements Comparable<RankedClient> {
         /**
          * The client in question.
@@ -81,46 +399,113 @@ final class ClientManager extends UninterruptibleTask<Void> {
     }
 
     /**
-     * The proxy for the tracker.
+     * Wraps a {@link Client} in order to perform client-dependent actions when
+     * the client completes.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
      */
-    private final TrackerProxy                 trackerProxy;
+    @ThreadSafe
+    private final class ClientWrapper extends UninterruptibleTask<Boolean> {
+        /**
+         * The client.
+         */
+        private final Client client;
+
+        /**
+         * Constructs from the {@link Client} to be executed.
+         * 
+         * @param client
+         *            the {@link Client} to be executed.
+         */
+        ClientWrapper(final Client client) {
+            this.client = client;
+        }
+
+        /**
+         * @return {@code true} if and only if all desired-data has been
+         *         received.
+         * @throws IOException
+         *             if an I/O error occurred that is unrelated to networking
+         */
+        @Override
+        public Boolean call() throws IOException {
+            boolean allDataReceived = false;
+            boolean reportOffline = true;
+            try {
+                final boolean validServer = client.call();
+                reportOffline = false;
+                if (validServer) {
+                    logger.debug("All desired-data received");
+                    allDataReceived = true;
+                }
+                else {
+                    synchronized (ClientManager.this) {
+                        // TODO: slowly remove "invalidServers" entries
+                        invalidServers.add(client.getServerAddress());
+                    }
+                }
+            }
+            catch (final InterruptedException e) {
+                logger.trace("Interrupted: {}", client);
+            }
+            catch (final EOFException e) {
+                logger.info("Connection closed by remote server: {}: {}",
+                        client.getServerAddress(), e.toString());
+            }
+            catch (final ConnectException e) {
+                logger.info("Couldn't connect to remote server: {}: {}",
+                        client.getServerAddress(), e.toString());
+            }
+            catch (final SocketException e) {
+                logger.info("Remote server is inaccessible: {}: {}",
+                        client.getServerAddress(), e.toString());
+            }
+            catch (final IOException e) {
+                reportOffline = false;
+                throw new IOException("Client I/O failure: " + client, e);
+            }
+            catch (final Throwable t) {
+                reportOffline = false;
+                throw new RuntimeException("Unexpected error: " + client, t);
+            }
+            finally {
+                if (reportOffline) {
+                    final InetSocketAddress remoteServerAddress = client
+                            .getServerAddress();
+                    try {
+                        trackerProxy.reportOffline(remoteServerAddress);
+                    }
+                    catch (final IOException e) {
+                        logger.warn("Couldn't report {} as being offline: {}",
+                                remoteServerAddress, e.toString());
+                    }
+                }
+                synchronized (ClientManager.this) {
+                    clients.remove(client);
+                    ClientManager.this.notifyAll();
+                }
+            }
+            return allDataReceived;
+        }
+
+        @Override
+        protected void stop() {
+            logger.trace("Stop: {}", client);
+            client.cancel();
+        }
+
+        @Override
+        public String toString() {
+            return getClass().getSimpleName() + " [client=" + client + "]";
+        }
+    }
+
     /**
-     * The task execution service.
+     * The logger for this class.
      */
-    private final CancellingExecutor           clientExecutor                               = new CancellingExecutor(
-                                                                                                    0,
-                                                                                                    Integer.MAX_VALUE,
-                                                                                                    CLIENT_THREAD_KEEP_ALIVE_TIME,
-                                                                                                    TimeUnit.SECONDS,
-                                                                                                    new SynchronousQueue<Runnable>());
-    /**
-     * The clients being managed by this instance.
-     */
-    @GuardedBy("this")
-    private final List<Client>                 clients                                      = new LinkedList<Client>();
-    /**
-     * The set of offline servers.
-     */
-    @GuardedBy("this")
-    private final SortedSet<InetSocketAddress> invalidServers                               = new TreeSet<InetSocketAddress>(
-                                                                                                    AddressComparator.INSTANCE);
-    /**
-     * The set of ranked clients.
-     */
-    @GuardedBy("this")
-    private final SortedSet<RankedClient>      rankedClients                                = new TreeSet<RankedClient>();
-    /**
-     * The data clearing-house.
-     */
-    private final ClearingHouse                clearingHouse;
-    /**
-     * The specification of locally-desired data.
-     */
-    private final Filter                       filter;
-    /**
-     * Address of the local server.
-     */
-    private final InetSocketAddress            localServer;
+    private static Logger                      logger                                       = Util.getLogger();
     /**
      * The minimum number of servers per filter.
      */
@@ -168,6 +553,66 @@ final class ClientManager extends UninterruptibleTask<Void> {
     }
 
     /**
+     * The proxy for the tracker.
+     */
+    private final TrackerProxy                 trackerProxy;
+    /**
+     * The task-execution service.
+     */
+    private final CancellingExecutor           executor                                     = new CancellingExecutor(
+                                                                                                    0,
+                                                                                                    Integer.MAX_VALUE,
+                                                                                                    CLIENT_THREAD_KEEP_ALIVE_TIME,
+                                                                                                    TimeUnit.SECONDS,
+                                                                                                    new SynchronousQueue<Runnable>());
+    /**
+     * The task-completion service
+     */
+    private final CompletionService<Void>      completionService                            = new ExecutorCompletionService<Void>(
+                                                                                                    executor);
+    /**
+     * The client-completion service
+     */
+    private final CompletionService<Boolean>   clientCompletionService                      = new ExecutorCompletionService<Boolean>(
+                                                                                                    executor);
+    /**
+     * The clients being managed by this instance.
+     */
+    @GuardedBy("this")
+    private final List<Client>                 clients                                      = new LinkedList<Client>();
+    /**
+     * The set of offline servers.
+     */
+    @GuardedBy("this")
+    private final SortedSet<InetSocketAddress> invalidServers                               = new TreeSet<InetSocketAddress>(
+                                                                                                    AddressComparator.INSTANCE);
+    /**
+     * The set of ranked clients.
+     */
+    @GuardedBy("this")
+    private final SortedSet<RankedClient>      rankedClients                                = new TreeSet<RankedClient>();
+    /**
+     * The data clearing-house.
+     */
+    private final ClearingHouse                clearingHouse;
+    /**
+     * The specification of locally-desired data.
+     */
+    private final Filter                       filter;
+    /**
+     * Address of the local server.
+     */
+    private final InetSocketAddress            localServer;
+    /**
+     * The creator of new clients
+     */
+    private final ClientCreator                clientCreator;
+    /**
+     * The reaper of completed clients
+     */
+    private final ClientReaper                 clientReaper;
+
+    /**
      * Constructs from the data clearing house, the address of the local server,
      * the filter to use, and the address of the tracker.
      * 
@@ -208,227 +653,118 @@ final class ClientManager extends UninterruptibleTask<Void> {
         this.localServer = localServer;
         this.filter = filter;
         this.clearingHouse = clearingHouse;
+        this.clientCreator = new ClientCreator();
+        this.clientReaper = new ClientReaper();
     }
 
     /**
-     * Runs this instance. Returns normally if and only if all desired data has
-     * been received or {@link #stop()} has been called.
+     * Returns this instance's {@link Filter}.
+     * 
+     * @return this instance's {@link Filter}.
+     */
+    public Filter getFilter() {
+        return filter;
+    }
+
+    /**
+     * Returns the Internet socket address of the local server.
+     * 
+     * @return the Internet socket address of the local server
+     */
+    InetSocketAddress getLocalServerAddress() {
+        return localServer;
+    }
+
+    /**
+     * Runs this instance. Returns if and only if all desired-data was received.
      * 
      * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws NoSuchFileException
-     *             if the tracker couldn't be contacted and there's no
-     *             tracker-specific topology-file in the archive.
+     *             if the current thread is interrupted
+     * @throws IOException
+     *             if an I/O error that is not related to networking occurs
      */
-    public Void call() throws NoSuchFileException, InterruptedException {
+    public Void call() throws InterruptedException, IOException {
+        logger.trace("Starting up: {}", this);
         final String prevName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         try {
-            while (!isCancelled()) {
-                if (enoughClients()) {
-                    rankClients();
-                    do {
-                        removeWorstClient();
-                    } while (!isCancelled() && enoughClients());
+            final Future<Void> clientCreatorFuture = completionService
+                    .submit(clientCreator);
+            final Future<Void> clientReaperFuture = completionService
+                    .submit(clientReaper);
+            final Future<Void> future = completionService.take();
+            if (future == clientCreatorFuture) {
+                /*
+                 * The client-creation task completed. Ideally because the
+                 * thread on which it was executing was interrupted.
+                 */
+                if (clientCreatorFuture.isCancelled()) {
+                    throw new InterruptedException();
                 }
-                while (!isCancelled() && !enoughClients()) {
-                    try {
-                        if (!addClient()) {
-                            waitUntilDoneOrTimeout(false);
-                        }
-                    }
-                    catch (final NoSuchFileException e) {
-                        throw e;
-                    }
-                    catch (final Exception e) {
-                        logger.warn("Couldn't add new client: ", e.toString());
-                        waitUntilDoneOrTimeout(false);
-                    }
+                try {
+                    clientCreatorFuture.get();
+                    throw new AssertionError();
                 }
-                restartClientCounters();
-                waitUntilDoneOrTimeout(true);
+                catch (final ExecutionException e) {
+                    final Throwable cause = e.getCause();
+                    if (cause instanceof InterruptedException) {
+                        throw (InterruptedException) cause;
+                    }
+                    throw new RuntimeException("Client creator crashed: "
+                            + this, cause);
+                }
+            }
+            else {
+                /*
+                 * The client-reaping task completed. Ideally because all
+                 * desired-data was received.
+                 */
+                if (clientReaperFuture.isCancelled()) {
+                    throw new InterruptedException();
+                }
+                try {
+                    clientReaperFuture.get();
+                }
+                catch (final ExecutionException e) {
+                    final Throwable cause = e.getCause();
+                    if (cause instanceof IOException) {
+                        throw (IOException) cause;
+                    }
+                    throw new RuntimeException("Client crashed", cause);
+                }
             }
         }
         finally {
-            trackerProxy.close();
-            clientExecutor.shutdownNow();
+            executor.shutdownNow();
+            awaitCompletion();
             Thread.currentThread().setName(prevName);
+            logger.trace("Done: {}", this);
         }
         return null;
     }
 
     /**
-     * Stops this instance.
-     */
-    @Override
-    protected synchronized void stop() {
-        logger.trace("stop() called");
-        trackerProxy.close();
-        clientExecutor.shutdownNow();
-        notifyAll();
-    }
-
-    /**
-     * Indicates if this instance has enough clients.
-     * 
-     * @return {@code true} if and only if this instance has enough clients.
-     */
-    private synchronized boolean enoughClients() {
-        return clients.size() >= MINIMUM_NUMBER_OF_CLIENTS_PER_FILTER;
-    }
-
-    /**
-     * Ranks the clients from worst-performing to best-performing.
-     */
-    private synchronized void rankClients() {
-        rankedClients.clear();
-        for (final Client client : clients) {
-            final RankedClient rankedClient = new RankedClient(client);
-            rankedClients.add(rankedClient);
-        }
-    }
-
-    /**
-     * Removes the worst-performing client.
-     */
-    private synchronized void removeWorstClient() {
-        if (!rankedClients.isEmpty()) {
-            final RankedClient rankedClient = rankedClients.first();
-            rankedClients.remove(rankedClient);
-            final Client client = rankedClient.client;
-            client.cancel();
-            clients.remove(client);
-        }
-    }
-
-    /**
-     * Adds a new client.
+     * Waits until this instance is running.
      * <p>
-     * This method is potentially uninterruptible and slow.
+     * This method is potentially slow.
      * 
-     * @return {@code true} if and only if a new client was successfully added.
-     * @throws ClassCastException
-     *             if the tracker returns the wrong type.
-     * @throws ClassNotFoundException
-     *             if the tracker's reply is invalid.
-     * @throws NoSuchFileException
-     *             if the tracker couldn't be contacted and no tracker-specific
-     *             topology-file exists in the archive.
-     * @throws IOException
-     *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
-    private boolean addClient() throws ClassNotFoundException,
-            NoSuchFileException, IOException {
-        boolean clientAdded = false;
-        FilterServerMap network = trackerProxy.getNetwork(clients.size() == 0,
-                filter, localServer);
-        network = new FilterServerMap(network);
-        final InetSocketAddress remoteServer = computeBestServer(network);
+    void waitUntilRunning() throws InterruptedException {
+        clientCreator.waitUntilRunning();
+        clientReaper.waitUntilRunning();
+    }
 
-        if (remoteServer != null) {
-            final Client client = new Client(localServer, remoteServer, filter,
-                    clearingHouse);
-            synchronized (this) {
-                clients.add(client);
-                clientExecutor.submit(new UninterruptibleTask<Void>() {
-                    @Override
-                    public Void call() {
-                        boolean validServer = false;
-                        boolean reportOffline = false;
-                        try {
-                            validServer = client.call().booleanValue();
-                            if (!validServer) {
-                                logger.debug("Invalid server: {}", client);
-                            }
-                            else {
-                                logger.debug("Client returned normally: {}",
-                                        client);
-                                ClientManager.this.cancel(); // because all
-                                                             // desired-data
-                                                             // received
-                            }
-                        }
-                        catch (final InterruptedException e) {
-                            logger.debug("Client was interrupted: {}",
-                                    e.toString());
-                        }
-                        catch (final EOFException e) {
-                            logger.info(
-                                    "Connection closed by remote server: {}: {}",
-                                    remoteServer, e.toString());
-                            reportOffline = true;
-                        }
-                        catch (final ConnectException e) {
-                            if (isCancelled()) {
-                                logger.debug("Client was cancelled: {}",
-                                        e.toString());
-                            }
-                            else {
-                                logger.info(
-                                        "Couldn't connect to remote server: {}: {}",
-                                        remoteServer, e.toString());
-                                reportOffline = true;
-                            }
-                        }
-                        catch (final SocketException e) {
-                            if (isCancelled()) {
-                                logger.debug(
-                                        "Client's connection was disconnected: {}",
-                                        e.toString());
-                            }
-                            else {
-                                logger.info(
-                                        "Connection to remote server closed: {}: {}",
-                                        remoteServer, e.toString());
-                                reportOffline = true;
-                            }
-                        }
-                        catch (final IOException e) {
-                            if (isCancelled()) {
-                                logger.debug("Client I/O failure: {}: {}",
-                                        client, e.toString());
-                            }
-                            else {
-                                logger.error("Client I/O failure: " + client, e);
-                            }
-                        }
-                        catch (final Throwable t) {
-                            logger.warn("Unexpected client failure", t);
-                        }
-                        finally {
-                            synchronized (ClientManager.this) {
-                                if (!validServer) {
-                                    // TODO: slowly remove entries from
-                                    // "invalidServers"
-                                    invalidServers.add(remoteServer);
-                                }
-                                clients.remove(client);
-                                ClientManager.this.notifyAll();
-                            }
-                            if (reportOffline) {
-                                try {
-                                    trackerProxy.reportOffline(remoteServer);
-                                }
-                                catch (final IOException e) {
-                                    logger.warn(
-                                            "Couldn't report {} as being offline: {}",
-                                            remoteServer, e.toString());
-                                }
-                            }
-                        }
-                        return null;
-                    }
-
-                    @Override
-                    protected void stop() {
-                        logger.trace("stop() called");
-                        client.cancel();
-                    }
-                });
-            }
-            clientAdded = true;
-        }
-        return clientAdded;
+    /**
+     * Waits until this instance has completed.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted while waiting
+     */
+    void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /**
@@ -440,66 +776,6 @@ final class ClientManager extends UninterruptibleTask<Void> {
         return clients.size();
     }
 
-    /**
-     * Returns information on the best server to connect to next.
-     * 
-     * @param network
-     *            The current state of the network. May be modified by this
-     *            method.
-     * @return Address of the next server to connect to or {@code null} if no
-     *         such server exists.
-     */
-    private InetSocketAddress computeBestServer(final FilterServerMap network) {
-        /*
-         * Remove servers from the network that should not be considered.
-         */
-        synchronized (this) {
-            for (final Client client : clients) {
-                network.remove(client.getServerAddress());
-            }
-            network.remove(invalidServers);
-            final Collection<Peer> extantPeers = clearingHouse.getPeers(filter);
-            for (final Peer peer : extantPeers) {
-                network.remove(peer.getRemoteServerSocketAddress());
-            }
-        }
-        network.remove(localServer);
-        final InetSocketAddress bestServer = network.getBestServer(filter);
-        logger.debug("Best server is {}", bestServer);
-        return bestServer;
-    }
-
-    /**
-     * Restarts the client counters.
-     */
-    private synchronized void restartClientCounters() {
-        for (final Client client : clients) {
-            client.restartCounter();
-        }
-    }
-
-    /**
-     * Waits until done or a timeout occurs or (optionally) a new client is
-     * needed.
-     * <p>
-     * This operation is potentially slow.
-     * 
-     * @param returnIfNeedClient
-     *            Whether or not to return if {@link #enoughClients()} is false.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     */
-    private synchronized void waitUntilDoneOrTimeout(
-            final boolean returnIfNeedClient) throws InterruptedException {
-        long timeout = 1000 * REPLACEMENT_PERIOD;
-        while (!isCancelled() && (!returnIfNeedClient || enoughClients())
-                && timeout > 0) {
-            final long start = System.currentTimeMillis();
-            wait(timeout); // notified by terminating client
-            timeout -= (System.currentTimeMillis() - start);
-        }
-    }
-
     /*
      * (non-Javadoc)
      * 
@@ -508,6 +784,6 @@ final class ClientManager extends UninterruptibleTask<Void> {
     @Override
     public String toString() {
         return "ClientManager [trackerProxy=" + trackerProxy + ", clients=("
-                + clients.size() + ")]";
+                + getClientCount() + ")]";
     }
 }

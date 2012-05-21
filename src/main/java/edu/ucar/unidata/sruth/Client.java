@@ -117,15 +117,15 @@ final class Client extends UninterruptibleTask<Boolean> {
      * @throws IOException
      *             if a serious I/O error occurs.
      * @throws SocketException
-     *             if the connection was closed by the remote peer.
+     *             if the remote peer couldn't be accessed.
      */
     @Override
     public Boolean call() throws ConnectException, EOFException, IOException,
             SocketException, InterruptedException {
+        logger.debug("Starting up: {}", this);
         final String origName = Thread.currentThread().getName();
         final Thread currentThread = Thread.currentThread();
         currentThread.setName(toString());
-        logger.debug("Starting up: {}", this);
 
         try {
             final ConnectionToServer connection;
@@ -171,15 +171,19 @@ final class Client extends UninterruptibleTask<Boolean> {
                     peer = new Peer(clearingHouse, connection, filter,
                             serverFilter);
                 }
-                return peer.call();
+                final Boolean isValid = peer.call();
+                if (!isValid) {
+                    logger.debug("Invalid server: {}", this);
+                }
+                return isValid;
             }
             finally {
                 connection.close();
             }
         }
         finally {
-            logger.debug("Done: {}", this);
             Thread.currentThread().setName(origName);
+            logger.trace("Done: {}", this);
         }
     }
 

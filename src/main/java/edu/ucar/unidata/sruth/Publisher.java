@@ -21,7 +21,6 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -82,7 +81,8 @@ public final class Publisher implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the root of the file-tree. The tracker
-     * and source-node server will both listen on ephemeral ports.
+     * and will listen on its IANA-assigned port and the source-node server will
+     * listen on an ephemeral port.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -94,7 +94,7 @@ public final class Publisher implements Callable<Void> {
      * @see #getSourceAddress()
      */
     public Publisher(final Path rootDir) throws IOException {
-        this(rootDir, 0);
+        this(rootDir, Tracker.IANA_PORT);
     }
 
     /**
@@ -121,18 +121,16 @@ public final class Publisher implements Callable<Void> {
         archive = new Archive(rootDir);
         sourceNode = new SourceNode(archive);
         final InetAddress trackerAddress = InetAddress.getLocalHost();
-        final PortNumberSet trackerPortSet = PortNumberSet.getInstance(port,
-                port);
-        final InetSocketAddressSet trackerSocketAddressSet = new InetSocketAddressSet(
-                trackerAddress, trackerPortSet);
+        final InetSocketAddress trackerSocketAddress = new InetSocketAddress(
+                trackerAddress, port);
         tracker = new Tracker(sourceNode.getLocalServerSocketAddress(),
-                trackerSocketAddressSet);
+                trackerSocketAddress);
         distributedTrackerFiles = archive.getDistributedTrackerFiles(tracker
                 .getServerAddress());
         tracker.addNetworkTopologyChangeListener(new PropertyChangeListener() {
             @Override
             public void propertyChange(final PropertyChangeEvent evt) {
-                distributedTrackerFiles.distribute((FilterServerMap) evt
+                distributedTrackerFiles.distribute((Topology) evt
                         .getNewValue());
             }
         });
@@ -146,16 +144,15 @@ public final class Publisher implements Callable<Void> {
      *             if the current thread is interrupted.
      * @throws IOException
      *             if an IO error occurs.
-     * @throws AssertionError
-     *             if either the source-node or the tracker completes.
      */
     public Void call() throws InterruptedException, IOException {
-        logger.trace("Starting Publisher");
+        logger.trace("Starting up: {}", this);
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         try {
             completionService.submit(sourceNode);
-            completionService.submit(tracker);
+            final Future<Void> trackerFuture = completionService
+                    .submit(tracker);
             final Future<Void> future = completionService.take();
             if (!future.isCancelled()) {
                 try {
@@ -163,17 +160,15 @@ public final class Publisher implements Callable<Void> {
                     throw new AssertionError();
                 }
                 catch (final ExecutionException e) {
-                    final Throwable t = e.getCause();
-                    if (t instanceof InterruptedException) {
-                        throw (InterruptedException) t;
+                    final Throwable cause = e.getCause();
+                    final Object task = future == trackerFuture
+                            ? tracker
+                            : sourceNode;
+                    if (cause instanceof IOException) {
+                        throw new IOException("IO error: " + task, cause);
                     }
-                    if (t instanceof IOException) {
-                        throw (IOException) t;
-                    }
-                    throw Util.launderThrowable(t);
-                }
-                catch (final CancellationException e) {
-                    throw new AssertionError(e);
+                    throw new RuntimeException("Unexpected error: " + task,
+                            cause);
                 }
             }
         }
@@ -182,14 +177,14 @@ public final class Publisher implements Callable<Void> {
         }
         finally {
             executor.shutdownNow();
+            awaitCompletion();
             try {
                 archive.close();
             }
             catch (final IOException ignored) {
             }
-            finally {
-                Thread.currentThread().setName(origThreadName);
-            }
+            Thread.currentThread().setName(origThreadName);
+            logger.trace("Done: {}", this);
         }
         return null;
     }
@@ -290,6 +285,17 @@ public final class Publisher implements Callable<Void> {
      */
     Path getAbsolutePath(final ArchivePath archivePath) {
         return archive.resolve(archivePath);
+    }
+
+    /**
+     * Waits until this instance has completed.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     */
+    void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /*

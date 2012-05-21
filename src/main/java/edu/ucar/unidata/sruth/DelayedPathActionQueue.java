@@ -117,7 +117,7 @@ final class DelayedPathActionQueue {
 
             @Override
             public String toString() {
-                return getClass().getSimpleName() + " [rootDir=" + rootDir
+                return "DelayedPathActionQueue$Thread" + " [rootDir=" + rootDir
                         + ", queue=" + queue + ", action=" + action + "]";
             }
         };
@@ -230,5 +230,17 @@ final class DelayedPathActionQueue {
                 thread.join();
             }
         }
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString() {
+        return "DelayedPathActionQueue [queue=" + queue + ", actedUponCount="
+                + actedUponCount + ", rootDir=" + rootDir + ", action="
+                + action + "]";
     }
 }

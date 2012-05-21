@@ -23,7 +23,7 @@ final class TopologyExperiment {
     public static void main(final String[] args) throws IOException,
             ClassNotFoundException {
         final File file = new File(
-                "/tmp/PubSubTest/subscribers/1/SRUTH/gilda.unidata.ucar.edu:38800/FilterServerMap");
+                "/tmp/PubSubTest/subscribers/1/SRUTH/gilda.unidata.ucar.edu:38800/Topology");
         final InputStream inputStream = new FileInputStream(file);
         final ObjectInputStream ois = new ObjectInputStream(inputStream);
         ois.readObject();

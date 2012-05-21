@@ -24,7 +24,7 @@ abstract class UninterruptibleTask<T> implements Callable<T> {
 
     /**
      * Cancels this task. Sets the cancellation flag and then calls
-     * {@link #stop()}.
+     * {@link #stop()}. Idempotent.
      */
     void cancel() {
         isCancelled.set(true);

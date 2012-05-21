@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
@@ -22,9 +23,11 @@ import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.ThreadSafe;
 
+import org.slf4j.Logger;
+
 /**
  * A top-level node of a distribution graph. A source-node has a {@link Server}
- * and a {@link FileWatcher} but no {@link ClientManager}-s.
+ * and a {@link ArchiveWatcher} but no {@link ClientManager}-s.
  * <p>
  * Instances are thread-safe.
  * 
@@ -34,20 +37,29 @@ import net.jcip.annotations.ThreadSafe;
 final class SourceNode extends AbstractNode {
     /**
      * Causes the local server to be notified of newly-created files in the
-     * file-tree.
-     * 
+     * archive.
+     * <p>
      * Instances are thread-safe.
      * 
      * @author Steven R. Emmerson
      */
-    private final class FileWatcher implements Callable<Void> {
+    private final class ArchiveWatcher implements Callable<Void> {
         private final CountDownLatch isRunningLatch = new CountDownLatch(1);
 
         @Override
         public Void call() throws InterruptedException, IOException {
-            isRunningLatch.countDown();
-            getArchive().watchArchive(localServer);
-            return null;
+            logger.trace("Starting up: {}", toString());
+            final String origThreadName = Thread.currentThread().getName();
+            Thread.currentThread().setName(toString());
+            try {
+                isRunningLatch.countDown();
+                getArchive().watchArchive(localServer);
+                return null;
+            }
+            finally {
+                Thread.currentThread().setName(origThreadName);
+                logger.trace("Done: {}", toString());
+            }
         }
 
         /**
@@ -59,26 +71,41 @@ final class SourceNode extends AbstractNode {
         void waitUntilRunning() throws InterruptedException {
             isRunningLatch.await();
         }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "ArchiveWatcher [rootDir=" + clearingHouse.getRootDir()
+                    + "]";
+        }
     }
 
     /**
+     * The logger for the package
+     */
+    private static final Logger           logger            = Util.getLogger();
+    /**
      * The {@link ExecutorService} for the localServer and file-watcher tasks.
      */
-    private final CancellingExecutor              executorService = new CancellingExecutor(
-                                                                          2,
-                                                                          2,
-                                                                          0,
-                                                                          TimeUnit.SECONDS,
-                                                                          new SynchronousQueue<Runnable>());
+    private final CancellingExecutor      executor          = new CancellingExecutor(
+                                                                    2,
+                                                                    2,
+                                                                    0,
+                                                                    TimeUnit.SECONDS,
+                                                                    new SynchronousQueue<Runnable>());
     /**
      * The task completion service.
      */
-    private final ExecutorCompletionService<Void> taskManager     = new ExecutorCompletionService<Void>(
-                                                                          executorService);
+    private final CompletionService<Void> completionService = new ExecutorCompletionService<Void>(
+                                                                    executor);
     /**
      * The watcher for new files.
      */
-    private final FileWatcher                     fileWatcher     = new FileWatcher();
+    private final ArchiveWatcher          archiveWatcher    = new ArchiveWatcher();
 
     /**
      * Constructs from the data archive and a specification of the
@@ -134,31 +161,40 @@ final class SourceNode extends AbstractNode {
      */
     @Override
     public Void call() throws InterruptedException, IOException {
+        logger.trace("Starting up: {}", this);
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         try {
-            taskManager.submit(localServer);
-            taskManager.submit(fileWatcher);
-            final Future<Void> future = taskManager.take();
+            final Future<Void> serverFuture = completionService
+                    .submit(localServer);
+            completionService.submit(archiveWatcher);
+            final Future<Void> future = completionService.take();
             if (!future.isCancelled()) {
+                final Object task = future == serverFuture
+                        ? localServer
+                        : archiveWatcher;
                 try {
                     future.get();
                 }
                 catch (final ExecutionException e) {
                     final Throwable cause = e.getCause();
                     if (cause instanceof InterruptedException) {
+                        logger.trace("Interrupted");
                         throw (InterruptedException) cause;
                     }
                     if (cause instanceof IOException) {
-                        throw (IOException) cause;
+                        throw new IOException("IO Error: " + task, cause);
                     }
-                    throw Util.launderThrowable(cause);
+                    throw new RuntimeException("Unexpected error: " + task,
+                            cause);
                 }
             }
         }
         finally {
-            executorService.shutdownNow();
+            executor.shutdownNow();
+            awaitCompletion();
             Thread.currentThread().setName(origThreadName);
+            logger.trace("Done: {}", this);
         }
         return null;
     }
@@ -171,7 +207,15 @@ final class SourceNode extends AbstractNode {
      */
     void waitUntilRunning() throws InterruptedException {
         localServer.waitUntilRunning();
-        fileWatcher.waitUntilRunning();
+        archiveWatcher.waitUntilRunning();
+    }
+
+    /**
+     * Waits until this instance has completed.
+     */
+    void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /**

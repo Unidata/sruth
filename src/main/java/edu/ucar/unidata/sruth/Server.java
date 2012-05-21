@@ -31,11 +31,12 @@ import edu.ucar.unidata.sruth.Connection.Stream;
 
 /**
  * Handles connections by clients.
- * 
+ * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
+@ThreadSafe
 abstract class Server extends UninterruptibleTask<Void> {
     /**
      * Manages a collection of servlets. A "servlet" is a client's individual
@@ -90,7 +91,7 @@ abstract class Server extends UninterruptibleTask<Void> {
 
             @Override
             public Void call() throws InterruptedException, IOException {
-                logger.debug("Starting up: {}", this);
+                logger.trace("Starting up: {}", this);
                 final Predicate predicate = clearingHouse.getPredicate();
                 try {
                     // NB: Client sends filter first, then server
@@ -132,7 +133,7 @@ abstract class Server extends UninterruptibleTask<Void> {
                 }
                 finally {
                     connection.close();
-                    logger.debug("Done: {}", this);
+                    logger.trace("Done: {}", this);
                 }
                 return null;
             }
@@ -166,7 +167,7 @@ abstract class Server extends UninterruptibleTask<Void> {
                     }
                     if (addInstance) {
                         servlets.add(this);
-                        numOutstandingServlets--;
+                        numPendingServlets--;
                     }
                     else {
                         logger.debug("Not sufficiently better: {}", this);
@@ -245,6 +246,7 @@ abstract class Server extends UninterruptibleTask<Void> {
              *            Specification of the new local data.
              */
             void newData(final FilePieceSpecSet spec) {
+                logger.trace("New data: {}", spec);
                 final Peer peer = peerRef.get();
                 if (peer != null) {
                     peer.newData(spec);
@@ -299,28 +301,28 @@ abstract class Server extends UninterruptibleTask<Void> {
          */
         private final int                maxNumActiveServlets;
         /**
-         * The maximum number of outstanding servlets.
+         * The maximum number of pending servlets.
          */
-        private final int                maxNumOutstandingServlets;
+        private final int                maxNumPendingServlets;
         /**
-         * The number of outstanding servlets.
+         * The number of pending servlets.
          */
         @GuardedBy("this")
-        private int                      numOutstandingServlets;
+        private int                      numPendingServlets;
 
         /**
          * Constructs from information on the local node, the data-exchange
-         * clearing house, and limits on the number of active and outstanding
+         * clearing house, and limits on the number of active and pending
          * servlets.
          * 
          * @param serverSocket
          *            The local server-socket.
          * @param clearingHouse
          *            The data-exchange clearing house.
-         * @param maxNumOutstandingServlets
-         *            Maximum number of outstanding servlets. A servlet is
-         *            outstanding upon construction. An outstanding servlet
-         *            either terminates or becomes an active servlet.
+         * @param maxNumPendingServlets
+         *            Maximum number of pending servlets. A servlet is pending
+         *            upon construction. An pending servlet either terminates or
+         *            becomes an active servlet.
          * @param maxNumActiveServlets
          *            Maximum number of active servlets. An active servlet
          *            exchanges data with its client.
@@ -331,15 +333,14 @@ abstract class Server extends UninterruptibleTask<Void> {
          */
         ServletManager(final ServerSocket serverSocket,
                 final ClearingHouse clearingHouse,
-                final int maxNumOutstandingServlets,
-                final int maxNumActiveServlets) {
+                final int maxNumPendingServlets, final int maxNumActiveServlets) {
             if (serverSocket == null) {
                 throw new NullPointerException();
             }
             if (clearingHouse == null) {
                 throw new NullPointerException();
             }
-            if (maxNumOutstandingServlets <= 0) {
+            if (maxNumPendingServlets <= 0) {
                 throw new IllegalArgumentException();
             }
             if (maxNumActiveServlets <= 0) {
@@ -348,9 +349,9 @@ abstract class Server extends UninterruptibleTask<Void> {
             this.serverSocket = serverSocket;
             this.clearingHouse = clearingHouse;
             this.maxNumActiveServlets = maxNumActiveServlets;
-            this.maxNumOutstandingServlets = maxNumOutstandingServlets;
+            this.maxNumPendingServlets = maxNumPendingServlets;
             servletExecutor = new CancellingExecutor(0, maxNumActiveServlets
-                    + maxNumOutstandingServlets, 60, TimeUnit.SECONDS,
+                    + maxNumPendingServlets, 60, TimeUnit.SECONDS,
                     new SynchronousQueue<Runnable>());
         }
 
@@ -367,15 +368,16 @@ abstract class Server extends UninterruptibleTask<Void> {
          *             if {@link #shutdownNow()} has been called.
          */
         synchronized void submit(final Connection connection) {
-            if (numOutstandingServlets >= maxNumOutstandingServlets) {
-                logger.debug("Too many outstanding connections: {}", connection);
+            if (numPendingServlets >= maxNumPendingServlets) {
+                logger.warn("Too many pending servlets ({}). Denied {}",
+                        numPendingServlets, connection);
                 connection.close();
             }
             else {
                 final Servlet servlet = new Servlet(connection);
                 try {
                     servletExecutor.submit(servlet);
-                    numOutstandingServlets++;
+                    numPendingServlets++;
                 }
                 catch (final RejectedExecutionException e) {
                     throw e;
@@ -393,12 +395,21 @@ abstract class Server extends UninterruptibleTask<Void> {
         }
 
         /**
+         * Waits until this instance has completed.
+         */
+        void awaitCompletion() throws InterruptedException {
+            Thread.interrupted();
+            servletExecutor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+        }
+
+        /**
          * Handles the creation of new local data by notifying all servlets.
          * 
          * @param spec
          *            Specification of the new local data.
          */
         synchronized void newData(final FilePieceSpecSet spec) {
+            logger.trace("New data: {}", spec);
             for (final Servlet servlet : servlets) {
                 servlet.newData(spec);
             }
@@ -440,20 +451,20 @@ abstract class Server extends UninterruptibleTask<Void> {
     /**
      * The logging service.
      */
-    private static final Logger     logger                               = Util.getLogger();
+    private static final Logger     logger                           = Util.getLogger();
 
     /**
      * The maximum number of active servlets.
      */
     private static final int        MAX_NUM_ACTIVE_SERVLETS;
-    private static final String     MAX_NUM_ACTIVE_SERVLETS_KEY          = "maximum number of active servlets";
-    private static final int        MAX_NUM_ACTIVE_SERVLETS_DEFAULT      = 8;
+    private static final String     MAX_NUM_ACTIVE_SERVLETS_KEY      = "maximum number of active servlets";
+    private static final int        MAX_NUM_ACTIVE_SERVLETS_DEFAULT  = 8;
     /**
-     * The maximum number of outstanding servlets.
+     * The maximum number of pending servlets.
      */
-    private static final int        MAX_NUM_OUTSTANDING_SERVLETS;
-    private static final String     MAX_NUM_OUTSTANDING_SERVLETS_KEY     = "maximum number of outstanding servlets";
-    private static final int        MAX_NUM_OUTSTANDING_SERVLETS_DEFAULT = 4;
+    private static final int        MAX_NUM_PENDING_SERVLETS;
+    private static final String     MAX_NUM_PENDING_SERVLETS_KEY     = "maximum number of pending servlets";
+    private static final int        MAX_NUM_PENDING_SERVLETS_DEFAULT = 8;
 
     static {
         final Preferences prefs = Preferences.userNodeForPackage(Server.class);
@@ -466,13 +477,12 @@ abstract class Server extends UninterruptibleTask<Void> {
                     + MAX_NUM_ACTIVE_SERVLETS);
         }
 
-        MAX_NUM_OUTSTANDING_SERVLETS = prefs.getInt(
-                MAX_NUM_OUTSTANDING_SERVLETS_KEY,
-                MAX_NUM_OUTSTANDING_SERVLETS_DEFAULT);
-        if (MAX_NUM_OUTSTANDING_SERVLETS < 0) {
+        MAX_NUM_PENDING_SERVLETS = prefs.getInt(MAX_NUM_PENDING_SERVLETS_KEY,
+                MAX_NUM_PENDING_SERVLETS_DEFAULT);
+        if (MAX_NUM_PENDING_SERVLETS < 0) {
             throw new IllegalArgumentException("Invalid preference: \""
-                    + MAX_NUM_OUTSTANDING_SERVLETS_KEY + "\"="
-                    + MAX_NUM_OUTSTANDING_SERVLETS);
+                    + MAX_NUM_PENDING_SERVLETS_KEY + "\"="
+                    + MAX_NUM_PENDING_SERVLETS);
         }
     }
 
@@ -491,11 +501,11 @@ abstract class Server extends UninterruptibleTask<Void> {
     /**
      * The "isRunning" latch.
      */
-    private final CountDownLatch    isRunningLatch                       = new CountDownLatch(
-                                                                                 1);
+    private final CountDownLatch    isRunningLatch                   = new CountDownLatch(
+                                                                             1);
 
-    private final AtomicLong        startTimeRef                         = new AtomicLong(
-                                                                                 System.currentTimeMillis());
+    private final AtomicLong        startTimeRef                     = new AtomicLong(
+                                                                             System.currentTimeMillis());
 
     /**
      * Constructs from the data-exchange clearing-house. Immediately starts
@@ -540,7 +550,7 @@ abstract class Server extends UninterruptibleTask<Void> {
     Server(final ClearingHouse clearingHouse,
             final InetSocketAddressSet inetSockAddrSet) throws IOException,
             SocketException {
-        // TODO: Set limit on number of outstanding connections
+        // TODO: Set limit on number of pending connections
         serverSocket = new ServerSocket();
         try {
             adjustSocket(serverSocket);
@@ -549,7 +559,7 @@ abstract class Server extends UninterruptibleTask<Void> {
                         + inetSockAddrSet);
             }
             servletManager = new ServletManager(serverSocket, clearingHouse,
-                    MAX_NUM_OUTSTANDING_SERVLETS, MAX_NUM_ACTIVE_SERVLETS);
+                    MAX_NUM_PENDING_SERVLETS, MAX_NUM_ACTIVE_SERVLETS);
             connectionFactory = new ConnectionFactory(
                     (InetSocketAddress) serverSocket.getLocalSocketAddress());
         }
@@ -595,19 +605,18 @@ abstract class Server extends UninterruptibleTask<Void> {
      * Executes this instance. Services connections by clients. Returns only if
      * Canceled. The server-socket is closed upon return.
      * 
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
      * @throws IOException
      *             if a severe I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
     @Override
     public Void call() throws InterruptedException, IOException {
+        logger.trace("Starting up: {}", this);
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
-        logger.info("Starting up: {}", this);
-        isRunningLatch.countDown();
         startTimeRef.set(System.currentTimeMillis());
-        logger.debug("Server listening on {}", serverSocket);
+        isRunningLatch.countDown();
 
         try {
             for (;;) {
@@ -640,8 +649,9 @@ abstract class Server extends UninterruptibleTask<Void> {
             catch (final IOException ignored) {
             }
             servletManager.shutdownNow();
-            logger.info("Done: {}", this);
+            servletManager.awaitCompletion();
             Thread.currentThread().setName(origThreadName);
+            logger.trace("Done: {}", this);
         }
         return null;
     }
@@ -671,7 +681,14 @@ abstract class Server extends UninterruptibleTask<Void> {
         }
         catch (final IOException ignored) {
         }
-        servletManager.shutdownNow();
+    }
+
+    /**
+     * Waits until this instance has completed.
+     */
+    void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        servletManager.awaitCompletion();
     }
 
     /**
@@ -690,6 +707,7 @@ abstract class Server extends UninterruptibleTask<Void> {
      *            Specification of the newly-created data.
      */
     void newData(final FilePieceSpecSet spec) {
+        logger.trace("New data: {}", spec);
         servletManager.newData(spec);
     }
 

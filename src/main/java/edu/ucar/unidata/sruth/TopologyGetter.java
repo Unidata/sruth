@@ -26,7 +26,7 @@ import net.jcip.annotations.ThreadSafe;
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class NetworkGetter extends TrackerTask {
+final class TopologyGetter extends TrackerTask {
     /**
      * The serial version identifier.
      */
@@ -63,7 +63,7 @@ final class NetworkGetter extends TrackerTask {
      * @throws NullPointerException
      *             if {@code socket == null}.
      */
-    NetworkGetter(final Filter filter, final InetSocketAddress localServer,
+    TopologyGetter(final Filter filter, final InetSocketAddress localServer,
             final Socket socket) throws SocketException {
         super(socket);
         if (filter == null) {
@@ -77,7 +77,10 @@ final class NetworkGetter extends TrackerTask {
     }
 
     /**
-     * Executes an instance. Creates an instance and has it do its thing.
+     * Executes an instance. Creates an instance, sends it to the tracker, gets
+     * the response, and adjusts the tracker proxy.
+     * <p>
+     * This method is potentially uninterruptible and slow.
      * 
      * @param filter
      *            Specification of locally-desired data
@@ -87,37 +90,39 @@ final class NetworkGetter extends TrackerTask {
      *            Socket to the tracker
      * @param trackerProxy
      *            Local proxy for the tracker
+     * @throws InvalidMessageException
+     *             if the response from the tracker is invalid
+     * @throws SocketException
+     *             if the socket is closed
      * @throws IOException
      *             if an I/O error occurs
-     * @throws ClassNotFoundException
-     *             if the response from the tracker is invalid
      */
     static void execute(final Filter filter,
             final InetSocketAddress localServer, final Socket socket,
-            final TrackerProxy trackerProxy) throws ClassNotFoundException,
+            final TrackerProxy trackerProxy) throws InvalidMessageException,
             IOException {
-        final NetworkGetter networkGetter = new NetworkGetter(filter,
+        final TopologyGetter topologyGetter = new TopologyGetter(filter,
                 localServer, socket);
-        networkGetter.getNetworkAndRegister(trackerProxy);
+        topologyGetter.getTopologyAndRegister(trackerProxy);
     }
 
     /**
      * Gets the state of the network from a tracker and registers with the
      * tracker.
      * <p>
-     * This method is uninterruptible and potentially slow.
+     * This method is potentially uninterruptible and slow.
      * 
      * @param trackerProxy
      *            The proxy for the tracker
-     * @throws ClassCastException
-     *             if the tracker returns the wrong type.
-     * @throws ClassNotFoundException
+     * @throws InvalidMessageException
      *             if the tracker's response is invalid.
+     * @throws SocketException
+     *             if the socket is closed
      * @throws IOException
      *             if an I/O error occurs.
      */
-    private void getNetworkAndRegister(final TrackerProxy trackerProxy)
-            throws ClassNotFoundException, IOException {
+    private void getTopologyAndRegister(final TrackerProxy trackerProxy)
+            throws InvalidMessageException, IOException {
         try {
             callTracker();
             processResponse(trackerProxy);
@@ -132,16 +137,27 @@ final class NetworkGetter extends TrackerTask {
      * 
      * @param trackerProxy
      *            The proxy for the tracker
+     * @throws InvalidMessageException
+     *             if the response from the tracker is invalid
+     * @throws IOException
+     *             if an I/O error occurs
      */
     private void processResponse(final TrackerProxy trackerProxy)
-            throws ClassNotFoundException, IOException {
+            throws InvalidMessageException, IOException {
         final ObjectInputStream ois = new ObjectInputStream(
                 trackerSocket.getInputStream());
-        final FilterServerMap topology = (FilterServerMap) ois.readObject();
-        trackerProxy.setRawTopology(topology);
-        final InetSocketAddress reportingAddress = (InetSocketAddress) ois
-                .readObject();
-        trackerProxy.setReportingAddress(reportingAddress);
+        Topology topology;
+        try {
+            topology = (Topology) ois.readObject();
+            trackerProxy.setRawTopology(topology);
+            InetSocketAddress reportingAddress;
+            reportingAddress = (InetSocketAddress) ois.readObject();
+            trackerProxy.setReportingAddress(reportingAddress);
+        }
+        catch (final ClassNotFoundException e) {
+            throw new InvalidMessageException("Couldn't get topology: " + this,
+                    e);
+        }
     }
 
     /**
@@ -163,7 +179,7 @@ final class NetworkGetter extends TrackerTask {
             throws IOException {
         final OutputStream outputStream = socket.getOutputStream();
         final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
-        final FilterServerMap network = tracker.getNetwork();
+        final Topology network = tracker.getNetwork();
         oos.writeObject(network);
         oos.writeObject(tracker.getReportingAddress());
         oos.flush();
@@ -177,13 +193,13 @@ final class NetworkGetter extends TrackerTask {
      */
     @Override
     public String toString() {
-        return "NetworkGetter [filter=" + filter + ",localServer="
+        return "FilteredProxy [filter=" + filter + ",localServer="
                 + localServer + "]";
     }
 
     private Object readResolve() throws ObjectStreamException, SocketException {
         try {
-            return new NetworkGetter(filter, localServer, null);
+            return new TopologyGetter(filter, localServer, null);
         }
         catch (final NullPointerException e) {
             throw (InvalidObjectException) new InvalidObjectException(
