@@ -14,6 +14,7 @@ import java.net.SocketTimeoutException;
 import java.nio.file.FileSystemException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
@@ -176,14 +177,13 @@ final class Peer implements Callable<Boolean> {
     @Override
     public final Boolean call() throws EOFException, IOException,
             SocketException, InterruptedException {
+        logger.trace("Starting up: {}", this);
         final String origName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
         boolean validPeer;
 
-        logger.debug("Starting up: {}", this);
-
         try {
-            final ExecutorCompletionService<Void> taskManager = new ExecutorCompletionService<Void>(
+            final CompletionService<Void> completionService = new ExecutorCompletionService<Void>(
                     cancellingExecutor);
 
             try {
@@ -195,11 +195,11 @@ final class Peer implements Callable<Boolean> {
                 }
                 else {
                     // The remote instance wants data
-                    taskManager.submit(new NoticeSender(connection
+                    completionService.submit(new NoticeSender(connection
                             .getNoticeStream()));
-                    taskManager.submit(new RequestReceiver(connection
+                    completionService.submit(new RequestReceiver(connection
                             .getRequestStream()));
-                    taskManager.submit(new PieceSender(connection
+                    completionService.submit(new PieceSender(connection
                             .getDataStream()));
                 }
 
@@ -211,11 +211,11 @@ final class Peer implements Callable<Boolean> {
                 }
                 else {
                     // This instance wants data
-                    taskManager.submit(new NoticeReceiver(connection
+                    completionService.submit(new NoticeReceiver(connection
                             .getNoticeStream()));
-                    taskManager.submit(new RequestSender(connection
+                    completionService.submit(new RequestSender(connection
                             .getRequestStream()));
-                    taskManager.submit(new PieceReceiver(connection
+                    completionService.submit(new PieceReceiver(connection
                             .getDataStream()));
                 }
 
@@ -228,12 +228,13 @@ final class Peer implements Callable<Boolean> {
                         Future<Void> fileScannerFuture = null;
                         if (!remoteFilter.equals(Filter.NOTHING)) {
                             // The remote instance wants data
-                            fileScannerFuture = taskManager
+                            fileScannerFuture = completionService
                                     .submit(new FileScanner());
                         }
 
-                        for (Future<Void> future = taskManager.take(); !future
-                                .isCancelled(); future = taskManager.take()) {
+                        for (Future<Void> future = completionService.take(); !future
+                                .isCancelled(); future = completionService
+                                .take()) {
                             try {
                                 future.get();
                             }
@@ -270,12 +271,15 @@ final class Peer implements Callable<Boolean> {
             }
             finally {
                 cancellingExecutor.shutdownNow();
+                Thread.interrupted();
+                cancellingExecutor.awaitTermination(Long.MAX_VALUE,
+                        TimeUnit.DAYS);
             }
         }
         finally {
             connection.close();
-            logger.debug("Done: {}", this);
             Thread.currentThread().setName(origName);
+            logger.trace("Done: {}", this);
         }
 
         return new Boolean(validPeer);
@@ -316,6 +320,7 @@ final class Peer implements Callable<Boolean> {
      *            Specification of the new data.
      */
     void newData(final FilePieceSpecSet spec) {
+        logger.trace("New data: {}", spec);
         if (remoteFilter.matches(spec.getArchivePath())) {
             noticeQueue.put(spec);
         }
@@ -416,6 +421,7 @@ final class Peer implements Callable<Boolean> {
     private final class FileScanner implements Callable<Void> {
         public Void call() throws InterruptedException, IOException {
             setThreadName(toString());
+            logger.trace("Starting up: {}", this);
             clearingHouse.walkArchive(new FilePieceSpecSetConsumer() {
                 @Override
                 public void consume(final FilePieceSpecSet spec) {
@@ -947,6 +953,7 @@ final class Peer implements Callable<Boolean> {
          *            The specification of the data to be added.
          */
         synchronized void put(final FilePieceSpecSet spec) {
+            logger.trace("New data: {}", spec);
             pieceSpecSet = (null == pieceSpecSet)
                     ? spec
                     : pieceSpecSet.merge(spec);

@@ -14,8 +14,9 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -29,85 +30,84 @@ import org.slf4j.Logger;
 
 public class PubSubTest {
     /**
-     * The logging service.
+     * The logging facility
      */
-    private static final Logger             logger              = Util.getLogger();
+    private static final Logger     logger              = Util.getLogger();
     /**
      * The test directory.
      */
-    private static final Path               TESTDIR             = Paths.get(
-                                                                        System.getProperty("java.io.tmpdir"))
-                                                                        .resolve(
-                                                                                PubSubTest.class
-                                                                                        .getSimpleName());
+    private static final Path       TESTDIR             = Paths.get(
+                                                                System.getProperty("java.io.tmpdir"))
+                                                                .resolve(
+                                                                        PubSubTest.class
+                                                                                .getSimpleName());
     /**
      * The maximum size of a created file in bytes. A large NEXRAD2 file is
      * about 110000 octets.
      */
-    private static int                      MAX_SIZE            = 110000;
+    private static int              MAX_SIZE            = 110000;
     /**
      * The root of the publisher file-tree.
      */
-    private static final Path               PUB_ROOT            = TESTDIR
-                                                                        .resolve("publisher");
+    private static final Path       PUB_ROOT            = TESTDIR
+                                                                .resolve("publisher");
     /**
      * The root of the subscriber file-trees.
      */
-    private static final Path               SUB_ROOT            = TESTDIR
-                                                                        .resolve("subscribers");
+    private static final Path       SUB_ROOT            = TESTDIR
+                                                                .resolve("subscribers");
     /**
      * The data directory for ease of transmission verification via diff(1)
      * relative to the root of the archive directory.
      */
-    private static final Path               DATA_DIR            = Paths.get("DATA");
+    private static final Path       DATA_DIR            = Paths.get("DATA");
     /**
      * The publisher data directory.
      */
-    private static final Path               PUB_DATA_DIR        = PUB_ROOT
-                                                                        .resolve(DATA_DIR);
+    private static final Path       PUB_DATA_DIR        = PUB_ROOT
+                                                                .resolve(DATA_DIR);
     /**
      * The number of subscribers.
      */
-    private static final int                SUB_COUNT           = 1;
+    private static final int        SUB_COUNT           = 3;
     /**
      * The number of rounds of subscribers in {@link #testDynamicNetworking}.
      */
-    private final int                       ROUND_COUNT         = 3;
+    private final int               ROUND_COUNT         = 3;
 
     /**
      * The number of pre-subscription files.
      */
-    private static final int                PRE_SUB_FILE_COUNT  = 1;
+    private static final int        PRE_SUB_FILE_COUNT  = 3;
     /**
      * The number of post-subscription files.
      */
-    private static final int                POST_SUB_FILE_COUNT = 0;
+    private static final int        POST_SUB_FILE_COUNT = 3;
     /**
      * The sleep interval, in milliseconds, to be used before checking that the
      * files have been successfully conveyed.
      */
-    private static long                     sleepAmount         = 2000;
-    /**
-     * The canceling execution service for tasks.
-     */
-    private static final CancellingExecutor executorService     = new CancellingExecutor(
-                                                                        0,
-                                                                        Integer.MAX_VALUE,
-                                                                        0,
-                                                                        TimeUnit.SECONDS,
-                                                                        new SynchronousQueue<Runnable>());
+    private static long             sleepAmount         = 2000;
     /**
      * The pathnames of the root directories of the subscribers.
      */
-    private static final Path[]             absSubRootDirs      = new Path[SUB_COUNT];
+    private static final Path[]     absSubRootDirs      = new Path[SUB_COUNT];
     /**
      * Pseudo random number generator.
      */
-    private static final Random             random              = new Random();
+    private static final Random     random              = new Random();
     /**
      * The number of constructed paths.
      */
-    private static int                      pathCount           = 0;
+    private static int              pathCount           = 0;
+    /**
+     * The canceling execution service for tasks.
+     */
+    private CancellingExecutor      executorService;
+    /**
+     * The completion service for tasks
+     */
+    private CompletionService<Void> completionService;
 
     /**
      * Constructs an archive pathname. The choice of a subdirectory or not is
@@ -148,17 +148,25 @@ public class PubSubTest {
     public void setUp() throws Exception {
         removeTestDirectory();
         /*
-         * Recreate publisher and subscriber directories.
+         * Create publisher and subscriber directories.
          */
         Files.createDirectories(PUB_ROOT);
         for (int i = 0; i < absSubRootDirs.length; i++) {
             absSubRootDirs[i] = SUB_ROOT.resolve(Integer.toString(i + 1));
             Files.createDirectories(absSubRootDirs[i]);
         }
+        /*
+         * Create the task-execution service
+         */
+        executorService = new CancellingExecutor(0, Integer.MAX_VALUE, 0,
+                TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
+        completionService = new ExecutorCompletionService<Void>(executorService);
+        completionService.submit(Misc.newReportingTask(completionService));
     }
 
     @After
     public void tearDown() throws Exception {
+        executorService.shutdownNow();
     }
 
     /**
@@ -186,8 +194,8 @@ public class PubSubTest {
     /**
      * Starts a task.
      */
-    private static Future<Void> start(final Callable<Void> task) {
-        return executorService.submit(task);
+    private Future<Void> start(final Callable<Void> task) {
+        return completionService.submit(task);
     }
 
     /**
@@ -200,25 +208,26 @@ public class PubSubTest {
      */
     private static void stop(final Future<Void> future)
             throws InterruptedException {
-        if (future != null) {
-            future.cancel(true);
+        future.cancel(true);
+        if (!future.isCancelled()) {
             try {
                 future.get();
             }
-            catch (final CancellationException ignored) {
-            }
             catch (final ExecutionException e) {
-                final Throwable t = e.getCause();
-                logger.error("Execution exception", t);
+                final Throwable cause = e.getCause();
+                logger.error("Unexpected error", cause);
+                throw new RuntimeException("Unexpected error", cause);
             }
         }
     }
 
     private static void diffDirs(final Path subRoot) throws IOException,
             InterruptedException {
-        final int status = Misc.system("diff", "-r", PUB_DATA_DIR.toString(),
-                subRoot.resolve(DATA_DIR).toString());
-        assertEquals(0, status);
+        if (PUB_DATA_DIR.toFile().exists()) {
+            final int status = Misc.system("diff", "-r", PUB_DATA_DIR
+                    .toString(), subRoot.resolve(DATA_DIR).toString());
+            assertEquals(0, status);
+        }
     }
 
     private static void deleteDir(final Path dir) throws IOException,
@@ -227,12 +236,14 @@ public class PubSubTest {
         assertEquals(0, status);
     }
 
-    @Test(expected = java.nio.file.NoSuchFileException.class)
+    @Test
     public void testNoTracker() throws InterruptedException, IOException {
         final InetSocketAddress trackerAddress = new InetSocketAddress(0);
         final Subscriber subscriber = new Subscriber(absSubRootDirs[0],
                 trackerAddress, Predicate.EVERYTHING, new Processor());
-        subscriber.call();
+        final Future<Void> subscriberFuture = start(subscriber);
+        Thread.sleep(sleepAmount);
+        stop(subscriberFuture);
     }
 
     @Test
@@ -312,7 +323,9 @@ public class PubSubTest {
         Future<Void> pubFuture = start(publisher);
         publisher.waitUntilRunning();
 
-        System.out.println("Tracker address: " + publisher.getTrackerAddress());
+        final InetSocketAddress trackerAddress = publisher.getTrackerAddress();
+
+        System.out.println("Tracker address: " + trackerAddress);
         System.out.println("Source address: " + publisher.getSourceAddress());
 
         /*
@@ -327,9 +340,8 @@ public class PubSubTest {
          */
         final List<Subscriber> subscribers = new LinkedList<Subscriber>();
         for (final Path rootDir : absSubRootDirs) {
-            subscribers
-                    .add(new Subscriber(rootDir, publisher.getTrackerAddress(),
-                            Predicate.EVERYTHING, new Processor()));
+            subscribers.add(new Subscriber(rootDir, trackerAddress,
+                    Predicate.EVERYTHING, new Processor()));
         }
         /*
          * Start the subscribers.
@@ -346,9 +358,12 @@ public class PubSubTest {
          * Restart the publisher.
          */
         stop(pubFuture);
+        publisher.awaitCompletion();
+        Thread.sleep(sleepAmount);
         publisher = new Publisher(PUB_ROOT);
         pubFuture = start(publisher);
         publisher.waitUntilRunning();
+
         Thread.sleep(sleepAmount);
 
         /*
@@ -424,6 +439,7 @@ public class PubSubTest {
                         new Processor());
                 future = start(subscriber);
                 assertNotNull(future);
+                subscriber.waitUntilRunning();
                 subFutures[subIndex] = future;
                 Thread.sleep(sleepAmount);
                 assertEquals(prevClientCount + 1, publisher.getClientCount());

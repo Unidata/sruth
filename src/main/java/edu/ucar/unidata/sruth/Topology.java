@@ -27,7 +27,7 @@ import net.jcip.annotations.ThreadSafe;
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class FilterServerMap implements Serializable {
+final class Topology implements Serializable {
     /**
      * The serial version identifier.
      */
@@ -58,7 +58,7 @@ final class FilterServerMap implements Serializable {
      * @param filters
      *            The set of data-selection filters.
      */
-    FilterServerMap(final Set<Filter> filters) {
+    Topology(final Set<Filter> filters) {
         for (final Filter filter : filters) {
             final Set<InetSocketAddress> servers = newServerSet();
             serverSets.put(filter, servers);
@@ -68,7 +68,7 @@ final class FilterServerMap implements Serializable {
     /**
      * Constructs an empty instance.
      */
-    FilterServerMap() {
+    Topology() {
     }
 
     /**
@@ -77,8 +77,8 @@ final class FilterServerMap implements Serializable {
      * @param that
      *            The other instance.
      */
-    FilterServerMap(final FilterServerMap that) {
-        FilterServerMap o1, o2;
+    Topology(final Topology that) {
+        Topology o1, o2;
         if (System.identityHashCode(this) < System.identityHashCode(that)) {
             o1 = this;
             o2 = that;
@@ -224,9 +224,9 @@ final class FilterServerMap implements Serializable {
      *            The filter to satisfy.
      * @return The subset of this instance that satisfies the given filter.
      */
-    synchronized FilterServerMap subset(final Filter filter) {
+    synchronized Topology subset(final Filter filter) {
         final Set<InetSocketAddress> servers = getServers(filter);
-        final FilterServerMap subset = new FilterServerMap();
+        final Topology subset = new Topology();
         for (final InetSocketAddress server : servers) {
             final Set<Filter> filters = filterSets.get(server);
             for (final Filter filt : filters) {
@@ -427,7 +427,7 @@ final class FilterServerMap implements Serializable {
      */
     @Override
     synchronized public String toString() {
-        return "FilterServerMap [serverSets=" + serverSets + ", filterSets="
+        return "Topology [serverSets=" + serverSets + ", filterSets="
                 + filterSets + "]";
     }
 
@@ -443,7 +443,7 @@ final class FilterServerMap implements Serializable {
     }
 
     private Object readResolve() {
-        final FilterServerMap instance = new FilterServerMap();
+        final Topology instance = new Topology();
         for (final Map.Entry<Filter, Set<InetSocketAddress>> entry : serverSets
                 .entrySet()) {
             instance.add(entry.getKey(), entry.getValue());

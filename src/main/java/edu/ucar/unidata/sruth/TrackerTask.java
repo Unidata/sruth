@@ -6,12 +6,13 @@
 package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.io.Serializable;
 import java.net.Socket;
+import java.net.SocketException;
+
+import org.slf4j.Logger;
 
 /**
  * A task that uses a tracker to accomplish itself.
@@ -22,12 +23,34 @@ abstract class TrackerTask implements Serializable {
     /**
      * The serial version identifier.
      */
-    private static final long serialVersionUID = 1L;
+    private static final long        serialVersionUID = 1L;
+    /**
+     * The package logger
+     */
+    protected static final Logger    logger           = Util.getLogger();
+    /**
+     * The socket to the tracker
+     */
+    protected final transient Socket trackerSocket;
 
     /**
-     * Constructs from nothing.
+     * Constructs from a socket that's connected to the tracker.
+     * 
+     * @param trackerSocket
+     *            The socket to the tracker or {@code null}
+     * @throws SocketException
+     *             if the socket can't be configured properly
      */
-    protected TrackerTask() {
+    protected TrackerTask(final Socket trackerSocket) throws SocketException {
+        if (trackerSocket != null) {
+            trackerSocket.setSoTimeout(Connection.SO_TIMEOUT);
+            trackerSocket.setKeepAlive(true);
+            trackerSocket.setSoLinger(false, 0); // because flush() always
+                                                 // called
+            trackerSocket.setTcpNoDelay(false); // because flush() called when
+                                                // appropriate
+        }
+        this.trackerSocket = trackerSocket;
     }
 
     /**
@@ -35,51 +58,16 @@ abstract class TrackerTask implements Serializable {
      * <p>
      * This method is uninterruptible and potentially slow.
      * 
-     * @param socket
-     *            The client socket to the tracker.
-     * @return The response.
-     * @throws ClassNotFoundException
-     *             if the response from the server is invalid.
+     * @throws SocketException
+     *             if the socket is closed
      * @throws IOException
      *             if an I/O error occurs.
      */
-    protected final Object callTracker(final Socket socket)
-            throws ClassNotFoundException, IOException {
-        socket.setSoTimeout(Connection.SO_TIMEOUT);
-        socket.setKeepAlive(true);
-        socket.setSoLinger(false, 0); // because flush() always called
-        socket.setTcpNoDelay(false); // because flush() called when appropriate
-        socket.setKeepAlive(true);
-
-        final OutputStream outputStream = socket.getOutputStream();
+    protected final void callTracker() throws IOException {
+        final OutputStream outputStream = trackerSocket.getOutputStream();
         final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
-        try {
-            oos.writeObject(this);
-            oos.flush();
-            final InputStream inputStream = socket.getInputStream();
-            final ObjectInputStream ois = new ObjectInputStream(inputStream);
-            try {
-                return ois.readObject();
-            }
-            catch (final ClassNotFoundException e) {
-                throw (ClassNotFoundException) new ClassNotFoundException(
-                        toString()).initCause(e);
-            }
-            finally {
-                try {
-                    ois.close();
-                }
-                catch (final IOException ignored) {
-                }
-            }
-        }
-        finally {
-            try {
-                oos.close();
-            }
-            catch (final IOException ignored) {
-            }
-        }
+        oos.writeObject(this);
+        oos.flush();
     }
 
     /**
@@ -97,32 +85,14 @@ abstract class TrackerTask implements Serializable {
             throws IOException;
 
     /**
-     * Replies to the client.
-     * <p>
-     * This method is potentially slow.
-     * 
-     * @param socket
-     *            The socket on which to reply.
-     * @param reply
-     *            The reply.
-     * @throws IOException
-     *             if an I/O error occurs.
-     * @throws NullPointerException
-     *             if {@code socket == null}.
+     * Closes the socket to the tracker. Idempotent.
      */
-    protected final void reply(final Socket socket, final Serializable reply)
-            throws IOException {
-        final OutputStream outputStream = socket.getOutputStream();
-        final ObjectOutputStream oos = new ObjectOutputStream(outputStream);
+    protected void close() {
         try {
-            oos.writeObject(reply);
+            trackerSocket.close();
         }
-        finally {
-            try {
-                oos.close();
-            }
-            catch (final IOException ignored) {
-            }
+        catch (final IOException e) {
+            logger.error("Couldn't close socket to tracker: {}", e.toString());
         }
     }
 }

@@ -203,7 +203,7 @@ abstract class Connection implements Comparable<Connection> {
              * Closes this instance. Idempotent.
              */
             synchronized void close() {
-                if (!socket.isOutputShutdown()) {
+                if (!socket.isClosed() && !socket.isOutputShutdown()) {
                     try {
                         socket.shutdownOutput();
                     }
@@ -296,7 +296,7 @@ abstract class Connection implements Comparable<Connection> {
              * Closes this instance. Idempotent.
              */
             synchronized void close() {
-                if (!socket.isOutputShutdown()) {
+                if (!socket.isClosed() && !socket.isInputShutdown()) {
                     try {
                         socket.shutdownInput();
                     }

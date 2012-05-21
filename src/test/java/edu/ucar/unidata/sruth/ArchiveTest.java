@@ -171,17 +171,17 @@ public class ArchiveTest {
     // @Test
     public final void testTopology() throws IOException, ClassNotFoundException {
         final File file = new File(
-                "/tmp/PubSubTest/subscribers/1/SRUTH/gilda.unidata.ucar.edu:38800/FilterServerMap");
+                "/tmp/PubSubTest/subscribers/1/SRUTH/gilda.unidata.ucar.edu:38800/Topology");
         final InputStream inputStream = new FileInputStream(file);
         final ObjectInputStream ois = new ObjectInputStream(inputStream);
-        final FilterServerMap topology = (FilterServerMap) ois.readObject();
+        final Topology topology = (Topology) ois.readObject();
         assertNotNull(topology);
         ois.close();
     }
 
     @Test
     public final void testToplogyDistribution() throws InterruptedException {
-        final FilterServerMap topology = new FilterServerMap();
+        final Topology topology = new Topology();
         final DistributedTrackerFiles admin = archive
                 .getDistributedTrackerFiles(new InetSocketAddress(38800));
         admin.distribute(topology);

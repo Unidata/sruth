@@ -9,12 +9,18 @@ import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import net.jcip.annotations.ThreadSafe;
+
+import org.slf4j.Logger;
 
 /**
  * Processes data-products according to client instructions.
@@ -24,11 +30,25 @@ import net.jcip.annotations.ThreadSafe;
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-public final class Processor {
+public final class Processor implements Callable<Void> {
+    /**
+     * The logger for this package
+     */
+    private static final Logger                        logger          = Util.getLogger();
     /**
      * Map from filters to actions.
      */
-    private final ConcurrentMap<Pattern, List<Action>> actions = new ConcurrentHashMap<Pattern, List<Action>>();
+    private final ConcurrentMap<Pattern, List<Action>> actions         = new ConcurrentHashMap<Pattern, List<Action>>();
+    /**
+     * The queue of unprocessed data-products.
+     */
+    // TODO: Use a more limited queue -- possibly a user preference
+    private final BlockingQueue<DataProduct>           processingQueue = new LinkedBlockingQueue<DataProduct>();
+    /**
+     * The "isRunning" latch.
+     */
+    private final CountDownLatch                       isRunningLatch  = new CountDownLatch(
+                                                                               1);
 
     /**
      * Adds a processing action to a data-product category.
@@ -50,6 +70,53 @@ public final class Processor {
         }
     }
 
+    @Override
+    public Void call() throws InterruptedException {
+        logger.trace("Starting up: {}", this);
+        isRunningLatch.countDown();
+        try {
+            for (;;) {
+                /*
+                 * TODO: Handle interruption better when the queue is not empty
+                 */
+                final DataProduct product = processingQueue.take();
+                try {
+                    matchAndProcess(product);
+                }
+                catch (final IOException e) {
+                    logger.error("Couldn't process data-product: " + product, e);
+                }
+            }
+        }
+        finally {
+            logger.trace("Done: {}", this);
+        }
+    }
+
+    /**
+     * Waits until this instance is running.
+     * <p>
+     * This method is potentially slow.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     */
+    public void waitUntilRunning() throws InterruptedException {
+        isRunningLatch.await();
+    }
+
+    /**
+     * Queues a data-product for processing.
+     * 
+     * @param dataProduct
+     *            The data-product to be processed
+     * @return {@code true} if and only if the data-product was successfully
+     *         queued.
+     */
+    boolean offer(final DataProduct dataProduct) {
+        return processingQueue.offer(dataProduct);
+    }
+
     /**
      * Processes a data-product. A data-product will be acted upon by matching
      * actions in the order in which the actions were added.
@@ -63,8 +130,8 @@ public final class Processor {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    boolean process(final DataProduct dataProduct) throws IOException,
-            InterruptedException {
+    private boolean matchAndProcess(final DataProduct dataProduct)
+            throws IOException, InterruptedException {
         boolean processed = false;
         for (final Map.Entry<Pattern, List<Action>> entry : actions.entrySet()) {
             final Matcher matcher = dataProduct.matcher(entry.getKey());

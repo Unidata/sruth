@@ -8,10 +8,12 @@ package edu.ucar.unidata.sruth;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
-import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +22,8 @@ import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
+
+import edu.ucar.unidata.sruth.Archive.DistributedTrackerFiles;
 
 /**
  * An interior or leaf node of a distribution graph. A sink-node has a
@@ -32,30 +36,26 @@ import org.slf4j.Logger;
 @ThreadSafe
 final class SinkNode extends AbstractNode {
     /**
-     * The {@link ClientManager} executor service.
-     */
-    private final CancellingExecutor              executorService;
-    /**
-     * The executor completion service.
-     */
-    private final ExecutorCompletionService<Void> completionService;
-    /**
-     * The thread that executes the server.
-     */
-    private final Thread                          serverThread;
-    /**
      * The address of the tracker.
      */
-    private final InetSocketAddress               trackerAddress;
+    private final InetSocketAddress        trackerAddress;
     /**
      * The set of client managers (one per desired-data filter).
      */
-    @GuardedBy("itself")
-    private final ArrayList<ClientManager>        clientManagers;
+    @GuardedBy("this")
+    private final ArrayList<ClientManager> clientManagers;
+    /**
+     * The proxy for the tracker
+     */
+    private final TrackerProxy             trackerProxy;
     /**
      * The logging service.
      */
-    private static final Logger                   logger = Util.getLogger();
+    private static final Logger            logger = Util.getLogger();
+    /**
+     * The task execution service
+     */
+    private final ExecutorService          executorService;
 
     /**
      * Constructs from a data archive, a specification of the locally-desired
@@ -116,36 +116,22 @@ final class SinkNode extends AbstractNode {
         }
         this.trackerAddress = trackerAddress;
 
-        executorService = new CancellingExecutor(0, predicate.getFilterCount(),
-                0, TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
-        completionService = new ExecutorCompletionService<Void>(executorService);
-
-        serverThread = new Thread() {
-            @Override
-            public void run() {
-                try {
-                    localServer.call();
-                }
-                catch (final InterruptedException ignored) {
-                }
-                catch (final IOException e) {
-                    logger.error("Server failed: " + localServer, e);
-                    executorService.shutdownNow();
-                    // SinkNode.this.cancel();
-                }
-            }
-        };
-
+        final DistributedTrackerFiles distributedTrackerFiles = clearingHouse
+                .getDistributedTrackerFiles(trackerAddress);
+        trackerProxy = new TrackerProxy(trackerAddress,
+                localServer.getSocketAddress(), distributedTrackerFiles);
         clientManagers = new ArrayList<ClientManager>(getPredicate()
                 .getFilterCount());
-        synchronized (clientManagers) {
+        synchronized (this) {
             for (final Filter filter : getPredicate()) {
                 final ClientManager clientManager = new ClientManager(
                         localServer.getSocketAddress(), clearingHouse, filter,
-                        trackerAddress);
+                        trackerProxy);
                 clientManagers.add(clientManager);
             }
         }
+        executorService = new CancellingExecutor(1, 1 + clientManagers.size(),
+                0, TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
     }
 
     @Override
@@ -161,47 +147,123 @@ final class SinkNode extends AbstractNode {
      * 
      * @throws InterruptedException
      *             if the current thread is interrupted.
-     * @throws NoSuchFileException
-     *             if the tracker couldn't be contacted and there's no
-     *             tracker-specific topology-file in the archive.
+     * @throws IOException
+     *             if a severe I/O error occurs
      */
-    public Void call() throws InterruptedException, NoSuchFileException {
+    public Void call() throws InterruptedException, IOException {
+        logger.trace("Starting up: {}", this);
         final String prevName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
-        serverThread.start();
         try {
-            final int n;
-            synchronized (clientManagers) {
-                for (final ClientManager clientManager : clientManagers) {
-                    completionService.submit(clientManager);
-                }
-                n = clientManagers.size();
+            int clientManagerCount;
+            synchronized (this) {
+                clientManagerCount = clientManagers.size();
             }
-            for (int i = 0; i < n; i++) {
-                final Future<Void> future = completionService.take();
-                if (!future.isCancelled()) {
-                    try {
-                        future.get();
-                    }
-                    catch (final ExecutionException e) {
-                        final Throwable t = e.getCause();
-                        if (t instanceof InterruptedException) {
-                            throw (InterruptedException) t;
-                        }
-                        if (t instanceof NoSuchFileException) {
-                            throw (NoSuchFileException) t;
-                        }
-                        throw Util.launderThrowable(t);
+            try {
+                final ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<Void>(
+                        executorService);
+                final Map<Future<Void>, ClientManager> clientManagerMap = new HashMap<Future<Void>, ClientManager>(
+                        clientManagerCount);
+                final Future<Void> serverFuture = completionService
+                        .submit(localServer);
+                synchronized (this) {
+                    for (final ClientManager clientManager : clientManagers) {
+                        final Future<Void> future = completionService
+                                .submit(clientManager);
+                        clientManagerMap.put(future, clientManager);
                     }
                 }
+                while (clientManagerMap.size() > 0) {
+                    final Future<Void> future = completionService.take();
+                    if (future == serverFuture) {
+                        /*
+                         * The local {@link SinkServer} completed. Ideally,
+                         * because it was cancelled.
+                         */
+                        if (!future.isCancelled()) {
+                            // The local {@link SinkServer} crashed
+                            try {
+                                future.get();
+                                throw new AssertionError();
+                            }
+                            catch (final ExecutionException e) {
+                                final Throwable cause = e.getCause();
+                                if (cause instanceof IOException) {
+                                    throw new IOException(
+                                            "Local sink-server crashed: "
+                                                    + localServer, cause);
+                                }
+                                throw new RuntimeException("Unexpected error: "
+                                        + localServer, cause);
+                            }
+                        }
+                    }
+                    else {
+                        /*
+                         * A {@link ClientManager} completed. Ideally, because
+                         * all filter-specific data was received.
+                         */
+                        final ClientManager clientManager = clientManagerMap
+                                .remove(future);
+                        assert future != null;
+                        if (future.isCancelled()) {
+                            logger.debug("Cancelled: {}", clientManager);
+                        }
+                        else {
+                            try {
+                                future.get();
+                                // All filter-specific data was received
+                            }
+                            catch (final ExecutionException e) {
+                                final Throwable cause = e.getCause();
+                                if (cause instanceof IOException) {
+                                    /*
+                                     * We're not talking about a simple
+                                     * networking error here
+                                     */
+                                    throw new IOException("I/O error: "
+                                            + clientManager, cause);
+                                }
+                                throw new RuntimeException("Unexpected error: "
+                                        + clientManager, cause);
+                            }
+                        }
+                    }
+                }
+            }
+            finally {
+                executorService.shutdownNow();
+                awaitCompletion();
             }
         }
         finally {
-            localServer.cancel();
-            executorService.shutdownNow();
             Thread.currentThread().setName(prevName);
+            logger.trace("Done: {}", this);
         }
         return null;
+    }
+
+    /**
+     * Waits until this instance is running.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     */
+    void waitUntilRunning() throws InterruptedException {
+        localServer.waitUntilRunning();
+        synchronized (this) {
+            for (final ClientManager clientManager : clientManagers) {
+                clientManager.waitUntilRunning();
+            }
+        }
+    }
+
+    /**
+     * Waits until this instance has completed.
+     */
+    void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /**
@@ -216,7 +278,7 @@ final class SinkNode extends AbstractNode {
     @Override
     int getClientCount() {
         int n = 0;
-        synchronized (clientManagers) {
+        synchronized (this) {
             for (final ClientManager clientManager : clientManagers) {
                 n += clientManager.getClientCount();
             }

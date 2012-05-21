@@ -82,12 +82,6 @@ final class Archive {
          * Distributes tracker-specific files via the network.
          */
         private class Distributor extends Thread {
-            /**
-             * The last time an attempt was made to update the files in the
-             * archive.
-             */
-            private ArchiveTime prevUpdateTime = ArchiveTime.BEGINNING_OF_TIME;
-
             @Override
             public void run() {
                 for (;;) {
@@ -98,33 +92,21 @@ final class Archive {
                      * resolution of the archive.
                      */
                     try {
-                        final FilterServerMap topology = topologyLock.take();
-                        final ArchiveTime now = new ArchiveTime();
-
-                        if (prevUpdateTime.compareTo(now) >= 0) {
-                            logger.debug(
-                                    "Topology-file not distributed because it's not sufficiently new: {}",
-                                    topologyArchivePath);
+                        final Topology topology = topologyLock.take();
+                        try {
+                            if (!topologyFile.set(topology)) {
+                                logger.debug(
+                                        "Topology-file not distributed because it's not sufficiently new: {}",
+                                        topologyFile.getArchivePath());
+                            }
                         }
-                        else {
-                            try {
-                                archive.save(topologyArchivePath, topology);
-                            }
-                            catch (final FileAlreadyExistsException e) {
-                                logger.error(
-                                        "The topology file was created by another thread!",
-                                        e);
-                            }
-                            catch (final IOException e) {
-                                logger.error("Couldn't save network topology",
-                                        e);
-                            }
-                            prevUpdateTime = new ArchiveTime(); // ensures later
+                        catch (final IOException e) {
+                            logger.error("Couldn't save network topology", e);
                         }
                     }
                     catch (final InterruptedException e) {
                         logger.error(
-                                "This thread shouldn't have been interrupted",
+                                "This thread should not have been interrupted",
                                 e);
                     }
                     catch (final Throwable t) {
@@ -135,38 +117,154 @@ final class Archive {
         }
 
         /**
+         * A distributed tracker file.
+         * <p>
+         * Instances are thread-safe.
+         * 
+         * @author Steven R. Emmerson
+         */
+        private class DistributedFile<T extends Serializable> {
+            private final ArchivePath path;
+            private final Class<T>    type;
+            private ArchiveTime       archiveTime = ArchiveTime.BEGINNING_OF_TIME;
+            private T                 object;
+
+            /**
+             * Constructs from the archive pathname of the associated file.
+             * 
+             * @param path
+             *            The archive pathname of the associated file.
+             * @throws IllegalArgumentException
+             *             if the pathname is {@code null}
+             */
+            DistributedFile(final ArchivePath path, final Class<T> type) {
+                if (path == null) {
+                    throw new NullPointerException();
+                }
+                this.path = path;
+                if (type == null) {
+                    throw new NullPointerException();
+                }
+                this.type = type;
+            }
+
+            /**
+             * Returns the archive pathname of the associated file.
+             * 
+             * @return the archive pathname of the associated file.
+             */
+            ArchivePath getArchivePath() {
+                return path;
+            }
+
+            /**
+             * Returns the archive time of the associated file.
+             * 
+             * @return the archive time of the associated file.
+             */
+            synchronized ArchiveTime getArchiveTime() {
+                return archiveTime;
+            }
+
+            /**
+             * Returns the object associated with this instance. Might modify
+             * the value returned by {@link #getArchiveTime()}. If the object
+             * hasn't changed since the previous invocation of this method, then
+             * the same object is returned.
+             * 
+             * @return the object associated with this instance.
+             * @throws ClassCastException
+             *             if the type of the object in the associated file is
+             *             incorrect
+             * @throws NoSuchFileException
+             *             if the file doesn't exist in the archive.
+             * @throws IOException
+             *             if an I/O error occurs.
+             */
+            synchronized T get() throws NoSuchFileException, IOException {
+                final ArchiveTime updateTime = archive.getArchiveTime(path);
+                if (archiveTime.compareTo(updateTime) < 0) {
+                    try {
+                        object = type.cast(archive.restore(path, type));
+                        archiveTime = updateTime;
+                    }
+                    catch (final ClassNotFoundException e) {
+                        throw (ClassCastException) new ClassCastException(
+                                "File-object has unknown type").initCause(e);
+                    }
+                    catch (final ClassCastException e) {
+                        throw (ClassCastException) new ClassCastException(
+                                "File-object isn't type "
+                                        + type.getSimpleName()).initCause(e);
+                    }
+                    catch (final FileNotFoundException e) {
+                        throw new NoSuchFileException(e.getLocalizedMessage());
+                    }
+                }
+                return object;
+            }
+
+            /**
+             * Saves an object in the associated file if and only if the
+             * archive-time of the file is further in the past than the temporal
+             * resolution of the archive.
+             * 
+             * @param object
+             *            The object to be saved
+             * @return {@code true} if and only if the object was written to the
+             *         file
+             * @throws IOException
+             *             if an I/O error occurs
+             * @throws FileSystemException
+             *             if too many files are open. This exception will be
+             *             thrown only after all open, segmented archive-files
+             *             in the associated archive have been closed.
+             */
+            synchronized boolean set(final T object)
+                    throws FileSystemException, IOException {
+                final ArchiveTime now = new ArchiveTime();
+                if (archiveTime.compareTo(now) < 0) {
+                    archive.save(path, object);
+                    archiveTime = archive.getArchiveTime(path);
+                    this.object = object;
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        /**
          * The data archive.
          */
-        private final Archive                     archive;
+        private final Archive                            archive;
         /**
-         * The archive-pathname of the network topology file.
+         * The distributed topology file.
          */
-        private final ArchivePath                 topologyArchivePath;
+        private final DistributedFile<Topology>   topologyFile;
         /**
-         * The absolute pathname of the network topology file.
+         * The distributed reporting address file.
          */
-        private final Path                        topologyAbsolutePath;
+        private final DistributedFile<InetSocketAddress> reportingAddressFile;
         /**
          * The object-lock for distributing the topology. NB: This is a
          * single-element, discarding queue rather than a Hoare monitor.
          */
-        private final ObjectLock<FilterServerMap> topologyLock      = new ObjectLock<FilterServerMap>();
+        private final ObjectLock<Topology>        topologyLock      = new ObjectLock<Topology>();
         /**
          * Distributes tracker-specific files via the network.
          */
         @GuardedBy("this")
-        private final Thread                      distributor       = new Distributor();
+        private final Thread                             distributor       = new Distributor();
         /**
          * The time when the network topology file in the archive was last
          * updated via the network.
          */
         @GuardedBy("this")
-        private ArchiveTime                       networkUpdateTime = ArchiveTime.BEGINNING_OF_TIME;
+        private final ArchiveTime                        networkUpdateTime = ArchiveTime.BEGINNING_OF_TIME;
         /**
-         * The network topology obtained via the network.
+         * The archive pathname of the distributed, tracker-specific directory
          */
-        @GuardedBy("this")
-        private FilterServerMap                   topologyFromNetwork;
+        private final ArchivePath                        trackerPath;
 
         /**
          * Constructs from the data archive and the address of the source-node's
@@ -188,12 +286,17 @@ final class Archive {
             String packageName = packagePath.substring(packagePath
                     .lastIndexOf('.') + 1);
             packageName = packageName.toUpperCase();
-            final ArchivePath path = new ArchivePath(Paths.get(
-                    trackerAddress.getHostString() + "-"
-                            + trackerAddress.getPort()).resolve(
-                    "FilterServerMap"));
-            topologyArchivePath = archive.getAdminDir().resolve(path);
-            topologyAbsolutePath = archive.resolve(topologyArchivePath);
+            trackerPath = archive.getAdminDir().resolve(
+                    new ArchivePath(Paths.get(trackerAddress.getHostString()
+                            + "-" + trackerAddress.getPort())));
+            final ArchivePath topologyArchivePath = trackerPath
+                    .resolve("topology");
+            topologyFile = new DistributedFile<Topology>(
+                    topologyArchivePath, Topology.class);
+            final ArchivePath reportingAddressArchivePath = trackerPath
+                    .resolve("reportingAddress");
+            reportingAddressFile = new DistributedFile<InetSocketAddress>(
+                    reportingAddressArchivePath, InetSocketAddress.class);
         }
 
         /**
@@ -204,7 +307,7 @@ final class Archive {
          *         tracker-specific network topology information.
          */
         ArchivePath getTopologyArchivePath() {
-            return topologyArchivePath;
+            return topologyFile.getArchivePath();
         }
 
         /**
@@ -217,8 +320,8 @@ final class Archive {
          * @throws IOException
          *             if an I/O error occurs.
          */
-        synchronized ArchiveTime getTopologyArchiveTime() throws IOException {
-            return networkUpdateTime;
+        ArchiveTime getTopologyArchiveTime() throws IOException {
+            return topologyFile.getArchiveTime();
         }
 
         /**
@@ -234,33 +337,24 @@ final class Archive {
          * @throws IOException
          *             if an I/O error occurs.
          */
-        synchronized FilterServerMap getTopology() throws NoSuchFileException,
+        Topology getTopology() throws NoSuchFileException, IOException {
+            return topologyFile.get();
+        }
+
+        /**
+         * Returns the Internet socket address for reporting unavailable
+         * servers.
+         * 
+         * @return the Internet socket address for reporting unavailable
+         *         servers.
+         * @throws IOException
+         *             if an I/O error occurs
+         * @throws NoSuchFileException
+         *             if the associated, distributed tracker file doesn't exist
+         */
+        InetSocketAddress getReportingAddress() throws NoSuchFileException,
                 IOException {
-            final ArchiveTime updateTime = new ArchiveTime(topologyAbsolutePath);
-            if (networkUpdateTime.compareTo(updateTime) < 0) {
-                try {
-                    /*
-                     * If the data is updated before the time, then an older
-                     * version might not be updated if a newer version arrives
-                     * between those two actions.
-                     */
-                    topologyFromNetwork = (FilterServerMap) archive.restore(
-                            topologyArchivePath, FilterServerMap.class);
-                    networkUpdateTime = updateTime;
-                }
-                catch (final ClassNotFoundException e) {
-                    throw (IOException) new IOException(
-                            "Invalid filter/server map type").initCause(e);
-                }
-                catch (final ClassCastException e) {
-                    throw (IOException) new IOException(
-                            "Invalid filter/server map type").initCause(e);
-                }
-                catch (final FileNotFoundException e) {
-                    throw new NoSuchFileException(e.getLocalizedMessage());
-                }
-            }
-            return topologyFromNetwork;
+            return reportingAddressFile.get();
         }
 
         /**
@@ -275,7 +369,7 @@ final class Archive {
          * @throws NullPointerException
          *             if {@code topology == null}.
          */
-        void distribute(final FilterServerMap topology) {
+        void distribute(final Topology topology) {
             if (topology == null) {
                 throw new NullPointerException();
             }
@@ -295,12 +389,31 @@ final class Archive {
         }
 
         /**
-         * Returns the data-filter that matches the filter/server map.
+         * Distributes the Internet socket address for reporting server
+         * unavailability.
          * 
-         * @return the data-filter that matches the filter/server map.
+         * @param reportingAddress
+         *            The Internet socket address for reporting server
+         *            unavailability
+         * @throws FileSystemException
+         *             if too many files are open
+         * @throws IOException
+         *             if an I/O error occurs.
          */
-        Filter getFilterServerMapFilter() {
-            return Filter.getInstance(topologyArchivePath.toString());
+        void distribute(final InetSocketAddress reportingAddress)
+                throws FileSystemException, IOException {
+            reportingAddressFile.set(reportingAddress);
+        }
+
+        /**
+         * Returns the data-filter that matches all the distributed,
+         * tracker-specific files.
+         * 
+         * @return the data-filter that matches all the distributed tracker
+         *         files.
+         */
+        Filter getFilter() {
+            return Filter.getInstance(trackerPath.toString());
         }
 
         /*
@@ -397,70 +510,62 @@ final class Archive {
          */
         FileWatcher(final Server server) throws IOException,
                 InterruptedException {
-            final String origThreadName = Thread.currentThread().getName();
-            Thread.currentThread().setName(toString());
             this.server = server;
+            if (null == server) {
+                throw new NullPointerException();
+            }
+            watchService = rootDir.getFileSystem().newWatchService();
             try {
-                if (null == server) {
-                    throw new NullPointerException();
-                }
-                watchService = rootDir.getFileSystem().newWatchService();
-                try {
-                    registerAll(rootDir);
-                    for (;;) {
-                        final WatchKey key = watchService.take();
-                        for (final WatchEvent<?> event : key.pollEvents()) {
-                            final WatchEvent.Kind<?> kind = event.kind();
-                            if (kind == StandardWatchEventKinds.OVERFLOW) {
-                                logger.error(
-                                        "Couldn't keep-up watching file-tree rooted at \"{}\"",
-                                        rootDir);
-                            }
-                            else {
-                                final Path name = (Path) event.context();
-                                Path path = dirs.get(key);
-                                path = path.resolve(name);
-                                if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
-                                    try {
-                                        newFile(path);
-                                    }
-                                    catch (final NoSuchFileException e) {
-                                        // The file was just deleted
-                                        logger.debug(
-                                                "New file was just deleted: {}",
-                                                path);
-                                    }
-                                    catch (final IOException e) {
-                                        logger.error("Error with new file "
-                                                + path, e);
-                                    }
-                                }
-                                else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-                                    try {
-                                        removedFile(path);
-                                    }
-                                    catch (final IOException e) {
-                                        logger.error(
-                                                "Error with removed file \""
-                                                        + path + "\"", e);
-                                    }
-                                }
-                            }
+                registerAll(rootDir);
+                for (;;) {
+                    final WatchKey key = watchService.take();
+                    for (final WatchEvent<?> event : key.pollEvents()) {
+                        final WatchEvent.Kind<?> kind = event.kind();
+                        if (kind == StandardWatchEventKinds.OVERFLOW) {
+                            logger.error(
+                                    "Couldn't keep-up watching file-tree rooted at \"{}\"",
+                                    rootDir);
                         }
-                        if (!key.reset()) {
-                            final Path dir = dirs.remove(key);
-                            if (null != dir) {
-                                keys.remove(dir);
+                        else {
+                            final Path name = (Path) event.context();
+                            Path path = dirs.get(key);
+                            path = path.resolve(name);
+                            if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
+                                try {
+                                    newFile(path);
+                                }
+                                catch (final NoSuchFileException e) {
+                                    // The file was just deleted
+                                    logger.debug(
+                                            "New file was just deleted: {}",
+                                            path);
+                                }
+                                catch (final IOException e) {
+                                    logger.error("Error with new file " + path,
+                                            e);
+                                }
+                            }
+                            else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
+                                try {
+                                    removedFile(path);
+                                }
+                                catch (final IOException e) {
+                                    logger.error("Error with removed file \""
+                                            + path + "\"", e);
+                                }
                             }
                         }
                     }
-                }
-                finally {
-                    watchService.close();
+                    if (!key.reset()) {
+                        final Path dir = dirs.remove(key);
+                        if (null != dir) {
+                            keys.remove(dir);
+                        }
+                    }
                 }
             }
             finally {
-                Thread.currentThread().setName(origThreadName);
+                watchService.close();
             }
         }
 
@@ -480,12 +585,12 @@ final class Archive {
                     BasicFileAttributes.class);
             if (attributes.isDirectory()) {
                 registerAll(path);
-                walkDirectory(path, new FilePieceSpecSetConsumer() {
-                    @Override
-                    public void consume(final FilePieceSpecSet spec) {
-                        server.newData(spec);
-                    }
-                }, Filter.EVERYTHING);
+                /*
+                 * walkDirectory(path, new FilePieceSpecSetConsumer() {
+                 * 
+                 * @Override public void consume(final FilePieceSpecSet spec) {
+                 * server.newData(spec); } }, Filter.EVERYTHING);
+                 */
             }
             else if (attributes.isRegularFile()) {
                 ArchiveTime.adjustTime(path);
@@ -503,6 +608,7 @@ final class Archive {
                     fileInfo = new FileInfo(fileId, attributes.size(),
                             PIECE_SIZE);
                 }
+                logger.trace("New file: {}", path);
                 server.newData(FilePieceSpecSet.newInstance(fileInfo, true));
             }
         }
@@ -877,11 +983,11 @@ final class Archive {
                     try {
                         Files.createDirectories(newPath.getParent());
                         try {
+                            logger.debug("Revealing file: {}", newPath);
                             Files.move(path, newPath,
                                     StandardCopyOption.ATOMIC_MOVE,
                                     StandardCopyOption.REPLACE_EXISTING);
                             path = newPath;
-                            logger.debug("Newly-visible file: {}", path);
                             break;
                         }
                         catch (final NoSuchFileException e) {
@@ -2409,15 +2515,12 @@ final class Archive {
      *            The object to be saved in the file.
      * @throws FileSystemException
      *             if too many files are open
-     * @throws FileInfoMismatchException
-     *             if the given file information is inconsistent with an
-     *             existing archive file
      * @throws IOException
      *             if an I/O error occurs.
      */
     private void save(final ArchivePath archivePath,
-            final Serializable serializable) throws FileAlreadyExistsException,
-            FileSystemException, IOException, FileInfoMismatchException {
+            final Serializable serializable) throws FileSystemException,
+            IOException {
         final byte[] bytes = Util.serialize(serializable);
         final InputStream inputStream = new ByteArrayInputStream(bytes);
         final ReadableByteChannel channel = Channels.newChannel(inputStream);
@@ -2455,15 +2558,12 @@ final class Archive {
      *            The channel from which to read the data for the file.
      * @throws FileSystemException
      *             if too many files are open
-     * @throws FileInfoMismatchException
-     *             if the file information conflicts with an existing archive
-     *             file.
      * @throws IOException
      *             if an I/O error occurs, including insufficient data in the
      *             channel
      */
     void save(final ArchivePath path, final ReadableByteChannel channel)
-            throws FileSystemException, FileInfoMismatchException, IOException {
+            throws FileSystemException, IOException {
         save(path, channel, -1);
     }
 
@@ -2479,15 +2579,11 @@ final class Archive {
      *            means indefinitely.
      * @throws FileSystemException
      *             if too many files are open
-     * @throws FileInfoMismatchException
-     *             if the file information conflicts with an existing archive
-     *             file.
      * @throws IOException
      *             if an I/O error occurs
      */
     void save(final ArchivePath archivePath, final ReadableByteChannel channel,
-            final int timeToLive) throws FileSystemException,
-            FileInfoMismatchException, IOException {
+            final int timeToLive) throws FileSystemException, IOException {
         final BulkArchiveFile file = archiveFileManager
                 .getForWriting(archivePath);
         boolean success = false;
@@ -2540,8 +2636,9 @@ final class Archive {
             try {
                 final Object obj = ois.readObject();
                 if (!type.isInstance(obj)) {
-                    throw new ClassCastException("expected=" + type
-                            + ", actual=" + obj.getClass());
+                    throw new ClassCastException("expected="
+                            + type.getSimpleName() + ", actual="
+                            + obj.getClass());
                 }
                 success = true;
                 return obj;

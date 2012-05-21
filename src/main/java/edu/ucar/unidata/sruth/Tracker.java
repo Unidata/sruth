@@ -10,6 +10,7 @@ import java.beans.PropertyChangeSupport;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
+import java.net.BindException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -19,7 +20,12 @@ import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -40,7 +46,7 @@ import org.slf4j.Logger;
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class Tracker extends UninterruptibleTask<Void> {
+final class Tracker implements Callable<Void> {
     /**
      * Checks the status of servers.
      * <p>
@@ -92,6 +98,9 @@ final class Tracker extends UninterruptibleTask<Void> {
              */
             @Override
             public Void call() {
+                logger.trace("Starting up: {}", this);
+                final String origThreadName = Thread.currentThread().getName();
+                Thread.currentThread().setName("Server-checker");
                 try {
                     connection.open();
                     logger.debug("Connection to server succeeded: {}",
@@ -99,8 +108,12 @@ final class Tracker extends UninterruptibleTask<Void> {
                     connection.close();
                 }
                 catch (final IOException e) {
-                    filterServerMap.remove(serverAddress);
+                    topology.remove(serverAddress);
                     logger.debug("Removed server: {}", serverAddress);
+                }
+                finally {
+                    Thread.currentThread().setName(origThreadName);
+                    logger.trace("Done: {}", this);
                 }
                 return null;
             }
@@ -108,6 +121,16 @@ final class Tracker extends UninterruptibleTask<Void> {
             @Override
             protected void stop() {
                 connection.close();
+            }
+
+            /*
+             * (non-Javadoc)
+             * 
+             * @see java.lang.Object#toString()
+             */
+            @Override
+            public String toString() {
+                return "ServerChecker [serverAddress=" + serverAddress + "]";
             }
         }
 
@@ -126,22 +149,38 @@ final class Tracker extends UninterruptibleTask<Void> {
         private final DatagramSocket     socket;
 
         /**
-         * Constructs from nothing. Opens a UDP socket next to the tracker's TCP
-         * socket (i.e., same port, different protocol).
+         * Constructs from nothing. Opens a UDP socket.
          * 
          * @throws SocketException
          *             if a UDP socket couldn't be created.
          */
         ServerCheckerTask() throws SocketException {
-            final InetSocketAddress serverAddress = getServerAddress();
+            /*
+             * Create an Internet socket address that uses the tracker's
+             * Internet address but an ephemeral port number.
+             */
+            final InetSocketAddress reportingAddress = new InetSocketAddress(
+                    getServerAddress().getAddress(), 0);
             /*
              * Create a UDP socket.
              */
-            socket = new DatagramSocket(serverAddress);
+            socket = new DatagramSocket(reportingAddress);
+        }
+
+        /**
+         * Returns the Internet socket address on which this instance listens.
+         * 
+         * @return The Internet socket address
+         */
+        InetSocketAddress getInetSocketAddress() {
+            return (InetSocketAddress) socket.getLocalSocketAddress();
         }
 
         @Override
         public Void call() throws IOException {
+            logger.trace("Starting up: {}", this);
+            final String origThreadName = Thread.currentThread().getName();
+            Thread.currentThread().setName(this.toString());
             final byte[] packetBuf = new byte[2048];
             final DatagramPacket packet = new DatagramPacket(packetBuf,
                     packetBuf.length);
@@ -190,6 +229,8 @@ final class Tracker extends UninterruptibleTask<Void> {
                 }
                 catch (final Exception ignored) {
                 }
+                Thread.currentThread().setName(origThreadName);
+                logger.trace("Done: {}", this);
             }
             return null;
         }
@@ -197,6 +238,92 @@ final class Tracker extends UninterruptibleTask<Void> {
         @Override
         protected void stop() {
             socket.close();
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "ServerCheckerTask []";
+        }
+    }
+
+    /**
+     * Accepts and handles connections on the tracker socket
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    private final class Accepter extends UninterruptibleTask<Void> {
+        /**
+         * Executes each task for a single sink-node.
+         */
+        private final CancellingExecutor trackerletExecutor = new CancellingExecutor(
+                                                                    0,
+                                                                    25,
+                                                                    60,
+                                                                    TimeUnit.SECONDS,
+                                                                    new SynchronousQueue<Runnable>());
+
+        @Override
+        public Void call() throws InterruptedException, IOException {
+            logger.trace("Starting up: {}", this);
+            try {
+                Thread.currentThread().setName("Tracker-accepter");
+                while (!trackerletExecutor.isShutdown()) {
+                    // TODO: limit number of outstanding trackerlets
+                    final Socket socket = trackerSocket.accept();
+                    final Trackerlet trackerlet = new Trackerlet(socket);
+                    try {
+                        trackerletExecutor.submit(trackerlet);
+                    }
+                    catch (final Throwable e) {
+                        try {
+                            socket.close();
+                        }
+                        catch (final IOException ignored) {
+                        }
+                        if (!trackerletExecutor.isShutdown()) {
+                            throw new RuntimeException("Unexpected error", e);
+                        }
+                    }
+                }
+            }
+            finally {
+                trackerletExecutor.shutdownNow();
+                Thread.interrupted();
+                trackerletExecutor.awaitTermination(Long.MAX_VALUE,
+                        TimeUnit.DAYS);
+                logger.trace("Done: {}", this);
+            }
+            return null;
+        }
+
+        @Override
+        protected void stop() {
+            trackerletExecutor.shutdownNow();
+            try {
+                trackerSocket.close();
+            }
+            catch (final IOException e) {
+                if (!trackerSocket.isClosed()) {
+                    logger.error("Couldn't close tracker's server-socket", e);
+                }
+            }
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "Accepter []";
         }
     }
 
@@ -353,12 +480,12 @@ final class Tracker extends UninterruptibleTask<Void> {
      */
     private static final String         NETWORK_TOPOLOGY_PROPERTY_NAME = "Network Topology";
     /**
-     * Executes each task for a single sink-node.
+     * The executor service
      */
-    private final CancellingExecutor    trackerletExecutor             = new CancellingExecutor(
+    private final CancellingExecutor    executor                       = new CancellingExecutor(
+                                                                               2,
+                                                                               2,
                                                                                0,
-                                                                               25,
-                                                                               60,
                                                                                TimeUnit.SECONDS,
                                                                                new SynchronousQueue<Runnable>());
     /**
@@ -369,7 +496,7 @@ final class Tracker extends UninterruptibleTask<Void> {
      * The filter/servers map.
      */
     @GuardedBy("this")
-    private final FilterServerMap       filterServerMap                = new FilterServerMap();
+    private final Topology       topology                = new Topology();
     /**
      * Information on the source-server.
      */
@@ -379,11 +506,9 @@ final class Tracker extends UninterruptibleTask<Void> {
      */
     private final PropertyChangeSupport propertySupport;
     /**
-     * The "isRunning" and "isStopped" latches.
+     * The "isRunning" latch.
      */
     private final CountDownLatch        isRunningLatch                 = new CountDownLatch(
-                                                                               1);
-    private final CountDownLatch        isStoppedLatch                 = new CountDownLatch(
                                                                                1);
     /**
      * The task that checks whether a server is offline.
@@ -391,34 +516,14 @@ final class Tracker extends UninterruptibleTask<Void> {
     private final ServerCheckerTask     serverCheckerTask;
 
     /**
-     * The minimum and maximum port numbers to use.
+     * The IANA-assigned port-number for the tracker
      */
-    private static final int            MIN_PORT;
-    private static final int            MAX_PORT;
-    private static final String         MIN_PORT_KEY                   = "tracker minimum port number";
-    private static final String         MAX_PORT_KEY                   = "tracker maximum port number";
-    private static final int            MIN_PORT_DEFAULT               = 38800;
-    private static final int            MAX_PORT_DEFAULT               = 38800;
-
-    static {
-        final Preferences prefs = Preferences.userNodeForPackage(Server.class);
-
-        MIN_PORT = prefs.getInt(MIN_PORT_KEY, MIN_PORT_DEFAULT);
-        MAX_PORT = prefs.getInt(MAX_PORT_KEY, MAX_PORT_DEFAULT);
-        if (MIN_PORT < PortNumberSet.MIN_PORT_NUMBER
-                || MIN_PORT > PortNumberSet.MAX_PORT_NUMBER
-                || MAX_PORT < PortNumberSet.MIN_PORT_NUMBER
-                || MAX_PORT > PortNumberSet.MAX_PORT_NUMBER
-                || MIN_PORT > MAX_PORT) {
-            throw new IllegalArgumentException("Invalid preferences: \""
-                    + MIN_PORT_KEY + "\"=" + MIN_PORT + ", \"" + MAX_PORT_KEY
-                    + "\"=" + MAX_PORT);
-        }
-    }
+    public static final int             IANA_PORT                      = 38800;
 
     /**
      * Constructs from information on the source-server. The tracker will listen
-     * on an ephemeral port of the local host's IP address.
+     * on its IANA-assigned port and the local host's IP address (as returned by
+     * {@link InetAddress#getLocalHost()}).
      * 
      * @param sourceServer
      *            Address of the source-server.
@@ -433,43 +538,45 @@ final class Tracker extends UninterruptibleTask<Void> {
      */
     Tracker(final InetSocketAddress sourceServer) throws UnknownHostException,
             IOException {
-        this(sourceServer, new InetSocketAddressSet(InetAddress.getLocalHost(),
-                null));
+        this(sourceServer, new InetSocketAddress(InetAddress.getLocalHost(),
+                IANA_PORT));
     }
 
     /**
-     * Constructs from information on the source-server and the set of candidate
+     * Constructs from the Internet socket address of the source-server and the
      * Internet socket address for the tracker.
      * 
      * @param sourceServer
-     *            Address of the source-server.
-     * @param inetSockAddrSet
-     *            The set of candidate Internet socket addresses for the
-     *            tracker.
+     *            The Internet socket address of the source-server.
+     * @param trackerSocketAddress
+     *            The Internet socket address for the tracker.
+     * @throws BindException
+     *             if the tracker socket couldn't be bound to the given Internet
+     *             socket address
+     * @throws SocketException
+     *             if the {@code SO_REUSEADDR} option on the tracker socket
+     *             couldn't be set
      * @throws IOException
-     *             if a server socket can't be created.
+     *             if a socket for the tracker couldn't be created
      * @throws NullPointerException
      *             if {@code sourceServer == null}.
      * @throws NullPointerException
      *             if {@code inetSockAddrSet == null}.
      */
     Tracker(final InetSocketAddress sourceServer,
-            final InetSocketAddressSet inetSockAddrSet) throws IOException {
+            final InetSocketAddress trackerSocketAddress) throws BindException,
+            SocketException, IOException {
         if (sourceServer == null) {
             throw new NullPointerException();
         }
-        if (inetSockAddrSet == null) {
+        if (trackerSocketAddress == null) {
             throw new NullPointerException();
         }
         trackerSocket = new ServerSocket();
-        trackerSocket.setReuseAddress(true);
-        filterServerMap.add(Filter.EVERYTHING, sourceServer);
         try {
-            if (!inetSockAddrSet.bind(trackerSocket)) {
-                throw new IOException(
-                        "Couldn't find unused port for tracker in "
-                                + inetSockAddrSet);
-            }
+            trackerSocket.setReuseAddress(true);
+            trackerSocket.bind(trackerSocketAddress);
+            topology.add(Filter.EVERYTHING, sourceServer);
             this.sourceServer = sourceServer;
             propertySupport = new PropertyChangeSupport(this);
             serverCheckerTask = new ServerCheckerTask();
@@ -479,10 +586,10 @@ final class Tracker extends UninterruptibleTask<Void> {
             try {
                 trackerSocket.close();
             }
-            catch (final Throwable t) {
-                logger.error("Couldn't close the tracker's socket", t);
+            catch (final IOException ignored) {
             }
-            throw e;
+            throw new IOException("Couldn't bind tracker socket to "
+                    + trackerSocketAddress + ": " + e.toString());
         }
     }
 
@@ -498,63 +605,75 @@ final class Tracker extends UninterruptibleTask<Void> {
     }
 
     /**
-     * Executes this instance. Completes normally if and only if the current
-     * thread is interrupted. Closes the tracker socket.
+     * Returns the Internet socket address for reporting unavailable servers.
      * 
-     * @throws IOException
-     *             if an I/O error occurs.
+     * @return The Internet socket address for reporting unavailable servers.
      */
-    public Void call() throws IOException {
+    InetSocketAddress getReportingAddress() {
+        return serverCheckerTask.getInetSocketAddress();
+    }
+
+    /**
+     * Executes this instance. Completes normally if and only if the current
+     * thread is interrupted.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     * @throws IOException
+     *             if a serious I/O error occurs
+     */
+    public Void call() throws InterruptedException, IOException {
+        logger.trace("Starting up: {}", this);
         final String origThreadName = Thread.currentThread().getName();
         Thread.currentThread().setName(toString());
-        new Thread("ServerCheckerThread") {
-            @Override
-            public void run() {
-                try {
-                    serverCheckerTask.call();
-                }
-                catch (final Exception e) {
-                    logger.error("Server-checker thread died", e);
-                }
-                finally {
-                    Tracker.this.stop();
+        try {
+            final CompletionService<Void> completionService = new ExecutorCompletionService<Void>(
+                    executor);
+            final Future<Void> checkerFuture = completionService
+                    .submit(serverCheckerTask);
+            try {
+                final Accepter accepterTask = new Accepter();
+                completionService.submit(accepterTask);
+
+                isRunningLatch.countDown();
+
+                final Future<Void> future = completionService.take();
+                if (!future.isCancelled()) {
+                    try {
+                        future.get();
+                    }
+                    catch (final ExecutionException e) {
+                        final Throwable cause = e.getCause();
+                        final Object task = future == checkerFuture
+                                ? serverCheckerTask
+                                : accepterTask;
+                        if (cause instanceof IOException) {
+                            throw new IOException("I/O error: " + task, cause);
+                        }
+                        throw new RuntimeException("Unexpected error: " + task,
+                                cause);
+                    }
                 }
             }
-        }.start();
-        isRunningLatch.countDown();
-        try {
-            for (;;) {
+            finally {
+                executor.shutdownNow();
+                awaitCompletion();
                 try {
-                    // TODO: limit number of outstanding trackerlets
-                    final Socket socket = trackerSocket.accept();
-                    final Trackerlet trackerlet = new Trackerlet(socket);
-                    try {
-                        trackerletExecutor.submit(trackerlet);
-                    }
-                    catch (final RejectedExecutionException e) {
-                        socket.close();
-                    }
+                    trackerSocket.close();
                 }
                 catch (final IOException e) {
-                    if (!isCancelled()) {
-                        throw e;
+                    if (!trackerSocket.isClosed()) {
+                        logger.error("Couldn't close tracker's server-socket",
+                                e);
                     }
-                    // Implements thread interruption policy
-                    return null;
                 }
             }
         }
         finally {
-            trackerletExecutor.shutdownNow();
-            try {
-                trackerSocket.close();
-            }
-            catch (final IOException e) {
-                logger.error("Couldn't close tracker's server-socket", e);
-            }
             Thread.currentThread().setName(origThreadName);
-            isStoppedLatch.countDown();
+            logger.trace("Done: {}", this);
         }
+        return null;
     }
 
     /**
@@ -567,26 +686,15 @@ final class Tracker extends UninterruptibleTask<Void> {
         isRunningLatch.await();
     }
 
-    @Override
-    protected void stop() {
-        serverCheckerTask.cancel();
-        trackerletExecutor.shutdownNow();
-        try {
-            trackerSocket.close();
-        }
-        catch (final IOException e) {
-            logger.error("Couldn't close tracker's server-socket", e);
-        }
-    }
-
     /**
      * Returns when this instance has released all its resources.
      * 
      * @throws InterruptedException
      *             if the current thread is interrupted.
      */
-    void waitUntilStopped() throws InterruptedException {
-        isStoppedLatch.await();
+    void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /**
@@ -603,9 +711,9 @@ final class Tracker extends UninterruptibleTask<Void> {
      */
     void register(final InetSocketAddress server, final Filter filter)
             throws IOException {
-        filterServerMap.add(filter, server);
+        topology.add(filter, server);
         propertySupport.firePropertyChange(NETWORK_TOPOLOGY_PROPERTY_NAME,
-                null, new FilterServerMap(filterServerMap));
+                null, new Topology(topology));
     }
 
     /**
@@ -632,6 +740,16 @@ final class Tracker extends UninterruptibleTask<Void> {
     }
 
     /**
+     * Returns the current state of the network. The returned object is not a
+     * copy.
+     * 
+     * @return The current state of the network.
+     */
+    Topology getNetwork() {
+        return topology;
+    }
+
+    /**
      * Returns the current, filter-specific, state of the network. The returned
      * object isn't backed-up by this instance. Each server in the returned
      * instance will be able to satisfy, at least, the given filter.
@@ -641,8 +759,8 @@ final class Tracker extends UninterruptibleTask<Void> {
      * 
      * @return The current state of the network.
      */
-    FilterServerMap getNetwork(final Filter filter) {
-        return filterServerMap.subset(filter);
+    Topology getNetwork(final Filter filter) {
+        return topology.subset(filter);
     }
 
     /**

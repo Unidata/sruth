@@ -113,7 +113,10 @@ public class NodeTest {
                 logger.error("Task problem:", t);
             }
             else {
-                if (r instanceof Future<?>) {
+                if (!(r instanceof Future<?>)) {
+                    logger.error("Assertion error: {}", r);
+                }
+                else {
                     try {
                         ((Future<?>) r).get();
                     }
@@ -121,10 +124,10 @@ public class NodeTest {
                         logger.debug("Task was cancelled: {}", r);
                     }
                     catch (final ExecutionException e) {
-                        logger.error("Task threw exception: " + r, e.getCause());
+                        logger.error("Task error: " + r, e);
                     }
                     catch (final InterruptedException e) {
-                        logger.debug("Task was interrupted: {}", r);
+                        logger.error("Assertion error", r);
                         Thread.currentThread().interrupt(); // ignore/reset
                     }
                 }
@@ -219,7 +222,7 @@ public class NodeTest {
         stop(trackerFuture);
         stop(sourceFuture);
 
-        tracker.waitUntilStopped();
+        tracker.awaitCompletion();
 
         File file;
 
