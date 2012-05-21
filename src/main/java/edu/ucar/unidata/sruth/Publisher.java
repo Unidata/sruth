@@ -81,7 +81,7 @@ public final class Publisher implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the root of the file-tree. The tracker
-     * and will listen on its IANA-assigned port and the source-node server will
+     * will listen on its IANA-assigned port and the source-node server will
      * listen on an ephemeral port.
      * 
      * @param rootDir
@@ -130,8 +130,7 @@ public final class Publisher implements Callable<Void> {
         tracker.addNetworkTopologyChangeListener(new PropertyChangeListener() {
             @Override
             public void propertyChange(final PropertyChangeEvent evt) {
-                distributedTrackerFiles.distribute((Topology) evt
-                        .getNewValue());
+                distributedTrackerFiles.distribute((Topology) evt.getNewValue());
             }
         });
         distributedTrackerFiles.distribute(tracker.getReportingAddress());
