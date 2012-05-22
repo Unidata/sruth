@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 import org.junit.After;
@@ -26,6 +28,7 @@ import org.junit.Test;
  * @author Steven R. Emmerson
  */
 public class ProcessorTest {
+    private ExecutorService executor;
 
     /**
      * @throws java.lang.Exception
@@ -46,6 +49,7 @@ public class ProcessorTest {
      */
     @Before
     public void setUp() throws Exception {
+        executor = Executors.newCachedThreadPool();
     }
 
     /**
@@ -53,6 +57,7 @@ public class ProcessorTest {
      */
     @After
     public void tearDown() throws Exception {
+        executor.shutdownNow();
     }
 
     /**
@@ -92,11 +97,13 @@ public class ProcessorTest {
         final Action action = new FileAction(destDir.toString() + "/$1");
         final Pattern pattern = Pattern.compile("(.*)");
         processor.add(pattern, action);
+        executor.submit(processor);
         final FileInfo fileInfo = new FileInfo(
                 new FileId(new ArchivePath(name)), (Long) Files.getAttribute(
                         srcDir.resolve(name), "size"));
         final DataProduct dataProduct = new DataProduct(srcDir, fileInfo);
         assertTrue(processor.offer(dataProduct));
+        Thread.sleep(500);
         assertTrue(Files.exists(destDir.resolve(name)));
         final int status = Misc.system("cmp", srcDir.resolve(name).toString(),
                 destDir.resolve(name).toString());

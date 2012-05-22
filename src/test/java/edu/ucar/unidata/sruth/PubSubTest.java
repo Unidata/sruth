@@ -281,6 +281,7 @@ public class PubSubTest {
         final List<Future<Void>> subFutures = new LinkedList<Future<Void>>();
         for (final Subscriber subscriber : subscribers) {
             subFutures.add(start(subscriber));
+            subscriber.waitUntilRunning();
         }
 
         Thread.sleep(sleepAmount);
@@ -349,6 +350,7 @@ public class PubSubTest {
         final List<Future<Void>> subFutures = new LinkedList<Future<Void>>();
         for (final Subscriber subscriber : subscribers) {
             subFutures.add(start(subscriber));
+            subscriber.waitUntilRunning();
         }
 
         Thread.sleep(sleepAmount);
@@ -364,7 +366,8 @@ public class PubSubTest {
         pubFuture = start(publisher);
         publisher.waitUntilRunning();
 
-        Thread.sleep(sleepAmount);
+        // Give the subscribers sufficient time to notice the new publisher
+        Thread.sleep(4 * sleepAmount);
 
         /*
          * Publish some more files.

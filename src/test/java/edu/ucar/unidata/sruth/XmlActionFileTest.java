@@ -15,6 +15,8 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -28,6 +30,8 @@ import org.junit.Test;
  * @author Steven R. Emmerson
  */
 public class XmlActionFileTest {
+
+    private ExecutorService executor;
 
     /**
      * @throws java.lang.Exception
@@ -48,6 +52,7 @@ public class XmlActionFileTest {
      */
     @Before
     public void setUp() throws Exception {
+        executor = Executors.newCachedThreadPool();
     }
 
     /**
@@ -55,6 +60,7 @@ public class XmlActionFileTest {
      */
     @After
     public void tearDown() throws Exception {
+        executor.shutdownNow();
     }
 
     @Test(expected = NullPointerException.class)
@@ -87,6 +93,7 @@ public class XmlActionFileTest {
                         + destDir.toString() + "/$1\"/>" + "</entry>"
                         + "</actions>");
         assertNotNull(processor);
+        executor.submit(processor);
         // Set up the source and destination
         final Path srcDir = Paths.get("/home/steve");
         final Path name = Paths.get(".shrc");
@@ -100,6 +107,7 @@ public class XmlActionFileTest {
         final DataProduct dataProduct = new DataProduct(srcDir, fileInfo);
         // Process the data-product
         assertTrue(processor.offer(dataProduct));
+        Thread.sleep(200);
         assertTrue(Files.exists(destPath));
         final int status = Misc.system("cmp", srcPath.toString(),
                 destPath.toString());

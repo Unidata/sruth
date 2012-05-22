@@ -240,7 +240,7 @@ final class Archive {
         /**
          * The distributed topology file.
          */
-        private final DistributedFile<Topology>   topologyFile;
+        private final DistributedFile<Topology>          topologyFile;
         /**
          * The distributed reporting address file.
          */
@@ -249,7 +249,7 @@ final class Archive {
          * The object-lock for distributing the topology. NB: This is a
          * single-element, discarding queue rather than a Hoare monitor.
          */
-        private final ObjectLock<Topology>        topologyLock      = new ObjectLock<Topology>();
+        private final ObjectLock<Topology>               topologyLock      = new ObjectLock<Topology>();
         /**
          * Distributes tracker-specific files via the network.
          */
@@ -291,8 +291,8 @@ final class Archive {
                             + "-" + trackerAddress.getPort())));
             final ArchivePath topologyArchivePath = trackerPath
                     .resolve("topology");
-            topologyFile = new DistributedFile<Topology>(
-                    topologyArchivePath, Topology.class);
+            topologyFile = new DistributedFile<Topology>(topologyArchivePath,
+                    Topology.class);
             final ArchivePath reportingAddressArchivePath = trackerPath
                     .resolve("reportingAddress");
             reportingAddressFile = new DistributedFile<InetSocketAddress>(
@@ -477,7 +477,7 @@ final class Archive {
      * @author Steven R. Emmerson
      */
     @NotThreadSafe
-    private final class FileWatcher {
+    private final class ArchiveWatcher {
         /**
          * Directory watch service.
          */
@@ -508,7 +508,7 @@ final class Archive {
          * @throws NullPointerException
          *             if {@code server == null}.
          */
-        FileWatcher(final Server server) throws IOException,
+        ArchiveWatcher(final Server server) throws IOException,
                 InterruptedException {
             this.server = server;
             if (null == server) {
@@ -573,7 +573,7 @@ final class Archive {
          * Handles the creation of a new file.
          * 
          * @param path
-         *            The pathname of the new file.
+         *            The absolute pathname of the new file.
          * @throws NoSuchFileException
          *             if the file doesn't exist
          * @throws IOException
@@ -650,11 +650,17 @@ final class Archive {
          *             if an I/O error occurs.
          */
         private void register(final Path dir) throws IOException {
-            final WatchKey key = dir.register(watchService,
-                    StandardWatchEventKinds.ENTRY_CREATE,
-                    StandardWatchEventKinds.ENTRY_DELETE);
-            dirs.put(key, dir);
-            keys.put(dir, key);
+            /*
+             * Ensure a one-to-one correspondence between watch keys and
+             * directories.
+             */
+            if (!keys.containsKey(dir)) {
+                final WatchKey key = dir.register(watchService,
+                        StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_DELETE);
+                dirs.put(key, dir);
+                keys.put(dir, key);
+            }
         }
 
         /**
@@ -696,7 +702,7 @@ final class Archive {
          */
         @Override
         public String toString() {
-            return "FileWatcher [rootDir=" + rootDir + "]";
+            return "ArchiveWatcher [rootDir=" + rootDir + "]";
         }
     }
 
@@ -2699,7 +2705,7 @@ final class Archive {
      */
     void watchArchive(final Server server) throws IOException,
             InterruptedException {
-        new FileWatcher(server);
+        new ArchiveWatcher(server);
     }
 
     /**
