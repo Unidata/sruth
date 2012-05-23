@@ -15,7 +15,6 @@ import java.text.DateFormat;
 import java.util.Calendar;
 import java.util.Date;
 
-import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.NotThreadSafe;
 import net.jcip.annotations.ThreadSafe;
 
@@ -216,7 +215,6 @@ final class PathDelayQueue {
     /**
      * The min-heap file that implements the priority queue.
      */
-    @GuardedBy("this")
     private final MinHeapFile<Entry> heap;
 
     /**
@@ -267,9 +265,7 @@ final class PathDelayQueue {
      * @return The number of entries in the queue.
      */
     int size() {
-        /*
-         * Synchronization is unnecessary because the heap is thread-safe.
-         */
+        // Synchronization is unnecessary because "heap" is thread-safe
         return heap.size();
     }
 
@@ -353,7 +349,7 @@ final class PathDelayQueue {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void close() throws IOException {
+    synchronized void close() throws IOException {
         heap.close();
     }
 

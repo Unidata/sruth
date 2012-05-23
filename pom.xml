@@ -5,7 +5,6 @@
     <modelVersion>4.0.0</modelVersion>
 	<groupId>edu.ucar.unidata</groupId>
 	<artifactId>sruth</artifactId>
-	<packaging>jar</packaging>
 	<version>1.0-SNAPSHOT</version>
 	<name>Unidata Sruth Data-Distribution Package</name>
 	<url>http://www.unidata.ucar.edu/projects/sruth</url>

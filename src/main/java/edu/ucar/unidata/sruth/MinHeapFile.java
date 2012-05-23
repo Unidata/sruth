@@ -17,8 +17,9 @@ import java.nio.file.StandardOpenOption;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.Immutable;
-import net.jcip.annotations.NotThreadSafe;
+import net.jcip.annotations.ThreadSafe;
 
 /**
  * A file that implements a persistent minimum-heap (i.e., elements are stored
@@ -28,7 +29,7 @@ import net.jcip.annotations.NotThreadSafe;
  * 
  * @author Steven R. Emmerson
  */
-@NotThreadSafe
+@ThreadSafe
 final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
     /**
      * The element of the heap-file.
@@ -75,10 +76,6 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      */
     private final FileChannel      channel;
     /**
-     * The number of elements in the heap.
-     */
-    private int                    eltCount;
-    /**
      * The type of an element.
      */
     private final Class<T>         type;
@@ -87,13 +84,19 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      */
     private final MappedByteBuffer eltCountBuffer;
     /**
+     * The size of an element.
+     */
+    private final int              eltSize;
+
+    /**
      * The I/O byte-buffer for the elements.
      */
     private MappedByteBuffer       eltsBuffer;
     /**
-     * The size of an element.
+     * The number of elements in the heap.
      */
-    private final int              eltSize;
+    @GuardedBy("this")
+    private int                    eltCount;
 
     /**
      * Constructs from the pathname of the file. The file is created if it
@@ -129,57 +132,59 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
         this.eltSize = eltSize;
         channel = FileChannel.open(path, StandardOpenOption.CREATE,
                 StandardOpenOption.READ, StandardOpenOption.WRITE);
-        /*
-         * The file-header comprise the following parameters in order: version
-         * (4 bytes), eltSize (4 bytes), and eltCount (4 bytes).
-         */
-        if (channel.size() < HEADER_SIZE) {
+        synchronized (this) {
             /*
-             * The header doesn't exist. Create it.
+             * The file-header comprise the following parameters in order:
+             * version (4 bytes), eltSize (4 bytes), and eltCount (4 bytes).
              */
-            ensureFileSize(HEADER_SIZE);
-            final MappedByteBuffer headBuf = channel.map(MapMode.READ_WRITE, 0,
-                    HEADER_SIZE);
-            headBuf.putInt(VERSION);
-            headBuf.putInt(eltSize);
-            eltCountBuffer = channel.map(MapMode.READ_WRITE,
-                    headBuf.position(), 4);
-            eltCount = 0;
-            writeEltCount();
-            headBuf.force();
+            if (channel.size() < HEADER_SIZE) {
+                /*
+                 * The header doesn't exist. Create it.
+                 */
+                ensureFileSize(HEADER_SIZE);
+                final MappedByteBuffer headBuf = channel.map(
+                        MapMode.READ_WRITE, 0, HEADER_SIZE);
+                headBuf.putInt(VERSION);
+                headBuf.putInt(eltSize);
+                eltCountBuffer = channel.map(MapMode.READ_WRITE,
+                        headBuf.position(), 4);
+                eltCount = 0;
+                writeEltCount();
+                headBuf.force();
+            }
+            else {
+                /*
+                 * The header exists. Vet it.
+                 */
+                final ByteBuffer headBuf = channel.map(MapMode.READ_WRITE, 0,
+                        HEADER_SIZE);
+                final int version = headBuf.getInt();
+                if (version != VERSION) {
+                    throw new IllegalStateException(
+                            "Corrupt file: unexpected version: " + version
+                                    + " != " + VERSION);
+                }
+                final int actualEltSize = headBuf.getInt();
+                if (actualEltSize != eltSize) {
+                    throw new IllegalArgumentException(
+                            "Element size inconsistancy: " + actualEltSize
+                                    + " != " + eltSize);
+                }
+                eltCountBuffer = channel.map(MapMode.READ_WRITE,
+                        headBuf.position(), 4);
+                eltCount = eltCountBuffer.getInt();
+                if (eltCount < 0) {
+                    throw new IllegalStateException(
+                            "Corrupt file: negative element count: " + eltCount);
+                }
+                if (channel.size() < HEADER_SIZE + getBufferOffset(eltCount)) {
+                    throw new IOException("Corrupt file: file too small: "
+                            + channel.size() + " < " + HEADER_SIZE
+                            + getBufferOffset(eltCount));
+                }
+            }
+            this.eltsBuffer = getEltsBuffer();
         }
-        else {
-            /*
-             * The header exists. Vet it.
-             */
-            final ByteBuffer headBuf = channel.map(MapMode.READ_WRITE, 0,
-                    HEADER_SIZE);
-            final int version = headBuf.getInt();
-            if (version != VERSION) {
-                throw new IllegalStateException(
-                        "Corrupt file: unexpected version: " + version + " != "
-                                + VERSION);
-            }
-            final int actualEltSize = headBuf.getInt();
-            if (actualEltSize != eltSize) {
-                throw new IllegalArgumentException(
-                        "Element size inconsistancy: " + actualEltSize + " != "
-                                + eltSize);
-            }
-            eltCountBuffer = channel.map(MapMode.READ_WRITE,
-                    headBuf.position(), 4);
-            eltCount = eltCountBuffer.getInt();
-            if (eltCount < 0) {
-                throw new IllegalStateException(
-                        "Corrupt file: negative element count: " + eltCount);
-            }
-            if (channel.size() < HEADER_SIZE + getBufferOffset(eltCount)) {
-                throw new IOException("Corrupt file: file too small: "
-                        + channel.size() + " < " + HEADER_SIZE
-                        + getBufferOffset(eltCount));
-            }
-        }
-        this.eltsBuffer = getEltsBuffer();
     }
 
     /**
@@ -294,7 +299,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    void close() throws IOException {
+    synchronized void close() throws IOException {
         channel.close();
     }
 
@@ -302,6 +307,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * Writes the number of elements to the file.
      */
     private void writeEltCount() {
+        assert Thread.holdsLock(this);
         eltCountBuffer.rewind();
         eltCountBuffer.putInt(eltCount);
         eltCountBuffer.force();
@@ -318,6 +324,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      *             if an I/O error occurs.
      */
     private void writeElt(final int index, final T elt) throws IOException {
+        assert Thread.holdsLock(this);
         final ByteBuffer buffer = getEltBuffer(index);
         elt.write(buffer);
         eltsBuffer.force();
@@ -340,6 +347,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      */
     private T readElt(final int index) throws ClosedChannelException,
             InstantiationException, IllegalAccessException, IOException {
+        assert Thread.holdsLock(this);
         final T instance = type.newInstance();
         instance.read(getEltBuffer(index));
         return instance;
@@ -360,6 +368,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      */
     private ByteBuffer getEltBuffer(final int index)
             throws ClosedChannelException, IOException {
+        assert Thread.holdsLock(this);
         if (getMaxEltCount() < (index + 1)) {
             // The golden ratio is a space/time compromise
             final long newMaxEltCount = Math.round((index + 1) * 1.618034);
@@ -383,6 +392,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      *             if an I/O error occurs.
      */
     private MappedByteBuffer getEltsBuffer() throws IOException {
+        assert Thread.holdsLock(this);
         return channel.map(MapMode.READ_WRITE, HEADER_SIZE, channel.size()
                 - HEADER_SIZE);
     }
@@ -396,6 +406,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @return The position in the element buffer of the start of the element.
      */
     private int getBufferOffset(final int index) {
+        assert Thread.holdsLock(this);
         return index * eltSize;
     }
 
@@ -409,6 +420,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      *             if an I/O error occurs.
      */
     private long getMaxEltCount() throws ClosedChannelException, IOException {
+        assert Thread.holdsLock(this);
         return (channel.size() - HEADER_SIZE) / eltSize;
     }
 
@@ -421,6 +433,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      *             if an I/O error occurs.
      */
     private void ensureFileSize(final int size) throws IOException {
+        assert Thread.holdsLock(this);
         if (channel.size() < size) {
             channel.position(size - 1);
             channel.write(ByteBuffer.wrap(new byte[] { 0 }));
@@ -468,7 +481,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @see java.lang.Object#toString()
      */
     @Override
-    public String toString() {
+    public synchronized String toString() {
         return "MinHeapFile [eltCount=" + eltCount + ", type=" + type
                 + ", eltSize=" + eltSize + "]";
     }

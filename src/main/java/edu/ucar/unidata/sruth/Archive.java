@@ -1529,6 +1529,26 @@ final class Archive {
         }
 
         /**
+         * Indicates if the given piece of data will make this file complete.
+         * 
+         * @param pieceSpec
+         *            Information on the piece of data
+         * @return {@code true} if and only if the file is currently incomplete
+         *         and the given piece of data will make it complete
+         */
+        boolean willMakeComplete(final PieceSpec pieceSpec) {
+            lock();
+            try {
+                final int index = pieceSpec.getIndex();
+                return !indexes.isSet(index)
+                        && (indexes.getSetCount() == indexes.getSize() - 1);
+            }
+            finally {
+                unlock();
+            }
+        }
+
+        /**
          * Writes a piece of data. If the data-piece completes the file, then
          * the file is moved from the hidden file-tree to the visible file-tree
          * in a manner that is robust in the face of removal of necessary
@@ -2488,14 +2508,22 @@ final class Archive {
             return false;
         }
         try {
-            final boolean isComplete = file.putPiece(piece);
-            if (isComplete) {
-                final int timeToLive = piece.getTimeToLive();
-                if (timeToLive >= 0) {
+            final int timeToLive = piece.getTimeToLive();
+            if (timeToLive >= 0) {
+                /**
+                 * The file is added to the file-deletion queue before the piece
+                 * is written to the file to avoid the possibility that a
+                 * complete, visible file might exist without a corresponding
+                 * entry in the queue.
+                 */
+                if (file.willMakeComplete(piece.getInfo())) {
                     delayedPathActionQueue.actUponEventurally(
                             fileInfo.getAbsolutePath(rootDir),
                             1000 * timeToLive);
                 }
+            }
+            final boolean isComplete = file.putPiece(piece);
+            if (isComplete) {
                 synchronized (dataProductListeners) {
                     for (final DataProductListener listener : dataProductListeners) {
                         final DataProduct product = new DataProduct(rootDir,
