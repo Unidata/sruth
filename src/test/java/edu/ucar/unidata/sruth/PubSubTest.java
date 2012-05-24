@@ -87,7 +87,7 @@ public class PubSubTest {
      * The sleep interval, in milliseconds, to be used before checking that the
      * files have been successfully conveyed.
      */
-    private static long             sleepAmount         = 4000;
+    private static long             sleepAmount         = 2000;
     /**
      * The pathnames of the root directories of the subscribers.
      */
@@ -244,6 +244,70 @@ public class PubSubTest {
         final Future<Void> subscriberFuture = start(subscriber);
         Thread.sleep(sleepAmount);
         stop(subscriberFuture);
+    }
+
+    @Test
+    public void testRapidNewDirectoryPublishing() throws IOException,
+            InterruptedException, FileInfoMismatchException {
+        /*
+         * Create and start the publisher.
+         */
+        final Publisher publisher = new Publisher(PUB_ROOT);
+        final Future<Void> pubFuture = start(publisher);
+        publisher.waitUntilRunning();
+
+        /*
+         * Create the subscribers.
+         */
+        final List<Subscriber> subscribers = new LinkedList<Subscriber>();
+        for (final Path rootDir : absSubRootDirs) {
+            subscribers
+                    .add(new Subscriber(rootDir, publisher.getTrackerAddress(),
+                            Predicate.EVERYTHING, new Processor()));
+        }
+        /*
+         * Start the subscribers.
+         */
+        final List<Future<Void>> subFutures = new LinkedList<Future<Void>>();
+        for (final Subscriber subscriber : subscribers) {
+            subFutures.add(start(subscriber));
+            subscriber.waitUntilRunning();
+        }
+
+        Thread.sleep(sleepAmount);
+        // Thread.sleep(Long.MAX_VALUE);
+
+        /*
+         * Quickly publish some files in a new subdirectory.
+         */
+        final Path dir = DATA_DIR.resolve("subdir");
+        final byte[] bytes = new byte[1];
+        for (int i = 0; i < 3; i++) {
+            final Path path = dir.resolve(Integer.toString(i));
+            random.nextBytes(bytes);
+            final ByteBuffer buf = ByteBuffer.wrap(bytes);
+            publisher.publish(new ArchivePath(path), buf, -1);
+        }
+
+        Thread.sleep(sleepAmount);
+        // Thread.sleep(Long.MAX_VALUE);
+
+        /*
+         * Verify transmission of published files.
+         */
+        for (final Subscriber subscriber : subscribers) {
+            diffDirs(subscriber.getRootDir());
+        }
+
+        /*
+         * Stop the subscribers and then the publisher.
+         */
+        for (final Future<Void> future : subFutures) {
+            stop(future);
+        }
+        Thread.sleep(sleepAmount);
+        stop(pubFuture);
+
     }
 
     @Test

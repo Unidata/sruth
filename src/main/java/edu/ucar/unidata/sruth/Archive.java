@@ -516,7 +516,7 @@ final class Archive {
             }
             watchService = rootDir.getFileSystem().newWatchService();
             try {
-                registerAll(rootDir);
+                registerDirectoryTree(rootDir);
                 for (;;) {
                     final WatchKey key = watchService.take();
                     for (final WatchEvent<?> event : key.pollEvents()) {
@@ -557,8 +557,12 @@ final class Archive {
                         }
                     }
                     if (!key.reset()) {
+                        /*
+                         * The watch-key was cancelled because the corresponding
+                         * directory was removed.
+                         */
                         final Path dir = dirs.remove(key);
-                        if (null != dir) {
+                        if (dir != null) {
                             keys.remove(dir);
                         }
                     }
@@ -584,13 +588,13 @@ final class Archive {
             final BasicFileAttributes attributes = Files.readAttributes(path,
                     BasicFileAttributes.class);
             if (attributes.isDirectory()) {
-                registerAll(path);
-                /*
-                 * walkDirectory(path, new FilePieceSpecSetConsumer() {
-                 * 
-                 * @Override public void consume(final FilePieceSpecSet spec) {
-                 * server.newData(spec); } }, Filter.EVERYTHING);
-                 */
+                registerDirectoryTree(path);
+                walkDirectory(path, new FilePieceSpecSetConsumer() {
+                    @Override
+                    public void consume(final FilePieceSpecSet spec) {
+                        server.newData(spec);
+                    }
+                }, Filter.EVERYTHING);
             }
             else if (attributes.isRegularFile()) {
                 ArchiveTime.adjustTime(path);
@@ -619,7 +623,7 @@ final class Archive {
          * removal-notice to all connected peers.
          * 
          * @param path
-         *            The pathname of the removed file.
+         *            The absolute pathname of the removed file.
          * @throws IOException
          *             if an I/O error occurs.
          */
@@ -637,6 +641,7 @@ final class Archive {
                 }
                 final FileId fileId = new FileId(archivePath,
                         ArchiveTime.BEGINNING_OF_TIME);
+                logger.trace("Removed file: {}", path);
                 server.removed(fileId);
             }
         }
@@ -655,9 +660,11 @@ final class Archive {
              * directories.
              */
             if (!keys.containsKey(dir)) {
+                logger.trace("New directory: {}", dir);
                 final WatchKey key = dir.register(watchService,
                         StandardWatchEventKinds.ENTRY_CREATE,
-                        StandardWatchEventKinds.ENTRY_DELETE);
+                        StandardWatchEventKinds.ENTRY_DELETE,
+                        StandardWatchEventKinds.OVERFLOW);
                 dirs.put(key, dir);
                 keys.put(dir, key);
             }
@@ -672,7 +679,7 @@ final class Archive {
          * @throws IOException
          *             if an I/O error occurs.
          */
-        private void registerAll(final Path dir) throws IOException {
+        private void registerDirectoryTree(final Path dir) throws IOException {
             final EnumSet<FileVisitOption> opts = EnumSet
                     .of(FileVisitOption.FOLLOW_LINKS);
             Files.walkFileTree(dir, opts, Integer.MAX_VALUE,
@@ -2826,7 +2833,8 @@ final class Archive {
                                     }
                                     final FilePieceSpecSet specSet = FilePieceSpecSet
                                             .newInstance(fileInfo, true);
-                                    logger.trace("Path={}", archivePath);
+                                    logger.trace("Consuming file: {}",
+                                            archivePath);
                                     consumer.consume(specSet);
                                 }
                             }
