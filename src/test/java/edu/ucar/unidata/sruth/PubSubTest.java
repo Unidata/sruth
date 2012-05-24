@@ -87,7 +87,7 @@ public class PubSubTest {
      * The sleep interval, in milliseconds, to be used before checking that the
      * files have been successfully conveyed.
      */
-    private static long             sleepAmount         = 2000;
+    private static long             sleepAmount         = 4000;
     /**
      * The pathnames of the root directories of the subscribers.
      */
