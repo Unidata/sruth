@@ -179,7 +179,7 @@ final class SourceNode extends AbstractNode {
                 catch (final ExecutionException e) {
                     final Throwable cause = e.getCause();
                     if (cause instanceof InterruptedException) {
-                        logger.trace("Interrupted");
+                        logger.trace("Interrupted: {}", task);
                         throw (InterruptedException) cause;
                     }
                     if (cause instanceof IOException) {
