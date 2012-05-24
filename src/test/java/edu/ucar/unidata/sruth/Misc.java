@@ -5,8 +5,10 @@
  */
 package edu.ucar.unidata.sruth;
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.util.List;
+import java.io.InputStreamReader;
+import java.lang.ProcessBuilder.Redirect;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
@@ -26,27 +28,56 @@ public final class Misc {
     /**
      * Executes a system command.
      * 
-     * @param cmd
-     *            The command to execute
+     * @param args
+     *            The arguments of the command to execute
      * @return The status of the executed command. 0 means success.
      * @throws IOException
      * @throws InterruptedException
      */
-    public static int system(final String... cmd) throws IOException,
+    public static int system(final String... args) throws IOException,
             InterruptedException {
-        final ProcessBuilder builder = new ProcessBuilder(cmd);
-        builder.inheritIO();
-        final StringBuilder msg = new StringBuilder("Executing: ");
-        final List<String> args = builder.command();
+        final StringBuilder msg = new StringBuilder();
         for (final String arg : args) {
             msg.append(arg);
             msg.append(' ');
         }
-        logger.info(msg.toString());
+        logger.info("Executing: {}", msg.toString());
+        final ProcessBuilder builder = new ProcessBuilder(args);
+        /*
+         * Have the child process' input and output streams inherit from this
+         * process and keep the redirection its error stream back to this
+         * process for logging.
+         */
+        builder.redirectInput(Redirect.INHERIT);
+        builder.redirectOutput(Redirect.INHERIT);
         final Process process = builder.start();
         Assert.assertNotNull(process);
-        final int status = process.waitFor();
-        return status;
+        try {
+            /*
+             * Log the child process' error stream.
+             */
+            final BufferedReader errorStream = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream()));
+            try {
+                for (String line = errorStream.readLine(); line != null; line = errorStream
+                        .readLine()) {
+                    logger.error(line);
+                }
+
+                // The process should have terminated
+                return process.waitFor();
+            }
+            finally {
+                try {
+                    errorStream.close();
+                }
+                catch (final IOException ignored) {
+                }
+            }
+        }
+        finally {
+            process.destroy();
+        }
     }
 
     /**
