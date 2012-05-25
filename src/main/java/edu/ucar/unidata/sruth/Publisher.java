@@ -318,7 +318,8 @@ public final class Publisher implements Callable<Void> {
      *     
      * where:
      *   -p port  Port number on which the tracker will listen. The default is
-     *            an ephemeral port assigned by the operating-system.
+     *            the IANA-assigned port, 38800. If zero, then an ephemeral
+     *            port will be assigned by the operating-system.
      *   rootDir  Pathname of the root of the data archive.
      * </pre>
      * <p>
@@ -341,7 +342,7 @@ public final class Publisher implements Callable<Void> {
             IOException {
         int status = 0;
         Path rootDir = null;
-        int port = 0;
+        int port = Tracker.IANA_PORT;
 
         /*
          * Decode the command-line.
