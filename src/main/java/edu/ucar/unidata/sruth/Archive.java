@@ -585,18 +585,47 @@ final class Archive {
          */
         private void newFile(final Path path) throws NoSuchFileException,
                 IOException {
-            final BasicFileAttributes attributes = Files.readAttributes(path,
-                    BasicFileAttributes.class);
-            if (attributes.isDirectory()) {
-                registerDirectoryTree(path);
-                walkDirectory(path, new FilePieceSpecSetConsumer() {
-                    @Override
-                    public void consume(final FilePieceSpecSet spec) {
-                        server.newData(spec);
+            /*
+             * If the new file is a directory, then it must be walked because
+             * any files it contains are also new.
+             */
+            Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult preVisitDirectory(final Path dir,
+                        final BasicFileAttributes attributes) {
+                    if (ArchiveFile.isHidden(rootDir, dir)) {
+                        return FileVisitResult.SKIP_SUBTREE;
                     }
-                }, Filter.EVERYTHING);
-            }
-            else if (attributes.isRegularFile()) {
+                    try {
+                        register(dir);
+                    }
+                    catch (final IOException e) {
+                        throw new IOError(e);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(final Path path,
+                        final BasicFileAttributes attributes) {
+                    assert attributes.isRegularFile();
+                    notifyServerAbout(path, attributes);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+
+        /**
+         * Notifies the server about a regular file.
+         * 
+         * @param path
+         *            Absolute pathname of the file
+         * @param attributes
+         *            Basic attributes of the file
+         */
+        private void notifyServerAbout(final Path path,
+                final BasicFileAttributes attributes) {
+            try {
                 ArchiveTime.adjustTime(path);
                 final FileInfo fileInfo;
                 final ArchivePath archivePath = new ArchivePath(path, rootDir);
@@ -614,6 +643,10 @@ final class Archive {
                 }
                 logger.trace("New file: {}", path);
                 server.newData(FilePieceSpecSet.newInstance(fileInfo, true));
+            }
+            catch (final IOException e) {
+                logger.error("Couldn't set time of file {}: {}", path,
+                        e.toString());
             }
         }
 

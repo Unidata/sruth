@@ -224,7 +224,7 @@ public class PubSubTest {
     private static void diffDirs(final Path subRoot) throws IOException,
             InterruptedException {
         if (PUB_DATA_DIR.toFile().exists()) {
-            final int status = Misc.system("diff", "-r", PUB_DATA_DIR
+            final int status = Misc.system(true, "diff", "-r", PUB_DATA_DIR
                     .toString(), subRoot.resolve(DATA_DIR).toString());
             assertEquals(0, status);
         }
