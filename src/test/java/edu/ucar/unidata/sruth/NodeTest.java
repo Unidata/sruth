@@ -11,6 +11,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
@@ -198,7 +199,8 @@ public class NodeTest {
         /*
          * Create and start the tracker.
          */
-        final Tracker tracker = new Tracker(serverSocketAddress);
+        final Tracker tracker = new Tracker(serverSocketAddress,
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
         final Future<Void> trackerFuture = start(tracker);
 
@@ -257,7 +259,8 @@ public class NodeTest {
         /*
          * Create and start the tracker.
          */
-        final Tracker tracker = new Tracker(serverSocketAddress);
+        final Tracker tracker = new Tracker(serverSocketAddress,
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
         final Future<Void> trackerFuture = start(tracker);
         /*
@@ -346,7 +349,8 @@ public class NodeTest {
         /*
          * Create and start the tracker.
          */
-        final Tracker tracker = new Tracker(serverSocketAddress);
+        final Tracker tracker = new Tracker(serverSocketAddress,
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
         final Future<Void> trackerFuture = start(tracker);
         /*

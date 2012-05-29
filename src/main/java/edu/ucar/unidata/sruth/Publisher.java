@@ -81,9 +81,8 @@ public final class Publisher implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the root of the file-tree. The tracker
-     * will listen on its IANA-assigned port, the source-node server will listen
-     * on an ephemeral port, and an ephemeral port will also be used for reports
-     * of unavailable servers.
+     * will listen on its IANA-assigned port. Ephemeral ports will be used for
+     * the data-exchange server and for reporting unavailable servers.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -99,9 +98,8 @@ public final class Publisher implements Callable<Void> {
     }
 
     /**
-     * Constructs from the pathname of the root of the file-tree and the port on
-     * which the tracker will listen. The source-node server will listen on an
-     * ephemeral port.
+     * Constructs from the pathname of the root of the file-tree and the port
+     * numbers to be used.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree

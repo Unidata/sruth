@@ -252,7 +252,7 @@ public class PubSubTest {
         /*
          * Create and start the publisher.
          */
-        final Publisher publisher = new Publisher(PUB_ROOT);
+        final Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
         final Future<Void> pubFuture = start(publisher);
         publisher.waitUntilRunning();
 
@@ -316,7 +316,7 @@ public class PubSubTest {
         /*
          * Create and start the publisher.
          */
-        final Publisher publisher = new Publisher(PUB_ROOT);
+        final Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
         final Future<Void> pubFuture = start(publisher);
         publisher.waitUntilRunning();
 
@@ -384,7 +384,7 @@ public class PubSubTest {
         /*
          * Create and start the publisher.
          */
-        Publisher publisher = new Publisher(PUB_ROOT);
+        Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
         Future<Void> pubFuture = start(publisher);
         publisher.waitUntilRunning();
 
@@ -426,7 +426,7 @@ public class PubSubTest {
         stop(pubFuture);
         publisher.awaitCompletion();
         Thread.sleep(sleepAmount);
-        publisher = new Publisher(PUB_ROOT);
+        publisher = new Publisher(PUB_ROOT, trackerAddress.getPort(), 0, 0);
         pubFuture = start(publisher);
         publisher.waitUntilRunning();
 
@@ -467,7 +467,7 @@ public class PubSubTest {
         /*
          * Create and start the publisher.
          */
-        final Publisher publisher = new Publisher(PUB_ROOT);
+        final Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
         final Future<Void> pubFuture = start(publisher);
         assertNotNull(pubFuture);
         publisher.waitUntilRunning();
