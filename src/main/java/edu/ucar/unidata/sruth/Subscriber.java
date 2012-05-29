@@ -87,8 +87,41 @@ public final class Subscriber implements Callable<Void> {
      *             if a server-side socket couldn't be created.
      */
     public Subscriber(final Path rootDir,
-            final InetSocketAddress trackerAddress, Predicate predicate,
+            final InetSocketAddress trackerAddress, final Predicate predicate,
             final Processor processor) throws IOException {
+        this(rootDir, trackerAddress, predicate, processor, 0);
+    }
+
+    /**
+     * Constructs from the pathname of the archive, the Internet address of the
+     * tracker, the predicate for the desired data, the processor of received
+     * data, and the port number for the local data-exchange server.
+     * 
+     * @param rootDir
+     *            Pathname of the root of the file-tree.
+     * @param trackerAddress
+     *            The address of the tracker.
+     * @param predicate
+     *            The predicate for selecting the desired data.
+     * @param processor
+     *            The processor of received data-products.
+     * @param serverPort
+     *            The port number on which the local data-exchange server will
+     *            listen for connections. If zero, then an ephemeral port will
+     *            be chosen by the operating-system.
+     * @throws IOException
+     *             if an unused port in the given range couldn't be found.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code rootDir == null || trackerAddress == null ||
+     *             predicate == null || processor == null}.
+     * @throws SocketException
+     *             if a server-side socket couldn't be created.
+     */
+    public Subscriber(final Path rootDir,
+            final InetSocketAddress trackerAddress, Predicate predicate,
+            final Processor processor, final int serverPort) throws IOException {
         if (null == rootDir) {
             throw new NullPointerException();
         }
@@ -120,7 +153,7 @@ public final class Subscriber implements Callable<Void> {
                 }
             }
         });
-        sinkNode = new SinkNode(archive, predicate, trackerAddress);
+        sinkNode = new SinkNode(archive, predicate, trackerAddress, serverPort);
         this.predicate = predicate;
         this.processor = new Processor();
     }
@@ -314,6 +347,10 @@ public final class Subscriber implements Callable<Void> {
      *   -d archive     Pathname of the root of the temporary data archive.
      *                  The default is the {@code SRUTH} subdirectory of the
      *                  user's home-directory.
+     *   -s port        Port number on which the local data-exchange server
+     *                  will listen for connections. If zero, then an ephemeral
+     *                  port will be chosen by the operating-system (which is
+     *                  the default).
      *   subscription   URL or pathname of the XML document that contains 
      *                  the subscription information.
      * </pre>
@@ -339,6 +376,7 @@ public final class Subscriber implements Callable<Void> {
                 + File.separatorChar + Util.PACKAGE_NAME);
         Processor processor = new Processor();
         Subscription subscription = null;
+        int serverPort = 0;
 
         try {
             int iarg;
@@ -388,6 +426,20 @@ public final class Subscriber implements Callable<Void> {
                             logger.error(
                                     "Couldn't process archive argument: \"{}\"",
                                     arg);
+                            throw new IllegalArgumentException();
+                        }
+                    }
+                    else if (optString.equals("s")) {
+                        /*
+                         * Decode the server-port argument.
+                         */
+                        try {
+                            serverPort = Integer.valueOf(arg);
+                        }
+                        catch (final Exception e) {
+                            logger.error(
+                                    "Couldn't decode server-port argument: \"{}\": {}",
+                                    arg, e.toString());
                             throw new IllegalArgumentException();
                         }
                     }
@@ -443,7 +495,7 @@ public final class Subscriber implements Callable<Void> {
         Subscriber subscriber = null;
         subscriber = new Subscriber(archivePath,
                 subscription.getTrackerAddress(), subscription.getPredicate(),
-                processor);
+                processor, serverPort);
 
         /*
          * Execute the subscriber.

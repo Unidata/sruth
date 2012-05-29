@@ -77,7 +77,7 @@ abstract class AbstractNode implements Callable<Void> {
      * 
      * @return The address of the server.
      */
-    protected InetSocketAddress getLocalServerSocketAddress() {
+    protected InetSocketAddress getServerSocketAddress() {
         return localServer.getSocketAddress();
     }
 

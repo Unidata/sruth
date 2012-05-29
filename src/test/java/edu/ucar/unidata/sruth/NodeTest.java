@@ -193,7 +193,7 @@ public class NodeTest {
         final SourceNode sourceNode = new SourceNode(new Archive(SOURCE_DIR));
         final Future<Void> sourceFuture = start(sourceNode);
         final InetSocketAddress serverSocketAddress = sourceNode
-                .getLocalServerSocketAddress();
+                .getServerSocketAddress();
 
         /*
          * Create and start the tracker.
@@ -252,7 +252,7 @@ public class NodeTest {
         final Archive serverArchive = new Archive(SOURCE_DIR);
         final AbstractNode sourceNode = new SourceNode(serverArchive);
         final InetSocketAddress serverSocketAddress = sourceNode
-                .getLocalServerSocketAddress();
+                .getServerSocketAddress();
         final Future<Void> sourceNodeFuture = start(sourceNode);
         /*
          * Create and start the tracker.
@@ -341,7 +341,7 @@ public class NodeTest {
         final Archive serverArchive = new Archive(SOURCE_DIR);
         final AbstractNode sourceNode = new SourceNode(serverArchive);
         final InetSocketAddress serverSocketAddress = sourceNode
-                .getLocalServerSocketAddress();
+                .getServerSocketAddress();
         final Future<Void> sourceNodeFuture = start(sourceNode);
         /*
          * Create and start the tracker.

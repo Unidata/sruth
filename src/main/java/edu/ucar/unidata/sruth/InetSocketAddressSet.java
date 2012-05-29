@@ -90,8 +90,8 @@ final class InetSocketAddressSet {
      *            The set of port numbers or {@code null}, in which case the
      *            ephemeral port number will be used.
      * @throws UnknownHostException
-     *             if the name of the local host couldn't be resolved into an
-     *             address.
+     *             if the given Internet address is {@code null} and the name of
+     *             the local host couldn't be resolved into an IP address.
      */
     InetSocketAddressSet(InetAddress inetAddress, PortNumberSet portSet)
             throws UnknownHostException {

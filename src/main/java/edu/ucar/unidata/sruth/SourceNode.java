@@ -6,7 +6,9 @@
 package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -108,33 +110,83 @@ final class SourceNode extends AbstractNode {
     private final ArchiveWatcher          archiveWatcher    = new ArchiveWatcher();
 
     /**
-     * Constructs from the data archive and a specification of the
-     * locally-desired data. This constructor is equivalent to the constructor
-     * {@link #SourceNode(Archive, InetSocketAddressSet) SourceNode(archive, new
-     * InetSocketAddressSet())}.
+     * Constructs from the data archive. This constructor is equivalent to the
+     * constructor {@link #SourceNode(Archive, InetSocketAddressSet)
+     * SourceNode(archive, new InetSocketAddressSet())}.
      * 
      * @param archive
      *            The data archive.
      * @throws IOException
-     *             if the localServer can't connect to the network.
+     *             if the local data-exchange server can't connect to the
+     *             network.
      * @throws NullPointerException
      *             if {@code rootDir == null || predicate == null}.
-     * @see #SourceNode(Archive, Predicate, PortNumberSet)
+     * @see #SourceNode(Archive, PortNumberSet)
      */
     SourceNode(final Archive archive) throws IOException {
         this(archive, new InetSocketAddressSet());
     }
 
     /**
-     * Constructs from the data archive, a specification of the locally-desired
-     * data, and the port numbers for the localServer.
+     * Constructs from the data archive and the port number for the local
+     * data-exchange server.
+     * 
+     * @param archive
+     *            The data archive.
+     * @param serverPort
+     *            The port number for the local data-exchange server or
+     *            {@code 0}, in which case an ephemeral port number will be
+     *            chose by the operating-system
+     * @throws IOException
+     *             if the local server can't connect to the network.
+     * @throws NullPointerException
+     *             if {@code archive == null || inetSockAddrSet == null}.
+     * @see AbstractNode#AbstractNode(Archive, InetSocketAddressSet)
+     */
+    SourceNode(final Archive archive, final int serverPort) throws IOException {
+        this(archive, new InetSocketAddressSet(PortNumberSet.getInstance(
+                serverPort, serverPort)));
+    }
+
+    /**
+     * Constructs from the data archive and the Internet socket address for the
+     * local data-exchange server.
+     * 
+     * @param archive
+     *            The data archive.
+     * @param serverSocketAddress
+     *            The Internet socket addresses for the server.
+     * @throws UnknownHostException
+     *             if {@code serverSocketAddress.isUnresolved()} and the name of
+     *             the local host couldn't be resolved into an IP address
+     * @throws IOException
+     *             if the local data-exchange server can't connect to the
+     *             network.
+     * @throws NullPointerException
+     *             if {@code archive == null || serverSocketAddress == null}.
+     * @see InetSocketAddress#isUnresolved()
+     * @see AbstractNode#AbstractNode(Archive, InetSocketAddressSet)
+     */
+    SourceNode(final Archive archive,
+            final InetSocketAddress serverSocketAddress)
+            throws UnknownHostException, IOException {
+        this(archive, new InetSocketAddressSet(
+                serverSocketAddress.getAddress(), PortNumberSet.getInstance(
+                        serverSocketAddress.getPort(),
+                        serverSocketAddress.getPort())));
+    }
+
+    /**
+     * Constructs from the data archive and the port numbers for the local
+     * data-exchange server.
      * 
      * @param archive
      *            The data archive.
      * @param inetSockAddrSet
      *            The set of candidate Internet socket addresses for the server.
      * @throws IOException
-     *             if the localServer can't connect to the network.
+     *             if the local data-exchange server can't connect to the
+     *             network.
      * @throws NullPointerException
      *             if {@code archive == null || inetSockAddrSet == null}.
      * @see AbstractNode#AbstractNode(Archive, Predicate, InetSocketAddressSet)

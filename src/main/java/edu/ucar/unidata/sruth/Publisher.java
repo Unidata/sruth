@@ -81,8 +81,9 @@ public final class Publisher implements Callable<Void> {
 
     /**
      * Constructs from the pathname of the root of the file-tree. The tracker
-     * will listen on its IANA-assigned port and the source-node server will
-     * listen on an ephemeral port.
+     * will listen on its IANA-assigned port, the source-node server will listen
+     * on an ephemeral port, and an ephemeral port will also be used for reports
+     * of unavailable servers.
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree.
@@ -94,7 +95,7 @@ public final class Publisher implements Callable<Void> {
      * @see #getSourceAddress()
      */
     public Publisher(final Path rootDir) throws IOException {
-        this(rootDir, Tracker.IANA_PORT);
+        this(rootDir, Tracker.IANA_PORT, 0, 0);
     }
 
     /**
@@ -104,10 +105,18 @@ public final class Publisher implements Callable<Void> {
      * 
      * @param rootDir
      *            Pathname of the root of the file-tree
-     * @param port
-     *            The port on which the tracker will listen or {@code 0}, in
-     *            which case an ephemeral port will be chosen by the
+     * @param trackerPort
+     *            The port number on which the tracker will listen or {@code 0},
+     *            in which case an ephemeral port will be chosen by the
      *            operating-system.
+     * @param serverPort
+     *            The port number on which the data-exchange server will listen
+     *            for connections or {@code 0}, in which case an ephemeral port
+     *            will be chosen by the operating-system.
+     * @param reportingPort
+     *            The port number on which the tracker will listen for UDP
+     *            reports of unavailable servers or {@code 0}, in which case an
+     *            ephemeral port will be chosen by the operating-system.
      * @throws IOException
      *             if an I/O error occurs
      * @throws IllegalArgumentException
@@ -117,13 +126,16 @@ public final class Publisher implements Callable<Void> {
      * @see #getTrackerAddress()
      * @see #getSourceAddress()
      */
-    public Publisher(final Path rootDir, final int port) throws IOException {
+    public Publisher(final Path rootDir, final int trackerPort,
+            final int serverPort, final int reportingPort) throws IOException {
         archive = new Archive(rootDir);
-        sourceNode = new SourceNode(archive);
-        final InetAddress trackerAddress = InetAddress.getLocalHost();
+        final InetAddress localHostAddress = InetAddress.getLocalHost();
+        final InetSocketAddress serverSocketAddress = new InetSocketAddress(
+                localHostAddress, serverPort);
+        sourceNode = new SourceNode(archive, serverSocketAddress);
         final InetSocketAddress trackerSocketAddress = new InetSocketAddress(
-                trackerAddress, port);
-        tracker = new Tracker(sourceNode.getLocalServerSocketAddress(),
+                localHostAddress, trackerPort);
+        tracker = new Tracker(sourceNode.getServerSocketAddress(),
                 trackerSocketAddress);
         distributedTrackerFiles = archive.getDistributedTrackerFiles(tracker
                 .getServerAddress());
@@ -216,7 +228,7 @@ public final class Publisher implements Callable<Void> {
      * @return The address of the source-node's server.
      */
     public InetSocketAddress getSourceAddress() {
-        return sourceNode.getLocalServerSocketAddress();
+        return sourceNode.getServerSocketAddress();
     }
 
     /**
@@ -317,9 +329,16 @@ public final class Publisher implements Callable<Void> {
      * java ... edu.ucar.unidata.sruth.Publisher [-p port] rootDir
      *     
      * where:
-     *   -p port  Port number on which the tracker will listen. The default is
-     *            the IANA-assigned port, 38800. If zero, then an ephemeral
-     *            port will be assigned by the operating-system.
+     *   -r port  Port number on which the tracker will listen for UDP reports
+     *            of unavailable data-exchange servers. If zero, then an
+     *            ephemeral port will be chosen by the operating-system (which
+     *            is the default).
+     *   -s port  Port number on which the local data-exchange server will
+     *            listen for connections. If zero, then an ephemeral port will
+     *            be chosen by the operating-system (which is the default).
+     *   -t port  Port number on which the tracker will listen. If zero, then
+     *            an ephemeral port will be chosen by the operating-system. The
+     *            default is the IANA-assigned port, 38800.
      *   rootDir  Pathname of the root of the data archive.
      * </pre>
      * <p>
@@ -342,7 +361,9 @@ public final class Publisher implements Callable<Void> {
             IOException {
         int status = 0;
         Path rootDir = null;
-        int port = Tracker.IANA_PORT;
+        int trackerPort = Tracker.IANA_PORT;
+        int serverPort = 0;
+        int reportingPort = 0;
 
         /*
          * Decode the command-line.
@@ -359,16 +380,44 @@ public final class Publisher implements Callable<Void> {
                     }
                     final String optString = arg.substring(1);
                     arg = args[++iarg];
-                    if (optString.equals("p")) {
+                    if (optString.equals("r")) {
                         /*
-                         * Decode the port argument.
+                         * Decode the reporting-port argument.
                          */
                         try {
-                            port = Integer.valueOf(arg);
+                            reportingPort = Integer.valueOf(arg);
                         }
                         catch (final Exception e) {
                             logger.error(
-                                    "Couldn't decode port argument: \"{}\": {}",
+                                    "Couldn't decode reporting-port argument: \"{}\": {}",
+                                    arg, e.toString());
+                            throw new IllegalArgumentException();
+                        }
+                    }
+                    else if (optString.equals("s")) {
+                        /*
+                         * Decode the server-port argument.
+                         */
+                        try {
+                            serverPort = Integer.valueOf(arg);
+                        }
+                        catch (final Exception e) {
+                            logger.error(
+                                    "Couldn't decode server-port argument: \"{}\": {}",
+                                    arg, e.toString());
+                            throw new IllegalArgumentException();
+                        }
+                    }
+                    else if (optString.equals("t")) {
+                        /*
+                         * Decode the tracker-port argument.
+                         */
+                        try {
+                            trackerPort = Integer.valueOf(arg);
+                        }
+                        catch (final Exception e) {
+                            logger.error(
+                                    "Couldn't decode tracker-port argument: \"{}\": {}",
                                     arg, e.toString());
                             throw new IllegalArgumentException();
                         }
@@ -416,7 +465,8 @@ public final class Publisher implements Callable<Void> {
          */
         if (status == 0) {
             try {
-                final Publisher publisher = new Publisher(rootDir, port);
+                final Publisher publisher = new Publisher(rootDir, trackerPort,
+                        serverPort, reportingPort);
                 try {
                     System.out.println(publisher.getTrackerSocketAddress());
                     System.out.flush();

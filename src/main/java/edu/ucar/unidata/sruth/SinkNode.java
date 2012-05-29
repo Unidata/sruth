@@ -6,8 +6,10 @@
 package edu.ucar.unidata.sruth;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -82,6 +84,42 @@ final class SinkNode extends AbstractNode {
     SinkNode(final Archive archive, final Predicate predicate,
             final InetSocketAddress trackerAddress) throws IOException {
         this(archive, predicate, trackerAddress, new InetSocketAddressSet());
+    }
+
+    /**
+     * Constructs from a data archive, a specification of the locally-desired
+     * data, the Internet socket address of the tracker, and the port-number for
+     * the local data-exchange server.
+     * <p>
+     * 
+     * @param archive
+     *            The data archive.
+     * @param predicate
+     *            Specification of the locally-desired data.
+     * @param trackerAddress
+     *            The address of the tracker.
+     * @param serverPort
+     *            The port number on which the local data-exchange server will
+     *            listen. If zero, than an ephemeral port will be chosen by the
+     *            operating-system.
+     * @throws IOException
+     *             if an I/O error occurs
+     * @throws UnknownHostException
+     *             if the name of the local host couldn't be resolved into an IP
+     *             address
+     * @throws NullPointerException
+     *             if
+     *             {@code archive == null || predicate == null || inetSockAddrSet ==
+     *             null || trackerAddress == null}.
+     * @throws SocketException
+     *             if a server socket couldn't be created.
+     */
+    SinkNode(final Archive archive, final Predicate predicate,
+            final InetSocketAddress trackerAddress, final int serverPort)
+            throws UnknownHostException, IOException {
+        this(archive, predicate, trackerAddress, new InetSocketAddressSet(
+                InetAddress.getLocalHost(), PortNumberSet.getInstance(
+                        serverPort, serverPort)));
     }
 
     /**
