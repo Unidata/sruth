@@ -10,32 +10,32 @@ import java.io.IOException;
 import net.jcip.annotations.ThreadSafe;
 
 /**
- * A notice of new data.
+ * A request for pieces of data.
  * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class AdditionNotice implements Notice {
+final class PieceRequest implements Request {
     /**
      * The serial version ID.
      */
     private static final long       serialVersionUID = 1L;
     /**
-     * The specification of the new data.
+     * The set of data-piece specifications.
      */
     private final PieceSpecSetIface set;
 
     /**
-     * Constructs from a set of piece-specifications.
+     * Constructs from a set of data-piece specifications.
      * 
      * @param set
-     *            The set of piece-specifications.
+     *            The set of data-piece specifications.
      * @throws NullPointerException
      *             if {@code set == null}.
      */
-    AdditionNotice(final PieceSpecSetIface set) {
+    PieceRequest(final PieceSpecSetIface set) {
         if (null == set) {
             throw new NullPointerException();
         }
@@ -45,9 +45,7 @@ final class AdditionNotice implements Notice {
     @Override
     public void processYourself(final Peer peer) throws IOException,
             InterruptedException {
-        for (final PieceSpec spec : set) {
-            peer.newRemoteData(spec);
-        }
+        peer.queueForSending(set);
     }
 
     /*
@@ -57,6 +55,6 @@ final class AdditionNotice implements Notice {
      */
     @Override
     public String toString() {
-        return "AdditionNotice [set=" + set + "]";
+        return "PieceRequest [set=" + set + "]";
     }
 }

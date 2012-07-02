@@ -223,6 +223,32 @@ final class Client extends UninterruptibleTask<Boolean> {
         peer.restartCounter();
     }
 
+    /**
+     * Returns the set of pending (i.e., outstanding) requests for data. The
+     * actual set is returned -- not a copy.
+     * 
+     * @return the set of pending (i.e., outstanding) requests for data.
+     */
+    synchronized SpecSet getPendingRequests() {
+        return (peer == null)
+                ? new SpecSet()
+                : peer.getPendingRequests();
+    }
+
+    /**
+     * Gets certain data-pieces, if appropriate, by causing the remote peer to
+     * send notices to the local peer about data-pieces it has that are
+     * referenced by a given set of specifications.
+     * 
+     * @param specs
+     *            The set of data-piece specifications
+     */
+    synchronized void getIfAppropriate(final SpecSet specs) {
+        if (peer != null && !isCancelled()) {
+            peer.requestNotices(specs);
+        }
+    }
+
     /*
      * (non-Javadoc)
      * 

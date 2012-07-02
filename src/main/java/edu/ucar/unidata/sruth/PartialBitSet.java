@@ -8,6 +8,8 @@ package edu.ucar.unidata.sruth;
 import java.io.InvalidObjectException;
 import java.util.BitSet;
 
+import net.jcip.annotations.GuardedBy;
+
 /**
  * A finite-size bit-set whose bits are not all set.
  * 
@@ -23,10 +25,12 @@ final class PartialBitSet extends FiniteBitSet {
     /**
      * The tracking bit-set.
      */
+    @GuardedBy("this")
     private BitSet            bitSet;
     /**
      * The number of set bits.
      */
+    @GuardedBy("this")
     private int               setCount;
 
     /**
@@ -42,6 +46,23 @@ final class PartialBitSet extends FiniteBitSet {
         synchronized (this) {
             bitSet = new BitSet(); // size omitted to conserve space
             setCount = 0;
+        }
+    }
+
+    /**
+     * Constructs an instance with all bits set except for one.
+     * 
+     * @param size
+     *            The number of bits.
+     * @param index
+     *            The 0-based index of the clear bit.
+     */
+    PartialBitSet(final int size, final int index) {
+        super(size);
+        synchronized (this) {
+            bitSet = new BitSet(size);
+            bitSet.set(0, size - 1);
+            setCount = size - 1;
         }
     }
 
@@ -69,6 +90,16 @@ final class PartialBitSet extends FiniteBitSet {
             }
         }
         return result;
+    }
+
+    @Override
+    synchronized FiniteBitSet clearBit(final int index) {
+        vetIndex(index);
+        if (bitSet.get(index)) {
+            bitSet.clear(index);
+            setCount--;
+        }
+        return this;
     }
 
     @Override
@@ -162,7 +193,16 @@ final class PartialBitSet extends FiniteBitSet {
     }
 
     @Override
-    public String toString() {
+    public synchronized PartialBitSet clone() {
+        final PartialBitSet clone = (PartialBitSet) super.clone();
+        synchronized (clone) {
+            clone.bitSet.and(bitSet);
+        }
+        return clone;
+    }
+
+    @Override
+    public synchronized String toString() {
         return getClass().getSimpleName() + "{size=" + size + ", setCount="
                 + setCount + "}";
     }

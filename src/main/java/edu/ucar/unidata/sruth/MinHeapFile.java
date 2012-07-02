@@ -12,6 +12,7 @@ import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.nio.channels.FileLock;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Iterator;
@@ -30,10 +31,500 @@ import net.jcip.annotations.ThreadSafe;
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
+final class MinHeapFile<E extends MinHeapFile.Element> implements Iterable<E> {
+    /**
+     * The I/O handler for the heap-file.
+     * <p>
+     * This class is thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private static class IoHandler {
+        /**
+         * The buffer used by this class.
+         * <p>
+         * This class is thread-safe.
+         * 
+         * @author Steven R. Emmerson
+         */
+        private class MyBuffer {
+            /**
+             * The underlying byte-buffer
+             */
+            private final ByteBuffer buf;
+
+            /**
+             * Constructs from a memory-mapped byte-buffer.
+             * 
+             * @param buf
+             *            The memory-mapped byte-buffer
+             */
+            MyBuffer(final ByteBuffer buf) {
+                this.buf = buf;
+            }
+
+            /**
+             * Writes an integer into the buffer.
+             * 
+             * @param value
+             */
+            void putInt(final int value) {
+                buf.putInt(value);
+            }
+
+            /**
+             * Returns the current position of the buffer.
+             * 
+             * @return The current position of the buffer.
+             */
+            int position() {
+                return buf.position();
+            }
+
+            /**
+             * Saves the contents of the buffer.
+             */
+            void force() {
+                IoHandler.this.force();
+            }
+
+            /**
+             * Returns the integer at the current buffer position.
+             * 
+             * @return the integer at the current buffer position.
+             */
+            int getInt() {
+                return buf.getInt();
+            }
+
+            /**
+             * Rewinds the buffer (i.e., sets the position to 0).
+             */
+            void rewind() {
+                buf.rewind();
+            }
+
+            /**
+             * Returns the byte-buffer that backs this instance.
+             * 
+             * @return the byte-buffer that backs this instance.
+             */
+            ByteBuffer getByteBuffer() {
+                return buf;
+            }
+        }
+
+        /**
+         * The I/O channel to the file.
+         */
+        private final FileChannel channel;
+        /**
+         * The memory-mapped byte-buffer that is the entire file.
+         */
+        @GuardedBy("this")
+        private MappedByteBuffer  buf;
+
+        /**
+         * Constructs from the pathname of the file.
+         * 
+         * @param path
+         *            The pathname of the file.
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        IoHandler(final Path path) throws IOException {
+            channel = FileChannel.open(path, StandardOpenOption.CREATE,
+                    StandardOpenOption.READ, StandardOpenOption.WRITE);
+            initMappedBuffer();
+        }
+
+        /**
+         * Initializes the memory-mapped byte-buffer.
+         * 
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        private synchronized void initMappedBuffer() throws IOException {
+            buf = channel.map(MapMode.READ_WRITE, 0, channel.size());
+        }
+
+        /**
+         * Forces any changes to the memory-mapped byte-buffer to the underlying
+         * file.
+         */
+        private synchronized void force() {
+            buf.force();
+        }
+
+        /**
+         * Returns the size of the file in bytes.
+         * 
+         * @return the size of the file in bytes.
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        int size() throws IOException {
+            return (int) channel.size();
+        }
+
+        /**
+         * Returns a buffer corresponding to an existing region of the file.
+         * 
+         * @param position
+         *            The offset, in bytes, to the start of the region
+         * @param length
+         *            The length of the region in bytes
+         * @return a byte-buffer corresponding to the specified region
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        synchronized MyBuffer getBuffer(final int position, final int length)
+                throws IOException {
+            buf.position(position);
+            final ByteBuffer regBuf = buf.slice();
+            regBuf.limit(length);
+            return new MyBuffer(regBuf);
+        }
+
+        /**
+         * Ensures that the underlying file is at least a given size.
+         * 
+         * @param size
+         *            The size of the file in bytes
+         * @throws IOException
+         *             if an I/O error occurs
+         * @throws IllegalArgumentException
+         *             if {@code size < 0}
+         */
+        synchronized void ensureSize(final long size) throws IOException {
+            if (size < 0) {
+                throw new IllegalArgumentException("Invalid size: " + size);
+            }
+            if (channel.size() < size) {
+                channel.position(size - 1);
+                channel.write(ByteBuffer.wrap(new byte[] { 0 }));
+                channel.force(false);
+                initMappedBuffer();
+            }
+        }
+
+        /**
+         * Locks a region of the underlying file.
+         * 
+         * @param position
+         *            The offset, in bytes, to the start of the region.
+         * @param size
+         *            The length of the region in bytes
+         * @param shared
+         *            Whether or not the lock is sharable.
+         * @return a lock on the region.
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        synchronized FileLock lock(final long position, final int size,
+                final boolean shared) throws IOException {
+            return channel.lock(position, size, shared);
+        }
+
+        /**
+         * Forces any changes to a byte-buffer to the underlying file.
+         * 
+         * @param buffer
+         *            The byte-buffer
+         */
+        void force(final ByteBuffer buffer) {
+            /*
+             * Bit of a hack. Only necessary because ByteBuffer can't be
+             * extended.
+             */
+            force();
+        }
+
+        /**
+         * Closes this instance, releasing all resources. Idempotent.
+         * 
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        synchronized void close() throws IOException {
+            if (channel.isOpen()) {
+                channel.close();
+            }
+        }
+    }
+
+    /**
+     * The header of the heap-file.
+     * <p>
+     * This class is thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    private static class Header {
+        /**
+         * The version of this class.
+         */
+        private static final short       VERSION     = 1;
+        /**
+         * The size of the file-header. The file-header comprise the following
+         * parameters in order: version (4 bytes), eltSize (4 bytes), and
+         * eltCount (4 bytes).
+         */
+        private static final int         HEADER_SIZE = 12;
+        /**
+         * The buffer for the number of elements.
+         */
+        private final IoHandler.MyBuffer eltCountBuffer;
+        /**
+         * The size of an element.
+         */
+        private final int                eltSize;
+        /**
+         * The number of elements in the heap-file.
+         */
+        @GuardedBy("this")
+        private int                      eltCount;
+
+        /**
+         * Constructs from an I/O handler, the starting offset, and the size of
+         * an element.
+         * 
+         * @param channel
+         *            The channel to the file.
+         * @param position
+         *            The offset into the file, in bytes, for the start of the
+         *            header.
+         * @param eltSize
+         *            The size of an element in bytes.
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        Header(final IoHandler ioHandler, final int position, final int eltSize)
+                throws IOException {
+            int eltCountPosition;
+            if (position + HEADER_SIZE > ioHandler.size()) {
+                /*
+                 * The header doesn't exist. Create it.
+                 */
+                ioHandler.ensureSize(position + HEADER_SIZE);
+                final IoHandler.MyBuffer headBuf = ioHandler.getBuffer(
+                        position, HEADER_SIZE);
+                headBuf.putInt(VERSION);
+                headBuf.putInt(eltSize);
+                eltCountPosition = headBuf.position();
+                headBuf.putInt(0);
+                headBuf.force();
+            }
+            else {
+                /*
+                 * The header exists. Vet it.
+                 */
+                final IoHandler.MyBuffer headBuf = ioHandler.getBuffer(
+                        position, HEADER_SIZE);
+                final int version = headBuf.getInt();
+                if (version != VERSION) {
+                    throw new IllegalStateException(
+                            "Corrupt file: unexpected version: " + version
+                                    + " != " + VERSION);
+                }
+                final int actualEltSize = headBuf.getInt();
+                if (actualEltSize != eltSize) {
+                    throw new IllegalArgumentException(
+                            "Element size inconsistancy: " + actualEltSize
+                                    + " != " + eltSize);
+                }
+                eltCountPosition = headBuf.position();
+                eltCount = headBuf.getInt();
+                if (eltCount < 0) {
+                    throw new IllegalStateException(
+                            "Corrupt file: negative element count: " + eltCount);
+                }
+            }
+            eltCountBuffer = ioHandler.getBuffer(eltCountPosition, Integer.SIZE
+                    / Byte.SIZE);
+            this.eltSize = eltSize;
+        }
+
+        /**
+         * Returns the size of the header.
+         * 
+         * @return The size of the header in bytes.
+         */
+        int getSize() {
+            return HEADER_SIZE;
+        }
+
+        /**
+         * Returns the size of an element.
+         * 
+         * @return The size of an element.
+         */
+        int getEltSize() {
+            return eltSize;
+        }
+
+        /**
+         * Sets the number of elements in the file.
+         */
+        synchronized void setEltCount(final int eltCount) {
+            this.eltCount = eltCount;
+            eltCountBuffer.rewind();
+            eltCountBuffer.putInt(eltCount);
+            eltCountBuffer.force();
+        }
+
+        /**
+         * Returns the number of elements in the file.
+         * 
+         * @return The number of elements in the file.
+         */
+        synchronized int getEltCount() {
+            return eltCount;
+        }
+    }
+
+    /**
+     * The portion of the file that contains all the elements.
+     * <p>
+     * This class is thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    private static class Heap<E extends MinHeapFile.Element> {
+        /**
+         * The I/O handler for the underlying file.
+         */
+        private final IoHandler ioHandler;
+        /**
+         * The file-header.
+         */
+        private final Header    header;
+        /**
+         * The offset, in bytes, to the start of the elements in the file.
+         */
+        private final int       position;
+        /**
+         * The type of an element.
+         */
+        private final Class<E>  type;
+
+        /**
+         * Constructs from an I/O handler, the file-header, the offset to the
+         * start of the elements, and the type of an element.
+         * 
+         * @param ioHandler
+         *            The I/O handler for the file.
+         * @param header
+         *            The file-header.
+         * @param position
+         *            The offset, in bytes, to the start of the elements in the
+         *            file.
+         * @param type
+         *            The type of an element.
+         * @throws IOException
+         *             if an I/O error occurs
+         */
+        Heap(final IoHandler ioHandler, final Header header,
+                final int position, final Class<E> type) throws IOException {
+            this.ioHandler = ioHandler;
+            this.header = header;
+            this.position = position;
+            this.type = type;
+        }
+
+        /**
+         * Returns an existing element.
+         * 
+         * @param index
+         *            Index of the existing element to return.
+         * @return The element at the corresponding index
+         * @throws IllegalAccessException
+         *             if an element can't be created.
+         * @throws InstantiationException
+         *             if an element can't be created.
+         * @throws ClosedChannelException
+         *             if the channel to the file is closed
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        E getElt(final int index) throws ClosedChannelException,
+                InstantiationException, IllegalAccessException, IOException {
+            final FileLock lock = ioHandler.lock(offsetToElement(index),
+                    header.getEltSize(), true);
+            try {
+                final E instance = type.newInstance();
+                instance.read(getEltBuffer(index));
+                return instance;
+            }
+            finally {
+                lock.release();
+            }
+        }
+
+        /**
+         * Sets an existing element to a given element.
+         * 
+         * @param index
+         *            Index of the existing element to be set.
+         * @param elt
+         *            The given element.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private void setElt(final int index, final E elt) throws IOException {
+            final FileLock lock = ioHandler.lock(offsetToElement(index),
+                    header.getEltSize(), false);
+            try {
+                final ByteBuffer buffer = getEltBuffer(index);
+                elt.write(buffer);
+                ioHandler.force(buffer);
+            }
+            finally {
+                lock.release();
+            }
+        }
+
+        /**
+         * Returns the absolute offset, in bytes, to the start of an element.
+         * 
+         * @param index
+         *            The index of the element
+         * @return the absolute offset, in bytes, to the start of the element.
+         * @throws IllegalArgumentException
+         *             if {@code index < 0}
+         */
+        private int offsetToElement(final int index) {
+            if (index < 0) {
+                throw new IllegalArgumentException("Invalid index: " + index);
+            }
+            return position + index * header.getEltSize();
+        }
+
+        /**
+         * Returns an I/O byte-buffer for an existing element.
+         * 
+         * @param index
+         *            The index of the existing element.
+         * @return An I/O byte-buffer for the specified element.
+         * @throws ClosedChannelException
+         *             if the channel to the file is closed
+         * @throws IllegalArgumentException
+         *             if {@code index} is too large.
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        private ByteBuffer getEltBuffer(final int index)
+                throws ClosedChannelException, IOException {
+            final IoHandler.MyBuffer buf = ioHandler.getBuffer(
+                    offsetToElement(index), header.getEltSize());
+            return buf.getByteBuffer();
+        }
+    }
+
     /**
      * The element of the heap-file.
-     * 
+     * <p>
      * Instances are immutable.
      * 
      * @author Steven R. Emmerson
@@ -62,41 +553,26 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
     }
 
     /**
-     * The version of this class.
-     */
-    private static final short     VERSION     = 1;
-    /**
-     * The size of the file-header. The file-header comprise the following
-     * parameters in order: version (4 bytes), eltSize (4 bytes), and eltCount
-     * (4 bytes).
-     */
-    private static final int       HEADER_SIZE = 12;
-    /**
-     * The I/O channel to the file.
-     */
-    private final FileChannel      channel;
-    /**
      * The type of an element.
      */
-    private final Class<T>         type;
+    private final Class<E>  type;
     /**
-     * The I/O byte-buffer for the number of elements.
+     * The header of the heap-file.
      */
-    private final MappedByteBuffer eltCountBuffer;
+    private final Header    header;
     /**
-     * The size of an element.
+     * The I/O handler for the file.
      */
-    private final int              eltSize;
-
+    private final IoHandler ioHandler;
     /**
-     * The I/O byte-buffer for the elements.
+     * The heap of elements.
      */
-    private MappedByteBuffer       eltsBuffer;
+    private final Heap<E>   elements;
     /**
-     * The number of elements in the heap.
+     * The capacity of this instance in elements.
      */
     @GuardedBy("this")
-    private int                    eltCount;
+    private int             capacity;
 
     /**
      * Constructs from the pathname of the file. The file is created if it
@@ -119,7 +595,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws NullPointerException
      *             if {@code type == null}.
      */
-    MinHeapFile(final Path path, final int eltSize, final Class<T> type)
+    MinHeapFile(final Path path, final int eltSize, final Class<E> type)
             throws IOException {
         if (eltSize <= 0) {
             throw new IllegalArgumentException(
@@ -129,67 +605,18 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
             throw new NullPointerException();
         }
         this.type = type;
-        this.eltSize = eltSize;
-        channel = FileChannel.open(path, StandardOpenOption.CREATE,
-                StandardOpenOption.READ, StandardOpenOption.WRITE);
+        ioHandler = new IoHandler(path);
+        header = new Header(ioHandler, 0, eltSize);
+        elements = new Heap<E>(ioHandler, header, header.getSize(), type);
         synchronized (this) {
-            /*
-             * The file-header comprise the following parameters in order:
-             * version (4 bytes), eltSize (4 bytes), and eltCount (4 bytes).
-             */
-            if (channel.size() < HEADER_SIZE) {
-                /*
-                 * The header doesn't exist. Create it.
-                 */
-                ensureFileSize(HEADER_SIZE);
-                final MappedByteBuffer headBuf = channel.map(
-                        MapMode.READ_WRITE, 0, HEADER_SIZE);
-                headBuf.putInt(VERSION);
-                headBuf.putInt(eltSize);
-                eltCountBuffer = channel.map(MapMode.READ_WRITE,
-                        headBuf.position(), 4);
-                eltCount = 0;
-                writeEltCount();
-                headBuf.force();
-            }
-            else {
-                /*
-                 * The header exists. Vet it.
-                 */
-                final ByteBuffer headBuf = channel.map(MapMode.READ_WRITE, 0,
-                        HEADER_SIZE);
-                final int version = headBuf.getInt();
-                if (version != VERSION) {
-                    throw new IllegalStateException(
-                            "Corrupt file: unexpected version: " + version
-                                    + " != " + VERSION);
-                }
-                final int actualEltSize = headBuf.getInt();
-                if (actualEltSize != eltSize) {
-                    throw new IllegalArgumentException(
-                            "Element size inconsistancy: " + actualEltSize
-                                    + " != " + eltSize);
-                }
-                eltCountBuffer = channel.map(MapMode.READ_WRITE,
-                        headBuf.position(), 4);
-                eltCount = eltCountBuffer.getInt();
-                if (eltCount < 0) {
-                    throw new IllegalStateException(
-                            "Corrupt file: negative element count: " + eltCount);
-                }
-                if (channel.size() < HEADER_SIZE + getBufferOffset(eltCount)) {
-                    throw new IOException("Corrupt file: file too small: "
-                            + channel.size() + " < " + HEADER_SIZE
-                            + getBufferOffset(eltCount));
-                }
-            }
-            this.eltsBuffer = getEltsBuffer();
+            capacity = (ioHandler.size() - header.getSize())
+                    / header.getEltSize();
         }
     }
 
     /**
      * Adds an element. Does so in a way that a power failure might cause the
-     * heap to contain a duplicate element, but no element will be lost.
+     * heap to contain an extra element.
      * 
      * @param elt
      *            The element to be added.
@@ -200,21 +627,45 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws InstantiationException
      *             if the new element can't be created
      */
-    synchronized void add(final T elt) throws IOException,
+    synchronized void add(final E elt) throws IOException,
             InstantiationException, IllegalAccessException {
         int childIndex;
         int parentIndex;
+        final int eltCount = header.getEltCount();
+        ensureCapacity(header.getEltCount() + 1);
         for (childIndex = eltCount; childIndex > 0; childIndex = parentIndex) {
             parentIndex = (childIndex - 1) / 2;
-            final T parent = readElt(parentIndex);
+            final E parent = elements.getElt(parentIndex);
             if (parent.compareTo(elt) <= 0) {
                 break;
             }
-            writeElt(childIndex, parent);
+            elements.setElt(childIndex, parent);
         }
-        ++eltCount;
-        writeEltCount();
-        writeElt(childIndex, elt);
+        elements.setElt(childIndex, elt);
+        header.setEltCount(eltCount + 1);
+    }
+
+    /**
+     * Ensures that this instance can contain the given number of elements.
+     * 
+     * @param eltCount
+     *            The given number of elements.
+     * @throws IOException
+     *             if an I/O error occurs
+     * @throws IllegalArgumentException
+     *             if {@code eltCount < 0}
+     */
+    private synchronized void ensureCapacity(final int eltCount)
+            throws IOException {
+        if (eltCount < 0) {
+            throw new IllegalArgumentException("Invalid capacity: " + eltCount);
+        }
+        if (eltCount > capacity) {
+            final int newCapacity = (int) Math.round(eltCount * 1.61803399);
+            ioHandler.ensureSize(header.getSize() + newCapacity
+                    * header.getEltSize());
+            capacity = newCapacity;
+        }
     }
 
     /**
@@ -229,10 +680,10 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws IllegalAccessException
      * @throws InstantiationException
      */
-    synchronized T peek() throws ClosedByInterruptException,
+    synchronized E peek() throws ClosedByInterruptException,
             InstantiationException, IllegalAccessException, IOException {
-        return (eltCount > 0)
-                ? readElt(0)
+        return (header.getEltCount() > 0)
+                ? elements.getElt(0)
                 : null;
     }
 
@@ -252,20 +703,21 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws InstantiationException
      *             if an element can't be created.
      */
-    synchronized T remove() throws ClosedChannelException, IOException,
+    synchronized E remove() throws ClosedChannelException, IOException,
             InstantiationException, IllegalAccessException {
-        T firstElt;
+        E firstElt;
+        int eltCount = header.getEltCount();
         if (eltCount <= 0) {
             firstElt = null;
         }
         else {
-            firstElt = readElt(0);
-            final T elt = readElt(--eltCount);
+            firstElt = elements.getElt(0);
+            final E elt = elements.getElt(--eltCount);
             int parentIndex = 0;
             for (int childIndex = 1; childIndex < eltCount; childIndex = 2 * parentIndex + 1) {
-                T child = readElt(childIndex);
+                E child = elements.getElt(childIndex);
                 if ((childIndex + 1 < eltCount)) {
-                    final T otherChild = readElt(childIndex + 1);
+                    final E otherChild = elements.getElt(childIndex + 1);
                     if (child.compareTo(otherChild) > 0) {
                         child = otherChild;
                         childIndex++;
@@ -274,11 +726,11 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
                 if (child.compareTo(elt) >= 0) {
                     break;
                 }
-                writeElt(parentIndex, child);
+                elements.setElt(parentIndex, child);
                 parentIndex = childIndex;
             }
-            writeElt(parentIndex, elt);
-            writeEltCount();
+            elements.setElt(parentIndex, elt);
+            header.setEltCount(eltCount);
         }
         return firstElt;
     }
@@ -288,8 +740,8 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * 
      * @return The number of elements in this instance.
      */
-    synchronized int size() {
-        return eltCount;
+    int size() {
+        return header.getEltCount();
     }
 
     /**
@@ -299,172 +751,31 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      * @throws IOException
      *             if an I/O error occurs.
      */
-    synchronized void close() throws IOException {
-        channel.close();
-    }
-
-    /**
-     * Writes the number of elements to the file.
-     */
-    private void writeEltCount() {
-        assert Thread.holdsLock(this);
-        eltCountBuffer.rewind();
-        eltCountBuffer.putInt(eltCount);
-        eltCountBuffer.force();
-    }
-
-    /**
-     * Writes an element.
-     * 
-     * @param index
-     *            Index of the element to be written.
-     * @param elt
-     *            Value of the element.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    private void writeElt(final int index, final T elt) throws IOException {
-        assert Thread.holdsLock(this);
-        final ByteBuffer buffer = getEltBuffer(index);
-        elt.write(buffer);
-        eltsBuffer.force();
-    }
-
-    /**
-     * Returns an element.
-     * 
-     * @param index
-     *            Index of the element to return.
-     * @return The element at the corresponding position
-     * @throws IllegalAccessException
-     *             if an element can't be created.
-     * @throws InstantiationException
-     *             if an element can't be created.
-     * @throws ClosedChannelException
-     *             if the channel to the file is closed
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    private T readElt(final int index) throws ClosedChannelException,
-            InstantiationException, IllegalAccessException, IOException {
-        assert Thread.holdsLock(this);
-        final T instance = type.newInstance();
-        instance.read(getEltBuffer(index));
-        return instance;
-    }
-
-    /**
-     * Returns an I/O byte-buffer for a given element.
-     * 
-     * @param index
-     *            The index of the element.
-     * @return An I/O bite-buffer for the specified element.
-     * @throws ClosedChannelException
-     *             if the channel to the file is closed
-     * @throws IllegalArgumentException
-     *             if {@code index} is too large.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    private ByteBuffer getEltBuffer(final int index)
-            throws ClosedChannelException, IOException {
-        assert Thread.holdsLock(this);
-        if (getMaxEltCount() < (index + 1)) {
-            // The golden ratio is a space/time compromise
-            final long newMaxEltCount = Math.round((index + 1) * 1.618034);
-            if (newMaxEltCount > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException("Index too large: " + index);
-            }
-            final int maxEltCount = (int) newMaxEltCount;
-            ensureFileSize(HEADER_SIZE + getBufferOffset(maxEltCount));
-            eltsBuffer = getEltsBuffer();
-        }
-        eltsBuffer.position(getBufferOffset(index));
-        final ByteBuffer eltBuffer = eltsBuffer.slice();
-        eltBuffer.limit(eltSize);
-        return eltBuffer;
-    }
-
-    /**
-     * Returns a mapped byte buffer for the element portion of the I/O channel.
-     * 
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    private MappedByteBuffer getEltsBuffer() throws IOException {
-        assert Thread.holdsLock(this);
-        return channel.map(MapMode.READ_WRITE, HEADER_SIZE, channel.size()
-                - HEADER_SIZE);
-    }
-
-    /**
-     * Returns the position in the element buffer of the start of a given
-     * element.
-     * 
-     * @param index
-     *            the index of the element.
-     * @return The position in the element buffer of the start of the element.
-     */
-    private int getBufferOffset(final int index) {
-        assert Thread.holdsLock(this);
-        return index * eltSize;
-    }
-
-    /**
-     * Returns the maximum number of elements that the file can contain.
-     * 
-     * @return The maximum number of elements that the file can contain.
-     * @throws ClosedChannelException
-     *             if the channel to the file is closed
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    private long getMaxEltCount() throws ClosedChannelException, IOException {
-        assert Thread.holdsLock(this);
-        return (channel.size() - HEADER_SIZE) / eltSize;
-    }
-
-    /**
-     * Ensures that the size of the file is at least a given value.
-     * 
-     * @param size
-     *            The minimum size of the file in bytes.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    private void ensureFileSize(final int size) throws IOException {
-        assert Thread.holdsLock(this);
-        if (channel.size() < size) {
-            channel.position(size - 1);
-            channel.write(ByteBuffer.wrap(new byte[] { 0 }));
-        }
-        // channel.force(false);
+    void close() throws IOException {
+        ioHandler.close();
     }
 
     @Override
-    public Iterator<T> iterator() {
-        return new Iterator<T>() {
+    public Iterator<E> iterator() {
+        return new Iterator<E>() {
             private int index = 0;
 
             @Override
             public boolean hasNext() {
-                final MinHeapFile<T> heap = MinHeapFile.this;
+                final MinHeapFile<E> heap = MinHeapFile.this;
                 synchronized (heap) {
-                    return index < heap.eltCount;
+                    return index < header.getEltCount();
                 }
             }
 
             @Override
-            public T next() {
-                final MinHeapFile<T> heap = MinHeapFile.this;
-                synchronized (heap) {
-                    try {
-                        return heap.readElt(index++);
-                    }
-                    catch (final Exception e) {
-                        throw (NoSuchElementException) new NoSuchElementException(
-                                "Index=" + index).initCause(e);
-                    }
+            public E next() {
+                try {
+                    return elements.getElt(index++);
+                }
+                catch (final Exception e) {
+                    throw (NoSuchElementException) new NoSuchElementException(
+                            "Index=" + index).initCause(e);
                 }
             }
 
@@ -482,7 +793,7 @@ final class MinHeapFile<T extends MinHeapFile.Element> implements Iterable<T> {
      */
     @Override
     public synchronized String toString() {
-        return "MinHeapFile [eltCount=" + eltCount + ", type=" + type
-                + ", eltSize=" + eltSize + "]";
+        return "MinHeapFile [eltCount=" + size() + ", type=" + type
+                + ", eltSize=" + header.getEltSize() + "]";
     }
 }

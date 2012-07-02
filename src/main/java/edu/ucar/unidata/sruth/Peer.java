@@ -7,7 +7,6 @@ package edu.ucar.unidata.sruth;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.ObjectOutputStream;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
@@ -26,10 +25,6 @@ import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
 
-import edu.ucar.unidata.sruth.ClearingHouse.PieceProcessStatus;
-import edu.ucar.unidata.sruth.Connection.Message;
-import edu.ucar.unidata.sruth.Connection.Stream;
-
 /**
  * Exchanges data with its remote counterpart.
  * <p>
@@ -39,6 +34,617 @@ import edu.ucar.unidata.sruth.Connection.Stream;
  */
 @ThreadSafe
 final class Peer implements Callable<Boolean> {
+    /**
+     * Scans the archive for remotely-desired data and adds it to the notice
+     * queue.
+     * 
+     * @author Steven E. Emmerson
+     */
+    @ThreadSafe
+    private final class FileScanner implements Callable<Void> {
+        public Void call() throws InterruptedException, IOException {
+            setThreadName(toString());
+            logger.trace("Starting up: {}", this);
+            clearingHouse.walkArchive(new FilePieceSpecSetConsumer() {
+                @Override
+                public void consume(final FilePieceSpecSet spec)
+                        throws InterruptedException {
+                    noticeQueue.oldData(spec);
+                }
+            }, remoteFilter);
+            return null;
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public String toString() {
+            return "FileScanner [rootDir=" + clearingHouse.getRootDir() + "]";
+        }
+    }
+
+    /**
+     * Receives messages from the remote peer and processes them.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private abstract class Receiver<T extends PeerMessage> extends
+            UninterruptibleTask<Void> {
+        /**
+         * The underlying {@link Connection#Stream}.
+         */
+        private final Connection.Stream.Input stream;
+        /**
+         * The type of the received objects.
+         */
+        private final Class<T>                type;
+
+        /**
+         * Constructs from a stream with the remote peer, and the type of
+         * received objects.
+         * 
+         * @param stream
+         *            The stream with the remote peer.
+         * @param type
+         *            The type of the received objects.
+         * @throws NullPointerException
+         *             if {stream == null || type == null}.
+         */
+        protected Receiver(final Connection.Stream stream, final Class<T> type) {
+            if (null == type) {
+                throw new NullPointerException();
+            }
+
+            this.stream = stream.getInput();
+            this.type = type;
+        }
+
+        /**
+         * Reads objects from the connection with the remote peer and processes
+         * them. Will block until the connection is initialized by the remote
+         * peer. Completes normally if and only if 1) the connection is closed;
+         * or 2) the subclass indicates that no more processing should occur
+         * (because all the desired data has been received, for example). Closes
+         * the input stream.
+         * 
+         * @throws ClassCastException
+         *             if a received object has the wrong type.
+         * @throws ClassNotFoundException
+         *             if a received object has unknown type.
+         * @throws EOFException
+         *             if a read on the connection returned EOF.
+         * @throws IOException
+         *             if a serious I/O error occurs.
+         * @throws SocketException
+         *             if the connection was closed by the remote peer.
+         */
+        public Void call() throws EOFException, IOException, SocketException,
+                ClassNotFoundException {
+            final String origName = Thread.currentThread().getName();
+            setThreadName(toString());
+            try {
+                for (;;) {
+                    final Object obj = readObject();
+                    final T message = type.cast(obj);
+                    message.processYourself(Peer.this);
+                    if (allDone()) {
+                        break;
+                    }
+                }
+            }
+            catch (final InterruptedException ignored) {
+                logger.debug("Interrupted: {}", getClass().getSimpleName());
+            }
+            catch (final IOException e) {
+                if (isCancelled()) {
+                    logger.debug("Interrupted: {}", getClass().getSimpleName());
+                }
+                else {
+                    throw e;
+                }
+            }
+            finally {
+                stream.close();
+                Thread.currentThread().setName(origName);
+            }
+            return null;
+        }
+
+        /**
+         * Returns the next object from an object input stream or {@code null}
+         * if no more objects are forthcoming.
+         * 
+         * @param ois
+         *            The object input stream.
+         * @return The next object from the object input stream or {@code null}.
+         * @throws EOFException
+         *             if a read on the connection returned EOF.
+         * @throws ClassCastException
+         *             if the object has the wrong type.
+         * @throws ClassNotFoundException
+         *             if object has unknown type.
+         * @throws IOException
+         *             if a serious I/O error occurs.
+         * @throws SocketException
+         *             if the connection was closed by the remote peer.
+         */
+        protected final Object readObject() throws EOFException, IOException,
+                ClassNotFoundException, SocketException {
+            try {
+                final Object obj = stream.receiveObject(0);
+                return obj;
+            }
+            catch (final SocketTimeoutException impossible) {
+                throw new AssertionError(impossible);
+            }
+        }
+
+        /**
+         * Indicates if processing of incoming messages should stop.
+         * <p>
+         * This implementation returns {@code false}.
+         */
+        protected boolean allDone() {
+            return false;
+        }
+
+        /**
+         * Stops this instance by closing the relevant {@link Connection#Stream}
+         * .
+         */
+        @Override
+        protected final void stop() {
+            stream.close();
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public final String toString() {
+            return getClass().getSimpleName() + " [peer=" + Peer.this + "]";
+        }
+    }
+
+    /**
+     * Receives requests and processes them.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class RequestReceiver extends Receiver<Request> {
+        /**
+         * Constructs from a connection to the remote peer.
+         * 
+         * @param connection
+         *            The connection to the remote peer.
+         * @throws NullPointerException
+         *             if {connection == null}.
+         */
+        RequestReceiver(final Connection connection) {
+            super(connection.getRequestStream(), Request.class);
+        }
+    }
+
+    /**
+     * Receives notices of data and processes them
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class NoticeReceiver extends Receiver<Notice> {
+        /**
+         * Constructs from a connection to the remote peer.
+         * 
+         * @param connection
+         *            The connection to the remote peer.
+         * @throws NullPointerException
+         *             if {connection == null}.
+         */
+        NoticeReceiver(final Connection connection) {
+            super(connection.getNoticeStream(), Notice.class);
+        }
+    }
+
+    /**
+     * Receives pieces of data and processes them.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class PieceReceiver extends Receiver<Piece> {
+        /**
+         * Constructs from a connection to the remote peer.
+         * 
+         * @param connection
+         *            The connection to the remote peer.
+         * @throws NullPointerException
+         *             if {connection == null}.
+         */
+        PieceReceiver(final Connection connection) {
+            super(connection.getDataStream(), Piece.class);
+        }
+
+        @Override
+        protected boolean allDone() {
+            return clearingHouse.allDataReceived();
+        }
+    }
+
+    /**
+     * Sends messages to the remote peer.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private abstract class Sender<T extends PeerMessage> extends
+            UninterruptibleTask<Void> {
+        /**
+         * The underlying {@link Connection#Stream}.
+         */
+        private final Connection.Stream.Output stream;
+
+        /**
+         * Constructs from a stream to the remote peer.
+         * 
+         * @param stream
+         *            The relevant stream to the remote peer.
+         * @throws NullPointerException
+         *             if {stream == null}.
+         */
+        protected Sender(final Connection.Stream stream) {
+            this.stream = stream.getOutput();
+        }
+
+        /**
+         * Executes this instance. Completes normally if and only if 1) the
+         * {@link #nextMessage()} method returns {@code null}; 2) the underlying
+         * connection is closed; or 3) the current thread is interrupted. Closes
+         * the output stream.
+         * 
+         * @throws IOException
+         *             if an I/O error occurs.
+         */
+        @Override
+        public final Void call() throws IOException {
+            setThreadName(toString());
+            try {
+                T message;
+                while ((message = nextMessage()) != null) {
+                    stream.send(message);
+                }
+            }
+            catch (final SocketException e) {
+                if (!isCancelled()) {
+                    logger.debug("Stream closed: {}", stream);
+                    throw e;
+                }
+            }
+            catch (final InterruptedException ignored) {
+                logger.debug("Interrupted: {}", getClass().getSimpleName());
+            }
+            finally {
+                stream.close();
+            }
+            return null;
+        }
+
+        /**
+         * Returns the next message to send.
+         * 
+         * @return The next message to send.
+         * @throws InterruptedException
+         *             if the current thread is interrupted.
+         */
+        protected abstract T nextMessage() throws InterruptedException;
+
+        /**
+         * Stops the thread executing this instance by closing the output
+         * stream.
+         */
+        @Override
+        protected final void stop() {
+            stream.close();
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see java.lang.Object#toString()
+         */
+        @Override
+        public final String toString() {
+            return getClass().getSimpleName() + " [peer=" + Peer.this + "]";
+        }
+    }
+
+    /**
+     * Sends requests for data to the remote peer.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class RequestSender extends Sender<Request> {
+        /**
+         * Constructs from a connection to the remote peer.
+         * 
+         * @param connection
+         *            The connection to the remote peer.
+         * @throws NullPointerException
+         *             if {connection == null}.
+         */
+        RequestSender(final Connection connection) {
+            super(connection.getRequestStream());
+        }
+
+        @Override
+        public PieceRequest nextMessage() throws InterruptedException {
+            return new PieceRequest(requestQueue.take());
+        }
+    }
+
+    /**
+     * Sends notices of available data to a remote peer.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class NoticeSender extends Sender<Notice> {
+        /**
+         * Constructs from a connection to a remote peer and a specification of
+         * the data desired by the remote peer.
+         * 
+         * @param connection
+         *            The connection to the remote peer.
+         * @throws NullPointerException
+         *             if {connection == null}.
+         */
+        NoticeSender(final Connection connection) {
+            super(connection.getNoticeStream());
+        }
+
+        @Override
+        protected Notice nextMessage() throws InterruptedException {
+            return noticeQueue.take();
+        }
+    }
+
+    /**
+     * Sends pieces of data to the remote peer.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private final class PieceSender extends Sender<Piece> {
+        /**
+         * Constructs from a connection to the remote peer.
+         * 
+         * @param connection
+         *            The connection to the remote peer.
+         * @throws NullPointerException
+         *             if {connection == null}.
+         */
+        PieceSender(final Connection connection) {
+            super(connection.getDataStream());
+        }
+
+        @Override
+        protected Piece nextMessage() throws InterruptedException {
+            return pieceQueue.take();
+        }
+    }
+
+    /**
+     * A queue of data-specifications.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private static final class DataSpecQueue {
+        /**
+         * The set of piece-specifications.
+         */
+        @GuardedBy("this")
+        private PieceSpecSetIface pieceSpecSet = EmptyPieceSpecSet.INSTANCE;
+
+        /**
+         * Adds a data-specification.
+         * 
+         * @param spec
+         *            The specification of the data to be added.
+         */
+        synchronized void put(final FilePieceSpecSet spec) {
+            pieceSpecSet = pieceSpecSet.merge(spec);
+            notify();
+        }
+
+        /**
+         * Adds a set of data-piece specifications.
+         * 
+         * @param specs
+         *            The set of data-piece specifications. The client must not
+         *            subsequently modify this set.
+         */
+        synchronized void put(final PieceSpecSetIface specs) {
+            pieceSpecSet = pieceSpecSet.merge(specs);
+            notify();
+        }
+
+        /**
+         * Indicates if this instance has a specification or not.
+         * 
+         * @return {@code true} if and only if this instance has a
+         *         specification.
+         */
+        synchronized boolean isEmpty() {
+            return pieceSpecSet.isEmpty();
+        }
+
+        /**
+         * Returns the next data-specification. Blocks until one is available.
+         * 
+         * @return The next data-specification.
+         * @throws InterruptedException
+         *             if the current thread is interrupted.
+         */
+        synchronized PieceSpecSetIface take() throws InterruptedException {
+            while (isEmpty()) {
+                wait();
+            }
+            return removeAndReturn();
+        }
+
+        /**
+         * Removes and returns the next data-specification if one exists;
+         * otherwise, returns {@code null}.
+         * 
+         * @return The next data-specification of one exists; otherwise,
+         *         {@code null}.
+         */
+        synchronized PieceSpecSetIface poll() {
+            return isEmpty()
+                    ? null
+                    : removeAndReturn();
+        }
+
+        @GuardedBy("this")
+        synchronized private PieceSpecSetIface removeAndReturn() {
+            final PieceSpecSetIface specs = pieceSpecSet;
+            pieceSpecSet = EmptyPieceSpecSet.INSTANCE;
+            notify();
+            return specs;
+        }
+    }
+
+    /**
+     * A queue of notices.
+     * <p>
+     * Instances are thread-safe.
+     * 
+     * @author Steven R. Emmerson
+     */
+    @ThreadSafe
+    private static final class NoticeQueue {
+        /**
+         * Was the last notice an addition?
+         */
+        private volatile boolean    wasAddition = false;
+        /**
+         * The queue of additions.
+         */
+        @GuardedBy("this")
+        private final DataSpecQueue additions   = new DataSpecQueue();
+        /**
+         * The queue of removals.
+         */
+        @GuardedBy("this")
+        private ArchivePathSet      removals    = new ArchivePathSet();
+
+        /**
+         * Adds a notice about new data.
+         * 
+         * @param spec
+         *            The specification of the new data.
+         */
+        synchronized void newData(final FilePieceSpecSet spec) {
+            /*
+             * NB: Notices about new data accumulate unconditionally.
+             */
+            additions.put(spec);
+            logger.trace("New-data notice added: {}", spec);
+            notify();
+        }
+
+        /**
+         * Adds a notice of old data.
+         * <p>
+         * This is a potentially lengthy operation because a notice about old
+         * data won't be added as long as a notice about new data remains to be
+         * sent.
+         * 
+         * @param spec
+         *            The specification of the data to be added.
+         * @throws InterruptedException
+         *             if the current thread is interrupted
+         */
+        synchronized void oldData(final FilePieceSpecSet spec)
+                throws InterruptedException {
+            /*
+             * NB: Notices about old data do not accumulate unconditionally in
+             * order to favor the transmission of new data over old data.
+             */
+            while (!additions.isEmpty()) {
+                wait();
+            }
+            additions.put(spec);
+            logger.trace("Old-data notice added: {}", spec);
+            notify();
+        }
+
+        /**
+         * Adds a notice of removal of a file.
+         * 
+         * @param archivePath
+         *            The archive-pathname of the file.
+         */
+        synchronized void put(final ArchivePath archivePath) {
+            removals.add(archivePath);
+            logger.trace("Removal notice added: {}", archivePath);
+            notify();
+        }
+
+        /**
+         * Returns the next notice. Blocks until one is available.
+         * 
+         * @return The next notice.
+         * @throws InterruptedException
+         *             if the current thread is interrupted.
+         */
+        synchronized Notice take() throws InterruptedException {
+            Notice notice;
+            while (removals.isEmpty() && additions.isEmpty()) {
+                wait();
+            }
+            if (additions.isEmpty() || (!removals.isEmpty() && wasAddition)) {
+                notice = (1 == removals.size())
+                        ? new RemovedFileNotice(removals.iterator().next())
+                        : new RemovedFilesNotice(removals);
+                removals = new ArchivePathSet();
+                wasAddition = false;
+            }
+            else {
+                notice = new AdditionNotice(additions.poll());
+                wasAddition = true;
+            }
+            notify();
+            return notice;
+        }
+    }
+
     /**
      * The logging service.
      */
@@ -73,6 +679,11 @@ final class Peer implements Callable<Boolean> {
      */
     private final DataSpecQueue        requestQueue       = new DataSpecQueue();
     /**
+     * Notice request queue. Contains specifications of data-pieces about which
+     * the remote peer should send notices for those that it has.
+     */
+    private final DataSpecQueue        requestNoticeQueue = new DataSpecQueue();
+    /**
      * The executor service for all the threads of a peer.
      */
     private final CancellingExecutor   cancellingExecutor = new CancellingExecutor(
@@ -89,6 +700,11 @@ final class Peer implements Callable<Boolean> {
      * Whether or not the counter is stopped.
      */
     private volatile boolean           counterStopped;
+    /**
+     * The set of pending data-piece requests (i.e., requests that have been at
+     * least queued but whose referenced data-pieces have not yet arrived)
+     */
+    private final SpecSet              pendingRequests    = new SpecSet();
 
     /**
      * Constructs from the pathname of the root of the file-tree and a
@@ -194,13 +810,13 @@ final class Peer implements Callable<Boolean> {
                     connection.getDataStream().getOutput().close();
                 }
                 else {
-                    // The remote instance wants data
-                    completionService.submit(new NoticeSender(connection
-                            .getNoticeStream()));
-                    completionService.submit(new RequestReceiver(connection
-                            .getRequestStream()));
-                    completionService.submit(new PieceSender(connection
-                            .getDataStream()));
+                    /*
+                     * The remote instance wants data. Start the tasks in a
+                     * particular order.
+                     */
+                    completionService.submit(new PieceSender(connection));
+                    completionService.submit(new RequestReceiver(connection));
+                    completionService.submit(new NoticeSender(connection));
                 }
 
                 if (localFilter.equals(Filter.NOTHING)) {
@@ -210,13 +826,13 @@ final class Peer implements Callable<Boolean> {
                     connection.getDataStream().getInput().close();
                 }
                 else {
-                    // This instance wants data
-                    completionService.submit(new NoticeReceiver(connection
-                            .getNoticeStream()));
-                    completionService.submit(new RequestSender(connection
-                            .getRequestStream()));
-                    completionService.submit(new PieceReceiver(connection
-                            .getDataStream()));
+                    /*
+                     * This instance wants data. Start the tasks in a particular
+                     * order.
+                     */
+                    completionService.submit(new PieceReceiver(connection));
+                    completionService.submit(new RequestSender(connection));
+                    completionService.submit(new NoticeReceiver(connection));
                 }
 
                 validPeer = clearingHouse.add(this);
@@ -297,19 +913,21 @@ final class Peer implements Callable<Boolean> {
     void notifyRemoteIfDesired(final PieceSpec pieceSpec)
             throws InterruptedException {
         if (remoteFilter.matches(pieceSpec.getArchivePath())) {
-            noticeQueue.put(pieceSpec);
+            noticeQueue.newData(pieceSpec);
         }
     }
 
     /**
-     * Adds a request to be made of the remote peer.
+     * Queues a request for a data-piece to be made of the remote peer.
      * 
      * @param pieceSpec
      *            Specification of the piece of data to request from the remote
      *            peer.
      */
-    void addRequest(final PieceSpec pieceSpec) {
+    void queueRequest(final PieceSpec pieceSpec) {
+        pendingRequests.add(pieceSpec);
         requestQueue.put(pieceSpec);
+        logger.trace("Request added: {}", pieceSpec);
     }
 
     /**
@@ -322,7 +940,7 @@ final class Peer implements Callable<Boolean> {
     void newData(final FilePieceSpecSet spec) {
         logger.trace("New data: {}", spec);
         if (remoteFilter.matches(spec.getArchivePath())) {
-            noticeQueue.put(spec);
+            noticeQueue.newData(spec);
         }
     }
 
@@ -330,23 +948,91 @@ final class Peer implements Callable<Boolean> {
      * Responds to the removal of a local file or category by putting a
      * removal-notice in the notice-queue for the remote peer.
      * 
-     * @param fileId
+     * @param archivePath
      *            Identifier of the file or category.
      */
-    void notifyRemoteOfRemovals(final FileId fileId) {
-        noticeQueue.put(fileId);
+    void notifyRemoteOfRemovals(final ArchivePath archivePath) {
+        noticeQueue.put(archivePath);
     }
 
     /**
      * Removes a file.
      * 
-     * @param fileId
-     *            Identifier of the file.
+     * @param archivePath
+     *            Archive-pathname of the file.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code archivePath == null}.
      */
-    void remove(final FileId fileId) throws IOException {
-        clearingHouse.remove(fileId);
+    void remove(final ArchivePath archivePath) throws IOException {
+        clearingHouse.remove(archivePath);
+    }
+
+    /**
+     * Queues the specified pieces of data for sending to the remote peer.
+     * 
+     * @param specs
+     *            Specifications of the pieces of data to be queued for sending.
+     */
+    void queueForSending(final PieceSpecSetIface specs)
+            throws InterruptedException, IOException {
+        for (final PieceSpec spec : specs) {
+            try {
+                final Piece piece = clearingHouse.getPiece(spec);
+                if (piece != null) {
+                    pieceQueue.put(piece);
+                }
+            }
+            catch (final FileInfoMismatchException e) {
+                logger.warn("Mismatched file-information: {}: {}",
+                        e.toString(), this);
+            }
+        }
+    }
+
+    /**
+     * Queues notices for the data-pieces that are referenced by a set of
+     * data-piece specifications and that also exist in the archive.
+     * 
+     * @param specs
+     *            The set of data-piece specifications. The client shall not
+     *            modify.
+     * @throws FileSystemException
+     *             if too many files are open.
+     * @throws IOException
+     *             if an I/O error occurs
+     */
+    void queueForSendingNotices(final PieceSpecSetIface specs)
+            throws FileSystemException, IOException {
+        final Archive archive = clearingHouse.getArchive();
+        for (final PieceSpec spec : specs) {
+            if (archive.exists(spec)) {
+                noticeQueue.newData(spec);
+            }
+        }
+    }
+
+    /**
+     * Process a piece of data.
+     * 
+     * @param piece
+     *            The piece of data.
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    void process(final Piece piece) throws IOException, InterruptedException {
+        try {
+            final boolean wasUsed = clearingHouse.process(Peer.this, piece);
+            if (!counterStopped && wasUsed) {
+                counter += piece.getSize();
+            }
+        }
+        catch (final FileInfoMismatchException e) {
+            logger.warn("Mismatched file-information: {}: {}", e.toString(),
+                    this);
+        }
+        pendingRequests.remove(piece.getInfo());
     }
 
     /**
@@ -400,6 +1086,27 @@ final class Peer implements Callable<Boolean> {
         counterStopped = false;
     }
 
+    /**
+     * Returns the set of pending (i.e., outstanding) requests for data. The
+     * actual set is returned -- not a copy.
+     * 
+     * @return the set of pending (i.e., outstanding) requests for data.
+     */
+    SpecSet getPendingRequests() {
+        return pendingRequests;
+    }
+
+    /**
+     * Requests the remote peer to send notices of any data-pieces it has that
+     * are also in a set of data-piece specifications.
+     * 
+     * @param specs
+     *            The set of data-piece specifications.
+     */
+    void requestNotices(final SpecSet specs) {
+        requestNoticeQueue.put(specs.getSet());
+    }
+
     /*
      * (non-Javadoc)
      * 
@@ -409,673 +1116,5 @@ final class Peer implements Callable<Boolean> {
     public String toString() {
         return "Peer [connection=" + connection + ", remoteFilter="
                 + remoteFilter + "]";
-    }
-
-    /**
-     * Scans the archive for remotely-desired data and adds it to the notice
-     * queue.
-     * 
-     * @author Steven E. Emmerson
-     */
-    @ThreadSafe
-    private final class FileScanner implements Callable<Void> {
-        public Void call() throws InterruptedException, IOException {
-            setThreadName(toString());
-            logger.trace("Starting up: {}", this);
-            clearingHouse.walkArchive(new FilePieceSpecSetConsumer() {
-                @Override
-                public void consume(final FilePieceSpecSet spec) {
-                    noticeQueue.put(spec);
-                }
-            }, remoteFilter);
-            return null;
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "FileScanner [rootDir=" + clearingHouse.getRootDir() + "]";
-        }
-    }
-
-    /**
-     * Receives objects from the remote peer and acts upon them.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private static abstract class Receiver<T> extends UninterruptibleTask<Void> {
-        /**
-         * The underlying {@link Connection#Stream}.
-         */
-        private final Connection.Stream.Input stream;
-        /**
-         * The type of the received objects.
-         */
-        private final Class<T>                type;
-
-        /**
-         * Constructs from a stream with the remote peer, and the type of
-         * received objects.
-         * 
-         * @param stream
-         *            The stream with the remote peer.
-         * @param type
-         *            The type of the received objects.
-         * @throws NullPointerException
-         *             if {stream == null || type == null}.
-         */
-        protected Receiver(final Connection.Stream stream, final Class<T> type) {
-            if (null == type) {
-                throw new NullPointerException();
-            }
-
-            this.stream = stream.getInput();
-            this.type = type;
-        }
-
-        /**
-         * Reads objects from the connection with the remote peer and processes
-         * them. Will block until the connection is initialized by the remote
-         * peer. Completes normally if and only if 1) the connection is closed;
-         * or 2) the subclass indicates that no more processing should occur
-         * (because all the desired data has been received, for example). Closes
-         * the input stream.
-         * 
-         * @throws ClassCastException
-         *             if a received object has the wrong type.
-         * @throws ClassNotFoundException
-         *             if a received object has unknown type.
-         * @throws EOFException
-         *             if a read on the connection returned EOF.
-         * @throws IOException
-         *             if a serious I/O error occurs.
-         * @throws SocketException
-         *             if the connection was closed by the remote peer.
-         */
-        public Void call() throws EOFException, IOException, SocketException,
-                ClassNotFoundException {
-            final String origName = Thread.currentThread().getName();
-            setThreadName(toString());
-            try {
-                for (;;) {
-                    final Object obj = readObject();
-                    if (!process(type.cast(obj))) {
-                        break;
-                    }
-                }
-            }
-            catch (final InterruptedException ignored) {
-                logger.debug("Interrupted: {}", getClass().getSimpleName());
-            }
-            catch (final IOException e) {
-                if (isCancelled()) {
-                    logger.debug("Interrupted: {}", getClass().getSimpleName());
-                }
-                else {
-                    throw e;
-                }
-            }
-            finally {
-                stream.close();
-                Thread.currentThread().setName(origName);
-            }
-            return null;
-        }
-
-        /**
-         * Returns the next object from an object input stream or {@code null}
-         * if no more objects are forthcoming.
-         * 
-         * @param ois
-         *            The object input stream.
-         * @return The next object from the object input stream or {@code null}.
-         * @throws EOFException
-         *             if a read on the connection returned EOF.
-         * @throws ClassCastException
-         *             if the object has the wrong type.
-         * @throws ClassNotFoundException
-         *             if object has unknown type.
-         * @throws IOException
-         *             if a serious I/O error occurs.
-         * @throws SocketException
-         *             if the connection was closed by the remote peer.
-         */
-        protected final Object readObject() throws EOFException, IOException,
-                ClassNotFoundException, SocketException {
-            try {
-                final Object obj = stream.receiveObject(0);
-                return obj;
-            }
-            catch (final SocketTimeoutException impossible) {
-                throw new AssertionError(impossible);
-            }
-        }
-
-        /**
-         * Processes an object.
-         * 
-         * @param obj
-         *            The object to process.
-         * @return {@code true} if and only if processing should continue.
-         * @throws FileSystemException
-         *             if too many files are open.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        protected abstract boolean process(T obj) throws IOException,
-                InterruptedException;
-
-        /**
-         * Stops this instance by closing the relevant {@link Connection#Stream}
-         * .
-         */
-        @Override
-        protected final void stop() {
-            stream.close();
-        }
-    }
-
-    /**
-     * Receives requests for data and processes them.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class RequestReceiver extends Receiver<PieceSpecSet> {
-        /**
-         * Constructs from a stream to the remote peer.
-         * 
-         * @param stream
-         *            The stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        RequestReceiver(final Stream stream) {
-            super(stream, PieceSpecSet.class);
-        }
-
-        @Override
-        protected boolean process(final PieceSpecSet request)
-                throws InterruptedException, IOException {
-            for (final PieceSpec spec : request) {
-                try {
-                    final Piece piece = clearingHouse.getPiece(spec);
-                    if (piece != null) {
-                        pieceQueue.put(piece);
-                    }
-                }
-                catch (final FileInfoMismatchException e) {
-                    logger.warn("Mismatched file-information: {}: {}",
-                            e.toString(), this);
-                }
-            }
-            return true;
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "RequestReceiver [peer=" + Peer.this + "]";
-        }
-    }
-
-    /**
-     * Receives notices of data and processes them
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class NoticeReceiver extends Receiver<Notice> {
-        /**
-         * Constructs from a stream to the remote peer.
-         * 
-         * @param stream
-         *            The stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        NoticeReceiver(final Stream stream) {
-            super(stream, Notice.class);
-        }
-
-        @Override
-        protected boolean process(final Notice notice) throws IOException,
-                InterruptedException {
-            notice.processYourself(Peer.this);
-            return true;
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "NoticeReceiver []";
-        }
-    }
-
-    /**
-     * Receives pieces of data and processes them.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class PieceReceiver extends Receiver<Piece> {
-        /**
-         * Constructs from a stream to the remote peer.
-         * 
-         * @param stream
-         *            The stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        PieceReceiver(final Stream stream) {
-            super(stream, Piece.class);
-        }
-
-        @Override
-        protected boolean process(final Piece piece) throws IOException,
-                InterruptedException {
-            try {
-                final PieceProcessStatus status = clearingHouse.process(
-                        Peer.this, piece);
-                if (!counterStopped && status.wasUsed()) {
-                    counter += piece.getSize();
-                }
-                return !status.isDone();
-            }
-            catch (final FileInfoMismatchException e) {
-                logger.warn("Mismatched file-information: {}: {}",
-                        e.toString(), this);
-                return true;
-            }
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "PieceReceiver [peer=" + Peer.this + "]";
-        }
-    }
-
-    /**
-     * Sends objects to the remote peer.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private static abstract class Sender extends UninterruptibleTask<Void> {
-        /**
-         * The underlying {@link Connection#Stream}.
-         */
-        private final Connection.Stream.Output stream;
-
-        /**
-         * Constructs from a stream to the remote peer.
-         * 
-         * @param stream
-         *            The relevant stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        protected Sender(final Connection.Stream stream) {
-            this.stream = stream.getOutput();
-        }
-
-        /**
-         * Executes this instance. Completes normally if and only if 1) the
-         * {@link #nextObject()} method returns {@code null}; 2) the underlying
-         * connection is closed; or 3) the current thread is interrupted. Closes
-         * the output stream.
-         * 
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        @Override
-        public final Void call() throws IOException {
-            setThreadName(toString());
-            try {
-                for (Message obj = nextObject(); null != obj; obj = nextObject()) {
-                    writeObject(obj);
-                }
-            }
-            catch (final SocketException e) {
-                if (!isCancelled()) {
-                    logger.debug("Stream closed: {}", stream);
-                    throw e;
-                }
-            }
-            catch (final InterruptedException ignored) {
-                logger.debug("Interrupted: {}", getClass().getSimpleName());
-            }
-            finally {
-                stream.close();
-            }
-            return null;
-        }
-
-        /**
-         * Writes an object to an object output stream. This method should be
-         * used for sending all objects to the remote peer -- including any sent
-         * by {@link #initialize(ObjectOutputStream)}.
-         * 
-         * @param obj
-         *            The object to be written.
-         * @param oos
-         *            The object output stream.
-         * @throws IOException
-         *             if an I/O error occurs.
-         */
-        protected final void writeObject(final Message obj) throws IOException {
-            stream.send(obj);
-        }
-
-        /**
-         * Returns the next object to send.
-         * 
-         * @return The next object to send.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         */
-        protected abstract Message nextObject() throws InterruptedException;
-
-        /**
-         * Stops the thread executing this instance by closing the output
-         * stream.
-         */
-        @Override
-        protected final void stop() {
-            stream.close();
-        }
-    }
-
-    /**
-     * Sends requests for data to the remote peer after initially sending the
-     * specification of locally-desired data.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class RequestSender extends Sender {
-        /**
-         * Constructs from a stream to the remote peer.
-         * 
-         * @param stream
-         *            The stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        RequestSender(final Stream stream) {
-            super(stream);
-        }
-
-        @Override
-        public PieceSpecSet nextObject() throws InterruptedException {
-            return requestQueue.take();
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "RequestSender []";
-        }
-    }
-
-    /**
-     * Sends notices of available data to a remote peer.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class NoticeSender extends Sender {
-        /**
-         * Constructs from a stream to a remote peer and a specification of the
-         * data desired by the remote peer.
-         * 
-         * @param stream
-         *            The stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        NoticeSender(final Stream stream) {
-            super(stream);
-        }
-
-        @Override
-        protected Notice nextObject() throws InterruptedException {
-            final Notice notice = noticeQueue.take();
-            return notice;
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "NoticeSender []";
-        }
-    }
-
-    /**
-     * Sends pieces of data to the remote peer.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private final class PieceSender extends Sender {
-        /**
-         * Constructs from a stream to the remote peer.
-         * 
-         * @param stream
-         *            The stream to the remote peer.
-         * @throws NullPointerException
-         *             if {stream == null}.
-         */
-        PieceSender(final Stream stream) {
-            super(stream);
-        }
-
-        @Override
-        protected Piece nextObject() throws InterruptedException {
-            final Piece piece = pieceQueue.take();
-            return piece;
-        }
-
-        /*
-         * (non-Javadoc)
-         * 
-         * @see java.lang.Object#toString()
-         */
-        @Override
-        public String toString() {
-            return "PieceSender []";
-        }
-    }
-
-    /**
-     * A queue of data-specifications.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private static final class DataSpecQueue {
-        /**
-         * The set of piece-specifications.
-         */
-        @GuardedBy("this")
-        private PieceSpecSet pieceSpecSet;
-
-        /**
-         * Adds a data-specification.
-         * 
-         * @param spec
-         *            The specification of the data to be added.
-         */
-        synchronized void put(final FilePieceSpecSet spec) {
-            logger.trace("New data: {}", spec);
-            pieceSpecSet = (null == pieceSpecSet)
-                    ? spec
-                    : pieceSpecSet.merge(spec);
-            notify();
-        }
-
-        /**
-         * Indicates if this instance has a specification or not.
-         * 
-         * @return {@code true} if and only if this instance has a
-         *         specification.
-         */
-        synchronized boolean isEmpty() {
-            return pieceSpecSet == null || pieceSpecSet.isEmpty();
-        }
-
-        /**
-         * Returns the next data-specification. Blocks until one is available.
-         * 
-         * @return The next data-specification.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         */
-        synchronized PieceSpecSet take() throws InterruptedException {
-            while (isEmpty()) {
-                wait();
-            }
-            return removeAndReturn();
-        }
-
-        /**
-         * Removes and returns the next data-specification of one exists;
-         * otherwise, returns {@code null}.
-         * 
-         * @return The next data-specification of one exists; otherwise,
-         *         {@code null}.
-         */
-        synchronized PieceSpecSet poll() {
-            if (isEmpty()) {
-                return null;
-            }
-            return removeAndReturn();
-        }
-
-        @GuardedBy("this")
-        private PieceSpecSet removeAndReturn() {
-            final PieceSpecSet specs = pieceSpecSet;
-            pieceSpecSet = null;
-            return specs;
-        }
-    }
-
-    /**
-     * A queue of notices.
-     * <p>
-     * Instances are thread-safe.
-     * 
-     * @author Steven R. Emmerson
-     */
-    @ThreadSafe
-    private static final class NoticeQueue {
-        /**
-         * Was the last notice an addition?
-         */
-        private volatile boolean    wasAddition = false;
-        /**
-         * The queue of additions.
-         */
-        @GuardedBy("this")
-        private final DataSpecQueue additions   = new DataSpecQueue();
-        /**
-         * The queue of removals.
-         */
-        @GuardedBy("this")
-        private FileSetSpec         removals    = new FileSetSpec();
-
-        /**
-         * Adds a notice of new data.
-         * 
-         * @param spec
-         *            The specification of the data to be added.
-         */
-        synchronized void put(final FilePieceSpecSet spec) {
-            additions.put(spec);
-            notify();
-        }
-
-        /**
-         * Adds a notice of removal of a file.
-         * 
-         * @param fileId
-         *            The identifier of the file.
-         */
-        synchronized void put(final FileId fileId) {
-            removals.add(fileId);
-            notify();
-        }
-
-        /**
-         * Returns the next notice. Blocks until one is available.
-         * 
-         * @return The next notice.
-         * @throws InterruptedException
-         *             if the current thread is interrupted.
-         */
-        synchronized Notice take() throws InterruptedException {
-            Notice notice;
-            while (removals.isEmpty() && additions.isEmpty()) {
-                wait();
-            }
-            if (additions.isEmpty() || (!removals.isEmpty() && wasAddition)) {
-                notice = (1 == removals.size())
-                        ? new RemovedFileNotice(removals.iterator().next())
-                        : new RemovedFilesNotice(removals);
-                removals = new FileSetSpec();
-                wasAddition = false;
-            }
-            else {
-                notice = new AdditionNotice(additions.poll());
-                wasAddition = true;
-            }
-            return notice;
-        }
     }
 }

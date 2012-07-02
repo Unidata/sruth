@@ -5,6 +5,7 @@
  */
 package edu.ucar.unidata.sruth;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.io.Serializable;
@@ -16,7 +17,7 @@ import java.util.regex.Pattern;
 /**
  * A path through the archive to a regular file or directory relative to the
  * root directory of the archive.
- * 
+ * <p>
  * Instances are immutable.
  * 
  * @author Steven R. Emmerson
@@ -35,7 +36,8 @@ public final class ArchivePath implements Comparable<ArchivePath>, Serializable 
      */
     private static final long       serialVersionUID = 1L;
     /**
-     * The relative pathname of the file.
+     * The relative pathname of the file. INVARIANT: path != null &&
+     * !path.isAbsolute()
      */
     private volatile transient Path path;
 
@@ -299,36 +301,40 @@ public final class ArchivePath implements Comparable<ArchivePath>, Serializable 
     /**
      * Serializes this instance.
      * 
-     * @serialData The relative pathname is written as a string.
+     * @serialData The relative pathname is written as a {@link File}.
      * @throws IOException
      *             if an I/O error occurs.
      */
     private void writeObject(final java.io.ObjectOutputStream out)
             throws IOException {
         out.defaultWriteObject();
-        out.writeObject(path.toString());
+        out.writeObject(path.toFile());
     }
 
     /**
      * Deserializes this instance.
      * 
+     * @throws ClassNotFoundException
+     *             if the deserialized object is unknown
+     * @throws InvalidObjectException
+     *             if the deserialized object is {@code null}, is not a
+     *             pathname, or is an absolute pathname
      * @throws IOException
      *             if an I/O error occurs.
-     * @throws ClassNotFoundException
      */
     private void readObject(final java.io.ObjectInputStream in)
-            throws IOException, ClassNotFoundException {
+            throws ClassNotFoundException, InvalidObjectException, IOException {
         in.defaultReadObject();
-        path = Paths.get((String) in.readObject());
-    }
-
-    private Object readResolve() throws InvalidObjectException {
-        try {
-            return new ArchivePath(path);
+        final Object obj = in.readObject();
+        if (obj == null) {
+            throw new InvalidObjectException("Null object");
         }
-        catch (final Exception e) {
-            throw (InvalidObjectException) new InvalidObjectException(
-                    "Read invalid " + getClass().getSimpleName()).initCause(e);
+        if (!(obj instanceof File)) {
+            throw new InvalidObjectException("Not a File: " + obj);
+        }
+        path = ((File) obj).toPath();
+        if (path.isAbsolute()) {
+            throw new InvalidObjectException("Absolute pathname: " + path);
         }
     }
 }

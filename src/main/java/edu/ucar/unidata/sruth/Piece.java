@@ -5,10 +5,9 @@
  */
 package edu.ucar.unidata.sruth;
 
+import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.util.Arrays;
-
-import edu.ucar.unidata.sruth.Connection.Message;
 
 /**
  * A piece of a file.
@@ -17,7 +16,7 @@ import edu.ucar.unidata.sruth.Connection.Message;
  * 
  * @author Steven R. Emmerson
  */
-final class Piece implements Message {
+final class Piece implements PeerMessage {
     /**
      * The serial version identifier.
      */
@@ -123,6 +122,21 @@ final class Piece implements Message {
      */
     int getTimeToLive() {
         return pieceSpec.getTimeToLive();
+    }
+
+    /**
+     * Processes reception of this instance by the local peer.
+     * 
+     * @param peer
+     *            The local peer
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     * @throws IOException
+     *             if an I/O error occurs
+     */
+    public void processYourself(final Peer peer) throws IOException,
+            InterruptedException {
+        peer.process(this);
     }
 
     /*

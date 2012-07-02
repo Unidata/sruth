@@ -12,6 +12,7 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.file.NoSuchFileException;
 import java.util.Comparator;
 import java.util.Set;
@@ -116,6 +117,9 @@ final class TrackerProxy {
          * <p>
          * This method is potentially slow and uninterruptible.
          * 
+         * @throws SocketTimeoutException
+         *             if the connection couldn't be made in
+         *             {@link Connection#SO_TIMEOUT} seconds
          * @throws ConnectException
          *             if the tracker can't be contacted
          * @throws SocketException
@@ -129,8 +133,8 @@ final class TrackerProxy {
          *             if {@link #deregister()} has been called
          * @see TrackerProxy#register(ClientManager)
          */
-        void register() throws ConnectException, SocketException, IOException,
-                InvalidMessageException {
+        void register() throws SocketTimeoutException, ConnectException,
+                SocketException, IOException, InvalidMessageException {
             synchronized (this) {
                 if (deregistered) {
                     throw new IllegalStateException();

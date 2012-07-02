@@ -7,13 +7,15 @@ import java.io.Serializable;
  * 
  * @author Steven R. Emmerson
  */
-abstract class FilePieceSpecSet implements PieceSpecSet, Serializable {
+abstract class FilePieceSpecSet implements PieceSpecSetIface, Serializable {
     /**
      * The serial version ID.
      */
     private static final long serialVersionUID = 1L;
     /**
      * Information on the file.
+     * 
+     * @serial
      */
     protected final FileInfo  fileInfo;
 
@@ -76,6 +78,16 @@ abstract class FilePieceSpecSet implements PieceSpecSet, Serializable {
      */
     ArchivePath getArchivePath() {
         return fileInfo.getPath();
+    }
+
+    @Override
+    public FilePieceSpecSet clone() {
+        try {
+            return (FilePieceSpecSet) super.clone();
+        }
+        catch (final CloneNotSupportedException e) {
+            throw new AssertionError();
+        }
     }
 
     /*

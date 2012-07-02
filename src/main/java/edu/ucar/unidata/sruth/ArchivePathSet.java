@@ -5,7 +5,6 @@
  */
 package edu.ucar.unidata.sruth;
 
-import java.io.InvalidObjectException;
 import java.io.Serializable;
 import java.util.Iterator;
 import java.util.SortedSet;
@@ -15,25 +14,25 @@ import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
 
 /**
- * A set of file or category specifications in which no specification is a
- * subset of another.
- * 
+ * A set of archive pathnames in which no pathname is a subset of another.
+ * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
 @ThreadSafe
-final class FileSetSpec implements Serializable, Iterable<FileId> {
+final class ArchivePathSet implements Serializable, Iterable<ArchivePath> {
     /**
      * The serial version ID.
      */
-    private static final long       serialVersionUID = 1L;
+    private static final long            serialVersionUID = 1L;
     /**
-     * The set of specifications. No specification in the set is a subset of
-     * another.
+     * The set of pathnames. No pathnames in the set is a subset of another. NB:
+     * The set uses natural ordering; therefore, it will not contain a null
+     * element.
      */
     @GuardedBy("this")
-    private final SortedSet<FileId> archivePaths     = new TreeSet<FileId>();
+    private final SortedSet<ArchivePath> archivePaths     = new TreeSet<ArchivePath>();
 
     /**
      * Indicates if this instance is empty or not.
@@ -45,9 +44,9 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
     }
 
     /**
-     * Returns the number of file or category specifications in this instance.
+     * Returns the number of pathnames in this instance.
      * 
-     * @return The number of file or category specifications.
+     * @return The number of pathnames specifications.
      */
     synchronized int size() {
         return archivePaths.size();
@@ -63,15 +62,21 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
     /**
      * Adds the specification of a file.
      * 
-     * @param fileId
-     *            The identifier of the file.
+     * @param archivePath
+     *            The archive-pathname of the file.
+     * @throws NullPointerException
+     *             if {@code archivePath == null}
      */
-    synchronized void add(final FileId fileId) {
-        archivePaths.add(fileId);
+    synchronized void add(final ArchivePath archivePath) {
+        /*
+         * The following will throw a NullPointerException if archivePath is
+         * null.
+         */
+        archivePaths.add(archivePath);
     }
 
     @Override
-    public Iterator<FileId> iterator() {
+    public Iterator<ArchivePath> iterator() {
         return archivePaths.iterator();
     }
 
@@ -82,14 +87,6 @@ final class FileSetSpec implements Serializable, Iterable<FileId> {
      */
     @Override
     public String toString() {
-        return "FileSetSpec [archivePaths=" + archivePaths + "]";
-    }
-
-    private Object readResolve() throws InvalidObjectException {
-        final FileSetSpec set = new FileSetSpec();
-        for (final FileId spec : archivePaths) {
-            set.add(spec);
-        }
-        return set;
+        return "ArchivePathSet [archivePaths=" + archivePaths + "]";
     }
 }

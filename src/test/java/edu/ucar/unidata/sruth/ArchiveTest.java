@@ -158,8 +158,7 @@ public class ArchiveTest {
     public final void testDeleteMissing() throws FileSystemException,
             IOException {
         final ArchivePath archivePath = new ArchivePath("doesn't exist");
-        final FileId fileId = new FileId(archivePath);
-        archive.remove(fileId);
+        archive.remove(archivePath);
     }
 
     /**
@@ -183,7 +182,8 @@ public class ArchiveTest {
     public final void testToplogyDistribution() throws InterruptedException {
         final Topology topology = new Topology();
         final DistributedTrackerFiles admin = archive
-                .getDistributedTrackerFiles(new InetSocketAddress(38800));
+                .getDistributedTrackerFiles(new InetSocketAddress(
+                        Tracker.IANA_PORT));
         admin.distribute(topology);
         admin.distribute(topology);
         Thread.sleep(1000);
@@ -291,9 +291,12 @@ public class ArchiveTest {
      * 
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
     @Test
-    public final void testWalkArchive() throws IOException {
+    public final void testWalkArchive() throws IOException,
+            InterruptedException {
         class Consumer implements FilePieceSpecSetConsumer {
             int fileCount;
 
@@ -310,7 +313,7 @@ public class ArchiveTest {
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.Archive#remove(edu.ucar.unidata.sruth.FileId)}
+     * {@link edu.ucar.unidata.sruth.Archive#remove(edu.ucar.unidata.sruth.ArchivePath)}
      * .
      * 
      * @throws IOException
@@ -322,7 +325,8 @@ public class ArchiveTest {
         final Piece piece = firstPiece();
         archive.putPiece(piece);
         assertTrue(archive.exists(piece.getInfo()));
-        archive.remove(piece.getFileInfo().getFileId());
+        final ArchivePath archivePath = piece.getArchivePath();
+        archive.remove(archivePath);
         assertFalse(archive.exists(piece.getInfo()));
     }
 }

@@ -1,75 +1,236 @@
 /**
- * Copyright 2010 University Corporation for Atmospheric Research.  All rights
+ * Copyright 2012 University Corporation for Atmospheric Research.  All rights
  * reserved.  See file LICENSE.txt in the top-level directory for licensing
  * information.
  */
 package edu.ucar.unidata.sruth;
 
-import edu.ucar.unidata.sruth.Connection.Message;
+import java.io.Serializable;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.TreeMap;
+
+import net.jcip.annotations.GuardedBy;
+import net.jcip.annotations.ThreadSafe;
 
 /**
- * The interface to one or more piece-specifications.
+ * A set of piece-specifications.
+ * <p>
+ * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-interface PieceSpecSet extends Iterable<PieceSpec>, Message {
+@ThreadSafe
+final class PieceSpecSet implements PieceSpecSetIface, Serializable {
     /**
-     * Merges this instance with one or more piece-specifications. The returned
-     * instance might be this instance, or the other instance, or a new
-     * instance. Instances that aren't returned remain unmodified.
+     * The serial version ID.
+     */
+    private static final long                   serialVersionUID  = 1L;
+    /**
+     * The map from file identifier to the file's piece-specifications.
+     * 
+     * @serial The map from file identifier to the file's piece-specifications.
+     */
+    @GuardedBy("this")
+    private final Map<FileId, FilePieceSpecSet> filePieceSpecSets = new TreeMap<FileId, FilePieceSpecSet>();
+
+    /**
+     * Constructs from nothing.
+     */
+    PieceSpecSet() {
+    }
+
+    /**
+     * Constructs from a set of piece-specifications for a single file.
      * 
      * @param specs
-     *            One or more piece-specifications to be merged with this one.
-     * @return The merger of the two instances.
-     * @throws NullPointerException
-     *             if {@code specs == null}.
+     *            The set of piece-specifications for a single file.
      */
-    abstract PieceSpecSet merge(PieceSpecSet specs);
+    PieceSpecSet(final FilePieceSpecSet specs) {
+        add(specs);
+    }
+
+    @Override
+    public PieceSpecSetIface merge(final PieceSpecSetIface specs) {
+        return specs.merge(this);
+    }
+
+    @Override
+    public PieceSpecSetIface merge(final PieceSpecSet that) {
+        if (this == that) {
+            return this;
+        }
+        PieceSpecSet o1, o2;
+        if (System.identityHashCode(this) < System.identityHashCode(that)) {
+            o1 = this;
+            o2 = that;
+        }
+        else {
+            o1 = that;
+            o2 = this;
+        }
+        synchronized (o1) {
+            synchronized (o2) {
+                if (o1.filePieceSpecSets.size() < o2.filePieceSpecSets.size()) {
+                    final PieceSpecSet tmp = o1;
+                    o1 = o2;
+                    o2 = tmp;
+                }
+                // "o2" has fewer entries
+                for (final FilePieceSpecSet specs : o2.filePieceSpecSets
+                        .values()) {
+                    o1.add(specs);
+                }
+            }
+        }
+        return o1;
+    }
+
+    @Override
+    public PieceSpecSetIface merge(final FilePieceSpecs specs) {
+        add(specs);
+        return this;
+    }
+
+    @Override
+    public synchronized PieceSpecSetIface merge(final PieceSpec spec) {
+        add(spec);
+        return this;
+    }
+
+    @Override
+    public synchronized PieceSpecSetIface remove(final PieceSpec spec) {
+        final FileId fileId = spec.getFileId();
+        final FilePieceSpecSet value = filePieceSpecSets.get(fileId);
+        if (value != null) {
+            final PieceSpecSetIface newValue = value.remove(spec);
+            if (newValue != value) {
+                if (newValue.isEmpty()) {
+                    filePieceSpecSets.remove(fileId);
+                }
+                else {
+                    filePieceSpecSets.put(fileId, (FilePieceSpecSet) newValue);
+                }
+            }
+        }
+        return this;
+    }
+
+    @Override
+    public boolean contains(final PieceSpec spec) {
+        final FileId fileId = spec.getFileId();
+        final FilePieceSpecSet value = filePieceSpecSets.get(fileId);
+        return value != null && value.contains(spec);
+    }
 
     /**
-     * Merges this instance with piece-specifications for one or more files. The
-     * returned instance might be this instance, or the other instance, or a new
-     * instance. Instances that aren't returned remain unmodified.
+     * Adds a set of piece-specifications for a file to this instance.
      * 
      * @param specs
-     *            Piece-specification for one or more files.
-     * @return The merger of the two instances.
-     * @throws NullPointerException
-     *             if {@code specs == null}.
+     *            The set of piece-specifications for a file.
      */
-    abstract PieceSpecSet merge(MultiFilePieceSpecs specs);
+    @GuardedBy("this")
+    private synchronized void add(final FilePieceSpecSet specs) {
+        final FileId fileId = specs.getFileId();
+        FilePieceSpecSet value = filePieceSpecSets.get(fileId);
+        value = (FilePieceSpecSet) ((null == value)
+                ? specs
+                : value.merge(specs));
+        filePieceSpecSets.put(fileId, value);
+    }
 
-    /**
-     * Merges this instance with multiple piece-specification for a file. The
-     * returned instance might be this instance, or the other instance, or a new
-     * instance. Instances that aren't returned remain unmodified.
+    @Override
+    public synchronized boolean isEmpty() {
+        return filePieceSpecSets.isEmpty();
+    }
+
+    @Override
+    public synchronized PieceSpecSet clone() {
+        /*
+         * A constructor is used to create the clone because {@link
+         * #filePieceSpecSets} is final (which means "super.clone()" will merely
+         * copy the field; consequently, it would have to be non-final and
+         * guarded, otherwise) and this class is final (which means no subclass
+         * will call "super.clone()".
+         */
+        final PieceSpecSet clone = new PieceSpecSet();
+        for (final FilePieceSpecSet specs : filePieceSpecSets.values()) {
+            clone.add(specs.clone());
+        }
+        return clone;
+    }
+
+    /*
+     * (non-Javadoc)
      * 
-     * @param specs
-     *            The piece-specifications for a file.
-     * @return The merger of the two instances.
-     * @throws IllegalArgumentException
-     *             if the file-identifier of the given specifications equals
-     *             that of this instance but the file-informations differ.
-     * @throws NullPointerException
-     *             if {@code specs == null}.
+     * @see java.lang.Iterable#iterator()
      */
-    abstract PieceSpecSet merge(FilePieceSpecs specs);
+    @Override
+    public synchronized Iterator<PieceSpec> iterator() {
+        return new SimpleIterator<PieceSpec>() {
+            Iterator<FilePieceSpecSet> fileIterator;
+            Iterator<PieceSpec>        specIterator;
 
-    /**
-     * Merges this instance with a piece-specification. The returned instance
-     * might be this instance, or the other instance, or a new instance.
-     * Instances that aren't returned remain unmodified.
+            @Override
+            protected PieceSpec getNext() {
+                /*
+                 * The fields are initialized here because
+                 * declaration-initialization would occur only after this method
+                 * is called by the super-constructor.
+                 */
+                if (null == fileIterator) {
+                    fileIterator = filePieceSpecSets.values().iterator();
+                    specIterator = fileIterator.hasNext()
+                            ? fileIterator.next().iterator()
+                            : null;
+
+                }
+                for (;;) {
+                    if (null == specIterator) {
+                        return null;
+                    }
+                    if (specIterator.hasNext()) {
+                        return specIterator.next();
+                    }
+                    specIterator = fileIterator.hasNext()
+                            ? fileIterator.next().iterator()
+                            : null;
+                }
+            }
+        };
+    }
+
+    /*
+     * (non-Javadoc)
      * 
-     * @param pieceSpec
-     *            Specification of the piece of data.
-     * @return The merger of the two instances.
-     * @throws IllegalArgumentException
-     *             if the file-identifier of the given specification equals that
-     *             of this instance but the file-informations differ.
-     * @throws NullPointerException
-     *             if {@code pieceSpec == null}.
+     * @see java.lang.Object#toString()
      */
-    abstract PieceSpecSet merge(PieceSpec pieceSpec);
+    @Override
+    public synchronized String toString() {
+        final StringBuilder builder = new StringBuilder();
+        builder.append("PieceSpecSet [filePieceSpecSets=");
+        final int size = filePieceSpecSets.size();
+        if (size == 1) {
+            builder.append(filePieceSpecSets);
+        }
+        else {
+            builder.append("(");
+            builder.append(size);
+            builder.append(" entries)");
+        }
+        builder.append("]");
+        return builder.toString();
+    }
 
-    abstract boolean isEmpty();
+    private Object readResolve() {
+        /*
+         * For all map entries, ensure that the key's file-identifier equals the
+         * value's file-identifier.
+         */
+        final PieceSpecSet result = new PieceSpecSet();
+        for (final FilePieceSpecSet specs : filePieceSpecSets.values()) {
+            result.add(specs);
+        }
+        return result;
+    }
 }

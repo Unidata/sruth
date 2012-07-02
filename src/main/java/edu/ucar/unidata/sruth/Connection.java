@@ -12,6 +12,7 @@ import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.prefs.Preferences;
 
@@ -166,6 +167,11 @@ abstract class Connection implements Comparable<Connection> {
              * The underlying object output stream.
              */
             private final ObjectOutputStream objectOutputStream;
+            /**
+             * Whether or not this instance is closed.
+             */
+            @GuardedBy("this")
+            private final AtomicBoolean      isShutdown = new AtomicBoolean();
 
             /**
              * Constructs from an object output stream.
@@ -202,32 +208,34 @@ abstract class Connection implements Comparable<Connection> {
             /**
              * Closes this instance. Idempotent.
              */
-            synchronized void close() {
-                if (!socket.isClosed() && !socket.isOutputShutdown()) {
-                    try {
-                        socket.shutdownOutput();
-                    }
-                    catch (final IOException e) {
-                        logger.debug("Couldn't close socket output: {}",
-                                e.toString());
+            void close() {
+                /*
+                 * The {@link Socket#shutdownOutput()} method is broken in Java
+                 * 1.7.0_04 for Windows from Oracle: it closes the entire socket
+                 * rather than just half of it. Consequently, it is not used.
+                 */
+                if (isShutdown.compareAndSet(false, true)) {
+                    if (input.isShutdown()) {
+                        try {
+                            socket.close();
+                        }
+                        catch (final IOException ignored) {
+                        }
                     }
                 }
                 /*
-                 * The following is commented-out because it causes the
-                 * associated input stream to return EOF.
+                 * if (!socket.isClosed() && !socket.isOutputShutdown()) { try {
+                 * socket.shutdownOutput(); } catch (final IOException e) {
+                 * logger.debug("Couldn't close socket output: {}",
+                 * e.toString()); } }
                  */
-                // try {
-                // objectOutputStream.close();
-                // }
-                // catch (final IOException ignored) {
-                // }
-                // finally {
-                // try {
-                // socket.shutdownOutput();
-                // }
-                // catch (final IOException ignored) {
-                // }
-                // }
+            }
+
+            /**
+             * Indicates if this instance is shutdown.
+             */
+            boolean isShutdown() {
+                return isShutdown.get();
             }
         }
 
@@ -243,6 +251,10 @@ abstract class Connection implements Comparable<Connection> {
              * The underlying object input stream.
              */
             private final ObjectInputStream objectInputStream;
+            /**
+             * Whether or not this instance has been shutdown.
+             */
+            private final AtomicBoolean     isShutdown = new AtomicBoolean();
 
             /**
              * Constructs from an object input stream.
@@ -295,32 +307,34 @@ abstract class Connection implements Comparable<Connection> {
             /**
              * Closes this instance. Idempotent.
              */
-            synchronized void close() {
-                if (!socket.isClosed() && !socket.isInputShutdown()) {
-                    try {
-                        socket.shutdownInput();
-                    }
-                    catch (final IOException e) {
-                        logger.debug("Couldn't close socket input: {}",
-                                e.toString());
+            void close() {
+                /*
+                 * The {@link Socket#shutdownInput()} method is broken in Java
+                 * 1.7.0_04 for Windows from Oracle: it closes the entire socket
+                 * rather than just half of it. Consequently, it is not used.
+                 */
+                if (isShutdown.compareAndSet(false, true)) {
+                    if (output.isShutdown()) {
+                        try {
+                            socket.close();
+                        }
+                        catch (final IOException ignored) {
+                        }
                     }
                 }
                 /*
-                 * The following is commented-out because it causes the
-                 * associated output stream to throw an IOException.
+                 * if (!socket.isClosed() && !socket.isInputShutdown()) { try {
+                 * socket.shutdownInput(); } catch (final IOException e) {
+                 * logger.debug("Couldn't close socket input: {}",
+                 * e.toString()); } }
                  */
-                // try {
-                // objectInputStream.close();
-                // }
-                // catch (final IOException ignored) {
-                // }
-                // finally {
-                // try {
-                // socket.shutdownInput();
-                // }
-                // catch (final IOException ignored) {
-                // }
-                // }
+            }
+
+            /**
+             * Indicates if this instance is shutdown.
+             */
+            boolean isShutdown() {
+                return isShutdown.get();
             }
         }
 

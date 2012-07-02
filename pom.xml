@@ -2,7 +2,7 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                       http://maven.apache.org/xsd/maven-4.0.0.xsd">
 
-    <modelVersion>4.0.0</modelVersion>
+	<modelVersion>4.0.0</modelVersion>
 	<groupId>edu.ucar.unidata</groupId>
 	<artifactId>sruth</artifactId>
 	<version>1.0-SNAPSHOT</version>
@@ -41,24 +41,24 @@
 			<roles>
 				<role>everything</role>
 			</roles>
-            <timezone>-6</timezone>
+			<timezone>-6</timezone>
 		</developer>
 	</developers>
-    
-    <repositories>
-        <repository>
-            <releases>
-                <enabled>true</enabled>
-                <checksumPolicy>fail</checksumPolicy>
-            </releases>
-            <snapshots>
-                <enabled>false</enabled>
-            </snapshots>
-            <id>UPC-3rd-Party-Repo</id>
-            <name>Unidata Program Center 3rd-Party Maven Repository</name>
-            <url>https://artifacts.unidata.ucar.edu/content/groups/unidata/</url>
-        </repository>
-    </repositories>
+
+	<repositories>
+		<repository>
+			<releases>
+				<enabled>true</enabled>
+				<checksumPolicy>fail</checksumPolicy>
+			</releases>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+			<id>UPC-3rd-Party-Repo</id>
+			<name>Unidata Program Center 3rd-Party Maven Repository</name>
+			<url>https://artifacts.unidata.ucar.edu/content/groups/unidata/</url>
+		</repository>
+	</repositories>
 
 	<dependencies>
 		<dependency>
@@ -66,7 +66,7 @@
 			<artifactId>junit</artifactId>
 			<!-- <version>[4.8,5.0)</version> -->
 			<version>4.8.2</version>
-			<scope>test</scope>
+			<!-- <scope>test</scope> -->
 		</dependency>
 		<dependency>
 			<groupId>net.jcip</groupId>
@@ -110,6 +110,18 @@
 					<!-- <testIncludes> <testInclude>ucar/unidata/util/TestRegexp.java</testInclude> 
 						</testIncludes> -->
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>2.4</version>
+				<executions>
+					<execution>
+						<goals>
+							<goal>test-jar</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -223,11 +235,11 @@
 			<name>Unidata Program Center Maven Snapshot Repository</name>
 			<url>https://artifacts.unidata.ucar.edu/content/repositories/unidata-snapshots</url>
 		</snapshotRepository>
-        <site>
-            <id>sruth.website</id>
-            <name>Sruth Website</name>
-            <url>file:///web/content/projects/sruth</url>
-        </site>
-        <downloadUrl>http://artifacts.unidata.ucar.edu/content/repositories/unidata-releases</downloadUrl>
+		<site>
+			<id>sruth.website</id>
+			<name>Sruth Website</name>
+			<url>file:///web/content/projects/sruth</url>
+		</site>
+		<downloadUrl>http://artifacts.unidata.ucar.edu/content/repositories/unidata-releases</downloadUrl>
 	</distributionManagement>
 </project>

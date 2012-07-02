@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /**
  * Information about a file.
- * 
+ * <p>
  * Instances are immutable.
  * 
  * @author Steven R. Emmerson

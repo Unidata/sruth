@@ -1,5 +1,5 @@
 /**
- * Copyright 2010 University Corporation for Atmospheric Research.  All rights
+ * Copyright 2012 University Corporation for Atmospheric Research.  All rights
  * reserved.  See file LICENSE.txt in the top-level directory for licensing
  * information.
  */
@@ -8,6 +8,7 @@ package edu.ucar.unidata.sruth;
 import java.io.InvalidObjectException;
 import java.util.Iterator;
 
+import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
 
 /**
@@ -26,6 +27,7 @@ final class FilePieceSpecs extends FilePieceSpecSet {
     /**
      * A bit-set that specifies the piece indexes.
      */
+    @GuardedBy("this")
     private FiniteBitSet      indexes;
 
     /**
@@ -53,27 +55,30 @@ final class FilePieceSpecs extends FilePieceSpecSet {
      */
     FilePieceSpecs(final FileInfo fileInfo, final boolean allPieces) {
         super(fileInfo);
-        indexes = FiniteBitSet.newInstance(fileInfo.getPieceCount(), allPieces);
+        synchronized (this) {
+            indexes = FiniteBitSet.newInstance(fileInfo.getPieceCount(),
+                    allPieces);
+        }
     }
 
     @Override
-    public PieceSpecSet merge(final PieceSpecSet specs) {
+    public PieceSpecSetIface merge(final PieceSpecSetIface specs) {
         return specs.merge(this);
     }
 
     @Override
-    public PieceSpecSet merge(final MultiFilePieceSpecs specs) {
+    public PieceSpecSetIface merge(final PieceSpecSet specs) {
         return specs.merge(this);
     }
 
     @Override
-    public PieceSpecSet merge(final FilePieceSpecs that) {
+    public PieceSpecSetIface merge(final FilePieceSpecs that) {
         if (this == that) {
             return this;
         }
-        PieceSpecSet result;
+        PieceSpecSetIface result;
         if (!getFileId().equals(that.getFileId())) {
-            result = new MultiFilePieceSpecs(this).merge(that);
+            result = new PieceSpecSet(this).merge(that);
         }
         else {
             vet(that.getFileInfo());
@@ -138,18 +143,40 @@ final class FilePieceSpecs extends FilePieceSpecSet {
      * edu.ucar.unidata.sruth.SpecThing#merge(edu.ucar.unidata.sruth.PieceSpec )
      */
     @Override
-    public synchronized PieceSpecSet merge(final PieceSpec that) {
+    public synchronized PieceSpecSetIface merge(final PieceSpec that) {
         if (getFileId().equals(that.getFileId())) {
             vet(that.getFileInfo());
             indexes = indexes.setBit(that.getIndex());
             return this;
         }
-        return new MultiFilePieceSpecs(this).merge(that);
+        return new PieceSpecSet(this).merge(that);
+    }
+
+    @Override
+    public synchronized PieceSpecSetIface remove(final PieceSpec spec) {
+        if (fileInfo.equals(spec.fileInfo)) {
+            indexes.clearBit(spec.getIndex());
+        }
+        return this;
+    }
+
+    @Override
+    public synchronized boolean contains(final PieceSpec spec) {
+        return fileInfo.equals(spec.fileInfo) && indexes.isSet(spec.getIndex());
     }
 
     @Override
     public synchronized boolean isEmpty() {
         return indexes.getSetCount() == 0;
+    }
+
+    @Override
+    public synchronized FilePieceSpecs clone() {
+        final FilePieceSpecs clone = (FilePieceSpecs) super.clone();
+        synchronized (clone) {
+            clone.indexes = indexes.clone();
+        }
+        return clone;
     }
 
     @Override

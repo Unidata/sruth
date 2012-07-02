@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.file.NoSuchFileException;
 import java.util.Collection;
 import java.util.LinkedList;
@@ -92,14 +93,19 @@ final class ClientManager implements Callable<Void> {
                     filteredProxy.register();
                     registered = true;
                 }
+                catch (final SocketTimeoutException e) {
+                    logger.debug(
+                            "Connection attempt to tracker timed-out: {}. Continuing...",
+                            trackerProxy.getAddress(), e.toString());
+                }
                 catch (final ConnectException e) {
                     logger.debug(
-                            "Couldn't connect to tracker {}: {}. Continuing...",
+                            "Couldn't connect to tracker: {}: {}. Continuing...",
                             trackerProxy.getAddress(), e.toString());
                 }
                 catch (final InvalidMessageException e) {
                     logger.debug(
-                            "Invalid communication with tracker {}: {}. Continuing...",
+                            "Invalid communication with tracker: {}: {}. Continuing...",
                             trackerProxy.getAddress(), e.toString());
                 }
                 timeout = waitUntilDoneOrTimeout(false, timeout);
@@ -483,7 +489,9 @@ final class ClientManager implements Callable<Void> {
                     }
                 }
                 synchronized (ClientManager.this) {
+                    final SpecSet specs = client.getPendingRequests();
                     clients.remove(client);
+                    redistributeRequests(specs);
                     ClientManager.this.notifyAll();
                 }
             }
@@ -774,6 +782,18 @@ final class ClientManager implements Callable<Void> {
      */
     synchronized int getClientCount() {
         return clients.size();
+    }
+
+    /**
+     * Redistributes a set of data requests to the set of extant clients.
+     * 
+     * @param specs
+     *            The set of data requests to be redistributed.
+     */
+    synchronized void redistributeRequests(final SpecSet specs) {
+        for (final Client client : clients) {
+            client.getIfAppropriate(specs);
+        }
     }
 
     /*

@@ -574,7 +574,7 @@ final class Archive {
         }
 
         /**
-         * Handles the creation of a new file.
+         * Handles the creation of a new file (including directories).
          * 
          * @param path
          *            The absolute pathname of the new file.
@@ -597,6 +597,7 @@ final class Archive {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     try {
+                        logger.debug("New directory: {}", path);
                         register(dir);
                     }
                     catch (final IOException e) {
@@ -609,6 +610,7 @@ final class Archive {
                 public FileVisitResult visitFile(final Path path,
                         final BasicFileAttributes attributes) {
                     assert attributes.isRegularFile();
+                    logger.debug("New file: {}", path);
                     notifyServerAbout(path, attributes);
                     return FileVisitResult.CONTINUE;
                 }
@@ -616,10 +618,10 @@ final class Archive {
         }
 
         /**
-         * Notifies the server about a regular file.
+         * Notifies the server about a new regular file.
          * 
          * @param path
-         *            Absolute pathname of the file
+         *            Absolute pathname of the new file
          * @param attributes
          *            Basic attributes of the file
          */
@@ -672,10 +674,8 @@ final class Archive {
                     dirs.remove(k);
                     k.cancel();
                 }
-                final FileId fileId = new FileId(archivePath,
-                        ArchiveTime.BEGINNING_OF_TIME);
-                logger.trace("Removed file: {}", path);
-                server.removed(fileId);
+                logger.trace("Removed file: {}", archivePath);
+                server.removed(archivePath);
             }
         }
 
@@ -841,7 +841,7 @@ final class Archive {
         }
 
         /**
-         * Returns the absolute pathname of the visible form of a hidden
+         * Returns the absolute pathname of the visible form of an archive
          * pathname.
          * 
          * @param rootDir
@@ -1554,21 +1554,6 @@ final class Archive {
         }
 
         /**
-         * Returns the file-identifier.
-         * 
-         * @return the file-identifier
-         */
-        FileId getFileId() {
-            lock();
-            try {
-                return fileInfo.getFileId();
-            }
-            finally {
-                unlock();
-            }
-        }
-
-        /**
          * Indicates if the given piece of data will make this file complete.
          * 
          * @param pieceSpec
@@ -1712,6 +1697,12 @@ final class Archive {
                                 try {
                                     Files.createDirectories(newPath.getParent());
                                     try {
+                                        /*
+                                         * FileModificationTimeTest shows that
+                                         * the last modification time of a file
+                                         * persists across a Files.move() call.
+                                         */
+                                        fileInfo.getTime().setTime(path);
                                         Files.move(
                                                 path,
                                                 newPath,
@@ -1719,14 +1710,15 @@ final class Archive {
                                                 StandardCopyOption.REPLACE_EXISTING);
                                         path = newPath;
                                         isVisible = true;
-                                        fileInfo.getTime().setTime(path);
                                         logger.debug("Complete file: {}",
                                                 fileInfo);
                                         break;
                                     }
                                     catch (final NoSuchFileException e) {
-                                        // A directory in the path was just
-                                        // deleted
+                                        /*
+                                         * A directory in the path was just
+                                         * deleted
+                                         */
                                         logger.trace(
                                                 "Directory in path just deleted by another thread: {}",
                                                 newPath);
@@ -1786,35 +1778,36 @@ final class Archive {
         }
 
         /**
-         * Ensures that a file that matches a file-identifier doesn't exist.
+         * Ensures that an archive-file doesn't exist.
          * 
          * @param rootDir
          *            Absolute pathname of the root-directory of the archive
-         * @param fileId
-         *            Identifier of the file
+         * @param archivePath
+         *            Archive-pathname of the file
          * @throws IllegalArgumentException
          *             if {@code !rootDir.isAbsolute()}
          * @throws FileSystemException
          *             if too many files are open
          * @throws IOException
          *             if an I/O error occurs
+         * @throws NullPointerException
+         *             if {@code archivePath == null}.
          */
-        static void deleteIfExists(final Path rootDir, final FileId fileId)
-                throws IOException {
-            final Path path = fileId.getAbsolutePath(rootDir);
+        static void deleteIfExists(final Path rootDir,
+                final ArchivePath archivePath) throws IOException {
+            final Path path = archivePath.getAbsolutePath(rootDir);
             try {
-                if (fileId.equals(FileId.getInstance(path, rootDir))) {
-                    Files.deleteIfExists(path);
-                }
+                Files.deleteIfExists(path);
             }
-            catch (final NoSuchFileException ignored) {
+            catch (final NoSuchFileException e) {
+                logger.trace("File doesn't exist: {}", archivePath);
             }
         }
     }
 
     /**
      * Manages a collection of archive-files.
-     * 
+     * <p>
      * Instances are thread-safe.
      * 
      * @author Steven R. Emmerson
@@ -2123,31 +2116,30 @@ final class Archive {
         /**
          * Deletes an archive-file if it exists.
          * 
-         * @param fileId
-         *            File-identifier of the archive-file. All attributes must
-         *            match.
+         * @param archivePath
+         *            Archive-pathname of the -file.
          * @throws FileSystemException
          *             if too many files are open. This will only be thrown
          *             after all open segmented archive-files have been closed.
          * @throws IOException
          *             if an I/O error occurs
+         * @throws NullPointerException
+         *             if {@code archivePath == null}.
          */
-        void deleteIfExists(final FileId fileId) throws FileSystemException,
-                IOException {
-            final ArchivePath path = fileId.getPath();
+        void deleteIfExists(final ArchivePath archivePath)
+                throws FileSystemException, IOException {
             synchronized (openSegmentedFiles) {
-                final SegmentedArchiveFile file = openSegmentedFiles.get(path);
+                final SegmentedArchiveFile file = openSegmentedFiles
+                        .get(archivePath);
                 if (file != null) {
-                    if (fileId.equals(file.getFileId())) {
-                        file.deleteIfExists();
-                        openSegmentedFiles.remove(path);
-                    }
+                    file.deleteIfExists();
+                    openSegmentedFiles.remove(archivePath);
                 }
                 else {
                     for (;;) {
                         try {
-                            SegmentedArchiveFile
-                                    .deleteIfExists(rootDir, fileId);
+                            SegmentedArchiveFile.deleteIfExists(rootDir,
+                                    archivePath);
                             break;
                         }
                         catch (final FileSystemException e) {
@@ -2314,6 +2306,7 @@ final class Archive {
             // The file-system isn't DOS
         }
         this.rootDir = rootDir;
+        archiveFileManager = new ArchiveFileManager(maxNumOpenFiles);
         delayedPathActionQueue = new DelayedPathActionQueue(rootDir,
                 new PathDelayQueue(fileDeletionQueuePath),
                 new DelayedPathActionQueue.Action() {
@@ -2328,7 +2321,6 @@ final class Archive {
                         return "DELETE";
                     }
                 });
-        archiveFileManager = new ArchiveFileManager(maxNumOpenFiles);
     }
 
     /**
@@ -2451,7 +2443,7 @@ final class Archive {
     }
 
     /**
-     * Indicates whether or not a piece of data exists.
+     * Indicates whether or not this instance contains a piece of data.
      * 
      * @param dir
      *            Pathname of the output directory.
@@ -2468,20 +2460,19 @@ final class Archive {
         SegmentedArchiveFile file;
         try {
             file = archiveFileManager.get(pieceSpec.getFileInfo(), true);
+            if (file == null) {
+                return false;
+            }
+            try {
+                return file.hasPiece(pieceSpec.getIndex());
+            }
+            finally {
+                file.unlock();
+            }
         }
         catch (final FileInfoMismatchException e) {
             logger.debug("Incompatible file-information: {}", e.toString());
             return false;
-        }
-
-        if (file == null) {
-            return false;
-        }
-        try {
-            return file.hasPiece(pieceSpec.getIndex());
-        }
-        finally {
-            file.unlock();
         }
     }
 
@@ -2747,18 +2738,20 @@ final class Archive {
     }
 
     /**
-     * Removes the archive-file that matches a file identifier.
+     * Removes an archive-file.
      * 
-     * @param fileId
-     *            Identifier of the file to be removed. All attributes must be
-     *            matched.
+     * @param archivePath
+     *            Archive-pathname of the file to be removed.
      * @throws FileSystemException
      *             if too many files are open
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code archivePath == null}.
      */
-    void remove(final FileId fileId) throws FileSystemException, IOException {
-        archiveFileManager.deleteIfExists(fileId);
+    void remove(final ArchivePath archivePath) throws FileSystemException,
+            IOException {
+        archiveFileManager.deleteIfExists(archivePath);
     }
 
     /**
@@ -2813,7 +2806,7 @@ final class Archive {
     /**
      * Recursively visits all the file-based data-specifications in a directory
      * that match a selection criteria. Doesn't visit files in hidden
-     * directories.
+     * directories. Returns when all files have been visited.
      * 
      * @param root
      *            The directory to recursively walk.
@@ -2823,68 +2816,83 @@ final class Archive {
      *            The selection criteria.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
     private void walkDirectory(final Path root,
             final FilePieceSpecSetConsumer consumer, final Filter filter)
-            throws IOException {
+            throws IOException, InterruptedException {
+        final class ArchiveVisitor extends SimpleFileVisitor<Path> {
+            @Override
+            public FileVisitResult preVisitDirectory(final Path dir,
+                    final BasicFileAttributes attributes) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return FileVisitResult.TERMINATE;
+                }
+                if (ArchiveFile.isHidden(rootDir, dir)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                logger.trace("Visiting directory: {}", dir);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(final Path path,
+                    final BasicFileAttributes attributes) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return FileVisitResult.TERMINATE;
+                }
+                if (attributes.isRegularFile()) {
+                    final ArchiveTime archiveTime = new ArchiveTime(attributes);
+                    try {
+                        archiveTime.setTime(path);
+                        final ArchivePath archivePath = new ArchivePath(path,
+                                rootDir);
+                        if (filter.matches(archivePath)) {
+                            final FileId fileId = new FileId(archivePath,
+                                    archiveTime);
+                            final FileInfo fileInfo;
+                            if (archivePath.startsWith(adminDir)) {
+                                // Indefinite time-to-live
+                                fileInfo = new FileInfo(fileId,
+                                        attributes.size(), PIECE_SIZE, -1);
+                            }
+                            else {
+                                // Default time-to-live
+                                fileInfo = new FileInfo(fileId,
+                                        attributes.size(), PIECE_SIZE);
+                            }
+                            final FilePieceSpecSet specSet = FilePieceSpecSet
+                                    .newInstance(fileInfo, true);
+                            logger.trace("Visiting file: {}", path);
+                            consumer.consume(specSet);
+                        }
+                    }
+                    catch (final IOException e) {
+                        logger.error("Couldn't adjust time of file {}: {}",
+                                path, e.toString());
+                    }
+                    catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return FileVisitResult.TERMINATE;
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        }
         final EnumSet<FileVisitOption> opts = EnumSet
                 .of(FileVisitOption.FOLLOW_LINKS);
-        Files.walkFileTree(root, opts, Integer.MAX_VALUE,
-                new SimpleFileVisitor<Path>() {
-                    @Override
-                    public FileVisitResult preVisitDirectory(final Path dir,
-                            final BasicFileAttributes attributes) {
-                        return ArchiveFile.isHidden(rootDir, dir)
-                                ? FileVisitResult.SKIP_SUBTREE
-                                : FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult visitFile(final Path path,
-                            final BasicFileAttributes attributes) {
-                        if (attributes.isRegularFile()) {
-                            final ArchiveTime archiveTime = new ArchiveTime(
-                                    attributes);
-                            try {
-                                archiveTime.setTime(path);
-                                final ArchivePath archivePath = new ArchivePath(
-                                        path, rootDir);
-                                if (filter.matches(archivePath)) {
-                                    final FileId fileId = new FileId(
-                                            archivePath, archiveTime);
-                                    final FileInfo fileInfo;
-                                    if (archivePath.startsWith(adminDir)) {
-                                        // Indefinite time-to-live
-                                        fileInfo = new FileInfo(fileId,
-                                                attributes.size(), PIECE_SIZE,
-                                                -1);
-                                    }
-                                    else {
-                                        // Default time-to-live
-                                        fileInfo = new FileInfo(fileId,
-                                                attributes.size(), PIECE_SIZE);
-                                    }
-                                    final FilePieceSpecSet specSet = FilePieceSpecSet
-                                            .newInstance(fileInfo, true);
-                                    logger.trace("Consuming file: {}",
-                                            archivePath);
-                                    consumer.consume(specSet);
-                                }
-                            }
-                            catch (final IOException e) {
-                                logger.error(
-                                        "Couldn't adjust time of file {}: {}",
-                                        path, e.toString());
-                            }
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
+        Files.walkFileTree(root, opts, Integer.MAX_VALUE, new ArchiveVisitor());
+        if (Thread.currentThread().isInterrupted()) {
+            logger.trace("Interrupted: {}", toString());
+            throw new InterruptedException();
+        }
     }
 
     /**
      * Visits all the file-based data-specifications in the archive that match a
-     * selection criteria. Doesn't visit files in hidden directories.
+     * selection criteria. Doesn't visit files in hidden directories. Returns
+     * only when all files have been visited.
      * 
      * @param consumer
      *            The consumer of file-based data-specifications.
@@ -2892,9 +2900,11 @@ final class Archive {
      *            The selection criteria.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
     void walkArchive(final FilePieceSpecSetConsumer consumer,
-            final Filter filter) throws IOException {
+            final Filter filter) throws IOException, InterruptedException {
         walkDirectory(rootDir, consumer, filter);
     }
 

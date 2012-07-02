@@ -10,7 +10,7 @@ import java.io.IOException;
 import net.jcip.annotations.ThreadSafe;
 
 /**
- * A notice of removed files.
+ * A notice of removed archivePaths.
  * 
  * Instances are thread-safe.
  * 
@@ -21,31 +21,31 @@ final class RemovedFilesNotice implements RemovalNotice {
     /**
      * Serial version ID.
      */
-    private static final long serialVersionUID = 1L;
+    private static final long    serialVersionUID = 1L;
     /**
-     * The specification of the removed files.
+     * The archive-pathnames of the removed archivePaths.
      */
-    private final FileSetSpec files;
+    private final ArchivePathSet archivePaths;
 
     /**
-     * Constructs from a specification of the removed files.
+     * Constructs from the pathnames of the removed archive-files.
      * 
-     * @param files
-     *            The specification of the removed files.
+     * @param archivePaths
+     *            The pathnames of the removed archive-files.
      * @throws NullPointerException
-     *             if {@code files == null}.
+     *             if {@code archivePaths == null}.
      */
-    RemovedFilesNotice(final FileSetSpec files) {
-        if (null == files) {
+    RemovedFilesNotice(final ArchivePathSet archivePaths) {
+        if (null == archivePaths) {
             throw new NullPointerException();
         }
-        this.files = files;
+        this.archivePaths = archivePaths;
     }
 
     @Override
     public void processYourself(final Peer peer) throws IOException {
-        for (final FileId fileId : files) {
-            peer.remove(fileId);
+        for (final ArchivePath archivePath : archivePaths) {
+            peer.remove(archivePath);
         }
     }
 
@@ -56,6 +56,6 @@ final class RemovedFilesNotice implements RemovalNotice {
      */
     @Override
     public String toString() {
-        return "RemovedFilesNotice [files=" + files + "]";
+        return "RemovedFilesNotice [archivePaths=" + archivePaths + "]";
     }
 }

@@ -212,7 +212,7 @@ public final class Publisher implements Callable<Void> {
     }
 
     /**
-     * Returns the address of the tracker.
+     * Returns the address of the tracker. May be called before {@link #call()}.
      * 
      * @return The address of the tracker.
      */
@@ -221,7 +221,8 @@ public final class Publisher implements Callable<Void> {
     }
 
     /**
-     * Returns the address of the source-node's server.
+     * Returns the address of the source-node's server. May be called before
+     * {@link #call()}.
      * 
      * @return The address of the source-node's server.
      */
@@ -239,7 +240,7 @@ public final class Publisher implements Callable<Void> {
     }
 
     /**
-     * Publishes data.
+     * Publishes data. May be called before {@link #call()}.
      * 
      * @param path
      *            Pathname for the data in the archive.

@@ -25,8 +25,8 @@ public class PieceSpecSetTest {
     private PieceSpec           pieceSpec2;
     private FilePieceSpecs      filePieceSpecs1;
     private FilePieceSpecs      filePieceSpecs2;
-    private MultiFilePieceSpecs multiFilePieceSpecs1;
-    private MultiFilePieceSpecs multiFilePieceSpecs2;
+    private PieceSpecSet multiFilePieceSpecs1;
+    private PieceSpecSet multiFilePieceSpecs2;
 
     /**
      * @throws java.lang.Exception
@@ -76,9 +76,9 @@ public class PieceSpecSetTest {
         fileInfo = new FileInfo(fileId, 2);
         filePieceSpecs2 = new FilePieceSpecs(fileInfo, true);
 
-        multiFilePieceSpecs1 = (MultiFilePieceSpecs) filePieceSpecs1
+        multiFilePieceSpecs1 = (PieceSpecSet) filePieceSpecs1
                 .merge(pieceSpec1);
-        multiFilePieceSpecs2 = (MultiFilePieceSpecs) filePieceSpecs2
+        multiFilePieceSpecs2 = (PieceSpecSet) filePieceSpecs2
                 .merge(pieceSpec2);
     }
 
@@ -89,8 +89,8 @@ public class PieceSpecSetTest {
     public void tearDown() throws Exception {
     }
 
-    private void verify(final PieceSpecSet o1, final PieceSpecSet o2,
-            final PieceSpecSet result) {
+    private void verify(final PieceSpecSetIface o1, final PieceSpecSetIface o2,
+            final PieceSpecSetIface result) {
         final HashSet<PieceSpec> set = new HashSet<PieceSpec>();
         for (final PieceSpec spec : o1) {
             set.add(spec);
@@ -113,14 +113,14 @@ public class PieceSpecSetTest {
         }
     }
 
-    private void test(final PieceSpecSet o1, final PieceSpecSet o2) {
-        final PieceSpecSet result = o1.merge(o2);
+    private void test(final PieceSpecSetIface o1, final PieceSpecSetIface o2) {
+        final PieceSpecSetIface result = o1.merge(o2);
         verify(o1, o2, result);
     }
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.PieceSpecSet#merge(edu.ucar.unidata.sruth.PieceSpecSet)}
+     * {@link edu.ucar.unidata.sruth.PieceSpecSetIface#merge(edu.ucar.unidata.sruth.PieceSpecSetIface)}
      * .
      */
     @Test
@@ -143,7 +143,7 @@ public class PieceSpecSetTest {
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.PieceSpecSet#merge(edu.ucar.unidata.sruth.MultiFilePieceSpecs)}
+     * {@link edu.ucar.unidata.sruth.PieceSpecSetIface#merge(edu.ucar.unidata.sruth.PieceSpecSet)}
      * .
      */
     @Test
@@ -160,7 +160,7 @@ public class PieceSpecSetTest {
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.PieceSpecSet#merge(edu.ucar.unidata.sruth.FilePieceSpecs)}
+     * {@link edu.ucar.unidata.sruth.PieceSpecSetIface#merge(edu.ucar.unidata.sruth.FilePieceSpecs)}
      * .
      */
     @Test
@@ -176,7 +176,7 @@ public class PieceSpecSetTest {
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.PieceSpecSet#merge(edu.ucar.unidata.sruth.PieceSpec)}
+     * {@link edu.ucar.unidata.sruth.PieceSpecSetIface#merge(edu.ucar.unidata.sruth.PieceSpec)}
      * .
      */
     @Test

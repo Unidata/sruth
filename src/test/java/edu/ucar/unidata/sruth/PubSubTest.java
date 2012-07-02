@@ -314,21 +314,25 @@ public class PubSubTest {
     public void testPubSub() throws IOException, InterruptedException,
             ExecutionException, FileInfoMismatchException {
         /*
-         * Create and start the publisher.
+         * Create the publisher.
          */
         final Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
-        final Future<Void> pubFuture = start(publisher);
-        publisher.waitUntilRunning();
 
         System.out.println("Tracker address: " + publisher.getTrackerAddress());
         System.out.println("Source address: " + publisher.getSourceAddress());
 
         /*
-         * Publish some files before the subscribers are started.
+         * Publish some files before the publisher is started.
          */
         for (int i = 0; i < PRE_SUB_FILE_COUNT; i++) {
             publishFile(publisher);
         }
+
+        /*
+         * Start the publisher.
+         */
+        final Future<Void> pubFuture = start(publisher);
+        publisher.waitUntilRunning();
 
         /*
          * Create the subscribers.
@@ -490,6 +494,7 @@ public class PubSubTest {
                 Future<Void> future;
                 if (round == 0) {
                     assertEquals(prevClientCount, subIndex);
+                    deleteDir(subRoot);
                 }
                 else {
                     // Stop the subscriber in this slot from the previous round.
@@ -500,7 +505,6 @@ public class PubSubTest {
                     Thread.sleep(sleepAmount);
                     assertEquals(--prevClientCount, publisher.getClientCount());
                 }
-                deleteDir(subRoot);
                 final Subscriber subscriber = new Subscriber(subRoot,
                         publisher.getTrackerAddress(), Predicate.EVERYTHING,
                         new Processor());

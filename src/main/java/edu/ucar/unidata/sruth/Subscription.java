@@ -109,14 +109,16 @@ final class Subscription {
             throw new IllegalArgumentException("Unknown host: \"" + attrString
                     + "\"");
         }
-        int port;
+        int port = Tracker.IANA_PORT;
         attrString = elt.getAttribute("port");
-        try {
-            port = Integer.valueOf(attrString);
-        }
-        catch (final NumberFormatException e) {
-            throw new IllegalArgumentException("Invalid port: \"" + attrString
-                    + "\"");
+        if (!attrString.isEmpty()) {
+            try {
+                port = Integer.valueOf(attrString);
+            }
+            catch (final NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid port: \""
+                        + attrString + "\"");
+            }
         }
         trackerAddress = new InetSocketAddress(inetAddress, port);
         /*

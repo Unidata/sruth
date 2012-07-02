@@ -7,14 +7,17 @@ package edu.ucar.unidata.sruth;
 
 import java.io.Serializable;
 
+import net.jcip.annotations.ThreadSafe;
+
 /**
  * A finite-size set of bits.
- * 
+ * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
  */
-abstract class FiniteBitSet implements Serializable {
+@ThreadSafe
+abstract class FiniteBitSet implements Serializable, Cloneable {
     /**
      * The serial version ID.
      */
@@ -105,6 +108,19 @@ abstract class FiniteBitSet implements Serializable {
     abstract FiniteBitSet setBit(int index);
 
     /**
+     * Returns the result of clearing a bit. The returned instance may be this
+     * instance or another instance. If this instance isn't returned, then it's
+     * unmodified.
+     * 
+     * @param index
+     *            0-based index of the bit to set.
+     * @return The result of clearing the indicated bit.
+     * @throws IllegalArgumentException
+     *             if {@code index < 0 || index >= getSize()}.
+     */
+    abstract FiniteBitSet clearBit(int index);
+
+    /**
      * Returns the result of setting all bits. The returned instance may be this
      * instance or another instance. If this instance isn't returned, then it's
      * unmodified.
@@ -193,5 +209,15 @@ abstract class FiniteBitSet implements Serializable {
     protected final FiniteBitSet merge(final CompleteBitSet that) {
         vetForMerger(that);
         return that;
+    }
+
+    @Override
+    public FiniteBitSet clone() {
+        try {
+            return (FiniteBitSet) super.clone();
+        }
+        catch (final CloneNotSupportedException e) {
+            throw new AssertionError();
+        }
     }
 }

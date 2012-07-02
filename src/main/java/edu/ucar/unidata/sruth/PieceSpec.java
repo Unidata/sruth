@@ -1,5 +1,5 @@
 /**
- * Copyright 2010 University Corporation for Atmospheric Research.  All rights
+ * Copyright 2012 University Corporation for Atmospheric Research.  All rights
  * reserved.  See file LICENSE.txt in the top-level directory for licensing
  * information.
  */
@@ -10,7 +10,7 @@ import java.util.Iterator;
 
 /**
  * A data-specification comprising a single piece of data in a file.
- * 
+ * <p>
  * Instances are immutable.
  * 
  * @author Steven R. Emmerson
@@ -22,6 +22,8 @@ final class PieceSpec extends FilePieceSpecSet {
     private static final long serialVersionUID = 1L;
     /**
      * The piece index.
+     * 
+     * @serial
      */
     private final int         index;
 
@@ -105,34 +107,51 @@ final class PieceSpec extends FilePieceSpecSet {
     }
 
     @Override
-    public PieceSpecSet merge(final PieceSpecSet specs) {
+    public PieceSpecSetIface merge(final PieceSpecSetIface specs) {
         return specs.merge(this);
     }
 
     @Override
-    public PieceSpecSet merge(final MultiFilePieceSpecs specs) {
+    public PieceSpecSetIface merge(final PieceSpecSet specs) {
         return specs.merge(this);
     }
 
     @Override
-    public PieceSpecSet merge(final FilePieceSpecs specs) {
+    public PieceSpecSetIface merge(final FilePieceSpecs specs) {
         return specs.merge(this);
     }
 
     @Override
-    public PieceSpecSet merge(final PieceSpec that) {
+    public PieceSpecSetIface merge(final PieceSpec that) {
         if (getFileId().equals(that.getFileId())) {
             if (index == that.index) {
                 return this;
             }
             return new FilePieceSpecs(fileInfo).merge(this).merge(that);
         }
-        return new MultiFilePieceSpecs(this).merge(that);
+        return new PieceSpecSet(this).merge(that);
+    }
+
+    @Override
+    public PieceSpecSetIface remove(final PieceSpec spec) {
+        return equals(spec)
+                ? EmptyPieceSpecSet.INSTANCE
+                : this;
+    }
+
+    @Override
+    public boolean contains(final PieceSpec spec) {
+        return equals(spec);
     }
 
     @Override
     public boolean isEmpty() {
         return false;
+    }
+
+    @Override
+    public PieceSpec clone() {
+        return this; // because instances are immutable
     }
 
     @Override

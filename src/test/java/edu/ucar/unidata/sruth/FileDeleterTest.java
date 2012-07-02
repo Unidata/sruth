@@ -174,10 +174,11 @@ public class FileDeleterTest {
     @Test
     public final void testPerformance() throws IOException,
             InterruptedException {
+        final long DELAY = 1000;
         final int PERFORMANCE_FILE_COUNT = 1000;
         final Long startTime = System.currentTimeMillis();
         for (int i = 0; i < PERFORMANCE_FILE_COUNT; ++i) {
-            delayedPathActionQueue.actUponEventurally(createFile(i), 1);
+            delayedPathActionQueue.actUponEventurally(createFile(i), DELAY);
         }
         delayedPathActionQueue.waitUntilEmpty();
         Assert.assertEquals(0, delayedPathActionQueue.getPendingCount());
@@ -185,7 +186,7 @@ public class FileDeleterTest {
                 delayedPathActionQueue.getActedUponCount());
         final Long stopTime = System.currentTimeMillis();
         System.out.println("Number of files: " + PERFORMANCE_FILE_COUNT);
-        final double interval = (stopTime - startTime) / 1000.0;
+        final double interval = (stopTime - startTime - DELAY) / 1000.0;
         System.out.println("Amount of time:  " + interval + " s");
         System.out.println("Deletion rate: "
                 + (PERFORMANCE_FILE_COUNT / interval) + "/s");

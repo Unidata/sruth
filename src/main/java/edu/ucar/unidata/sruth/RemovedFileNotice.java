@@ -20,28 +20,28 @@ final class RemovedFileNotice implements RemovalNotice {
      */
     private static final long serialVersionUID = 1L;
     /**
-     * Identifier of the removed file.
+     * Archive-pathname of the removed file.
      */
-    private final FileId      fileId;
+    private final ArchivePath archivePath;
 
     /**
-     * Constructs from a specification of the removed file.
+     * Constructs from the archive-pathname of the removed file.
      * 
-     * @param fileId
-     *            Identifier of the removed file.
+     * @param archivePath
+     *            Archive-pathname of the removed file.
      * @throws NullPointerException
-     *             if {@code fileId == null}.
+     *             if {@code archivePath == null}.
      */
-    RemovedFileNotice(final FileId fileId) {
-        if (null == fileId) {
+    RemovedFileNotice(final ArchivePath archivePath) {
+        if (null == archivePath) {
             throw new NullPointerException();
         }
-        this.fileId = fileId;
+        this.archivePath = archivePath;
     }
 
     @Override
     public void processYourself(final Peer peer) throws IOException {
-        peer.remove(fileId);
+        peer.remove(archivePath);
     }
 
     /*
@@ -51,6 +51,10 @@ final class RemovedFileNotice implements RemovalNotice {
      */
     @Override
     public String toString() {
-        return "RemovedFileNotice [fileId=" + fileId + "]";
+        return "RemovedFileNotice [archivePath=" + archivePath + "]";
+    }
+
+    private Object readResolve() {
+        return new RemovedFileNotice(archivePath);
     }
 }

@@ -8,8 +8,8 @@ package edu.ucar.unidata.sruth;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
+import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
 
 import org.slf4j.Logger;
@@ -48,11 +48,6 @@ final class DelayedPathActionQueue {
      */
     private final PathDelayQueue                queue;
     /**
-     * The number of acted-upon files.
-     */
-    private final AtomicLong                    actedUponCount = new AtomicLong(
-                                                                       0);
-    /**
      * The root-directory.
      */
     private final Path                          rootDir;
@@ -73,6 +68,16 @@ final class DelayedPathActionQueue {
      * The action to be performed on pathnames from the queue.
      */
     private final DelayedPathActionQueue.Action action;
+    /**
+     * The number of paths that have not yet been acted upon.
+     */
+    @GuardedBy("this")
+    private int                                 pendingCount   = 0;
+    /**
+     * The number of acted-upon files.
+     */
+    @GuardedBy("this")
+    private long                                actedUponCount = 0;
 
     /**
      * Constructs from the root-directory and the pathname/time-delay queue.
@@ -113,6 +118,13 @@ final class DelayedPathActionQueue {
                         }
                     }
                 }
+                finally {
+                    try {
+                        queue.close();
+                    }
+                    catch (final IOException ignored) {
+                    }
+                }
             }
 
             @Override
@@ -142,12 +154,13 @@ final class DelayedPathActionQueue {
      */
     private void run() throws InterruptedException, IOException {
         for (;;) {
-            final Path path = queue.peek();
+            final Path path = queue.take();
             action.act(path);
-            actedUponCount.incrementAndGet();
-            final Path removedPath = queue.remove();
-            assert path.equals(removedPath) : "Different paths: " + path
-                    + " != " + removedPath;
+            synchronized (this) {
+                actedUponCount++;
+                pendingCount--;
+                notifyAll();
+            }
         }
     }
 
@@ -175,9 +188,16 @@ final class DelayedPathActionQueue {
                     "Path not descendant of root-directory: path=\"" + path
                             + "\", rootDir=\"" + rootDir + "\"");
         }
+        synchronized (this) {
+            pendingCount++;
+        }
         if (time <= 0) {
             action.act(path);
-            actedUponCount.incrementAndGet();
+            synchronized (this) {
+                actedUponCount++;
+                pendingCount--;
+                notifyAll();
+            }
         }
         else {
             queue.add(path, System.currentTimeMillis() + time);
@@ -189,8 +209,8 @@ final class DelayedPathActionQueue {
      * 
      * @return The number of pathnames that have not yet been acted upon.
      */
-    int getPendingCount() {
-        return queue.size();
+    synchronized int getPendingCount() {
+        return pendingCount;
     }
 
     /**
@@ -198,18 +218,21 @@ final class DelayedPathActionQueue {
      * 
      * @return The number of acted-upon files.
      */
-    long getActedUponCount() {
-        return actedUponCount.get();
+    synchronized long getActedUponCount() {
+        return actedUponCount;
     }
 
     /**
-     * Waits until the queue is empty.
+     * Waits until the queue is empty and all previous entries have been acted
+     * upon.
      * 
      * @throws InterruptedException
      *             if the current thread is interrupted.
      */
-    void waitUntilEmpty() throws InterruptedException {
-        queue.waitUntilEmpty();
+    synchronized void waitUntilEmpty() throws InterruptedException {
+        while (pendingCount > 0) {
+            wait();
+        }
     }
 
     /**
@@ -222,13 +245,8 @@ final class DelayedPathActionQueue {
      */
     void stop() throws InterruptedException, IOException {
         if (thread.isAlive()) {
-            try {
-                queue.close();
-            }
-            finally {
-                thread.interrupt();
-                thread.join();
-            }
+            thread.interrupt();
+            thread.join();
         }
     }
 

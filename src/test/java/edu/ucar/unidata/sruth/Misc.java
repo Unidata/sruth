@@ -75,7 +75,9 @@ public final class Misc {
              * Log the child process' error stream.
              */
             final BufferedReader errorStream = new BufferedReader(
-                    new InputStreamReader(process.getErrorStream()));
+                    new InputStreamReader(mergeOutput
+                            ? process.getInputStream()
+                            : process.getErrorStream()));
             try {
                 for (String line = errorStream.readLine(); line != null; line = errorStream
                         .readLine()) {

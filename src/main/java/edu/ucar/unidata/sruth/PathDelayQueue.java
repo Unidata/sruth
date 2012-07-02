@@ -33,7 +33,7 @@ import edu.ucar.unidata.sruth.MinHeapFile.Element;
 final class PathDelayQueue {
     /**
      * An entry in the min-heap file.
-     * 
+     * <p>
      * Instances are thread-compatible but not thread-safe.
      * 
      * @author Steven R. Emmerson
@@ -270,26 +270,27 @@ final class PathDelayQueue {
     }
 
     /**
-     * Retrieves (but does not remove) the pathname of the file that should be
-     * deleted next. Blocks until the earliest availability-time has arrived.
+     * Removes and returns the pathname of the file that should be acted-upon
+     * next. Blocks until the earliest availability-time has arrived.
      * 
-     * @return The next available pathname.
+     * @return The next "ripe" pathname.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      * @throws IOException
      *             if an I/O error occurs.
      */
-    synchronized Path peek() throws InterruptedException, IOException {
+    synchronized Path take() throws InterruptedException, IOException {
         try {
-            Entry entry;
-            while ((entry = heap.peek()) == null) {
+            while (heap.peek() == null) {
                 wait();
             }
             long sleep;
             while ((sleep = heap.peek().getTime() - System.currentTimeMillis()) > 0) {
                 wait(sleep);
             }
-            logger.trace("Returned {}", entry.toString());
+            final Entry entry = heap.remove();
+            notifyAll();
+            logger.trace("Returned {}", entry);
             return entry.getPath();
         }
         catch (final InstantiationException impossible) {
@@ -301,33 +302,6 @@ final class PathDelayQueue {
         catch (final ClosedByInterruptException e) {
             throw (InterruptedException) new InterruptedException()
                     .initCause(e);
-        }
-    }
-
-    /**
-     * Removes the head of the queue and returns the associated pathname.
-     * 
-     * @return The pathname associated with the head of the queue or
-     *         {@code null} if the queue is empty.
-     * @throws IOException
-     *             if an I/O error occurs.
-     */
-    synchronized Path remove() throws IOException {
-        Entry entry;
-        try {
-            entry = heap.remove();
-            if (entry == null) {
-                return null;
-            }
-            logger.trace("Removed {}", entry.toString());
-            notifyAll();
-            return entry.getPath();
-        }
-        catch (final InstantiationException impossible) {
-            throw new AssertionError(impossible);
-        }
-        catch (final IllegalAccessException impossible) {
-            throw new AssertionError(impossible);
         }
     }
 

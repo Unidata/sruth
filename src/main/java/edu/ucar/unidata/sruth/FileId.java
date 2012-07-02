@@ -18,7 +18,7 @@ import net.jcip.annotations.Immutable;
 
 /**
  * Unique, logical identifier for a file.
- * 
+ * <p>
  * Instances are immutable.
  * 
  * @author Steven R. Emmerson
@@ -146,11 +146,25 @@ final class FileId implements Serializable, Comparable<FileId> {
         return path.matcher(pattern);
     }
 
+    /**
+     * Compares this instance to another. Archive-times are compared first, then
+     * archive-pathnames. More recent files are considered less than earlier
+     * files.
+     * 
+     * @param that
+     *            The other instance
+     * @return a value less than, equal to, or greater than zero as this
+     *         instance is considered less than, equal to, or greater than the
+     *         other instance.
+     */
     @Override
     public int compareTo(final FileId that) {
-        int cmp = path.compareTo(that.path);
+        if (this == that) {
+            return 0;
+        }
+        int cmp = -time.compareTo(that.time);
         if (cmp == 0) {
-            cmp = time.compareTo(that.time);
+            cmp = path.compareTo(that.path);
         }
         return cmp;
     }

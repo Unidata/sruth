@@ -26,7 +26,7 @@ import edu.ucar.unidata.sruth.Archive.DistributedTrackerFiles;
 
 /**
  * Clearing house for processing pieces of data and their information.
- * 
+ * <p>
  * Instances are thread-safe.
  * 
  * @author Steven R. Emmerson
@@ -96,6 +96,11 @@ final class ClearingHouse {
      * The number of completely received files.
      */
     private final AtomicLong      receivedFileCount = new AtomicLong(0);
+    /**
+     * The set of pending data-piece requests (i.e., requests that have been
+     * sent but whose referenced data-pieces have not yet arrived)
+     */
+    private final SpecSet         pendingRequests   = new SpecSet();
 
     /**
      * Constructs from the data archive and a specification of the
@@ -225,51 +230,20 @@ final class ClearingHouse {
     void process(final Peer peer, final PieceSpec pieceSpec)
             throws FileInfoMismatchException, IOException {
         if (predicate.matches(pieceSpec) && !archive.exists(pieceSpec)) {
-            peer.addRequest(pieceSpec);
+            if (pendingRequests.add(pieceSpec)) {
+                peer.queueRequest(pieceSpec);
+            }
         }
     }
 
     /**
-     * Return value of method {@link #process(Peer, Piece)}.
-     * 
-     * @author Steven R. Emmerson
-     */
-    static enum PieceProcessStatus {
-        NOT_USED_NOT_DONE(false, false), USED_NOT_DONE(true, false), NOT_USED_DONE(
-                false, true), USED_DONE(true, true);
-
-        private final boolean wasUsed;
-        private final boolean isDone;
-
-        PieceProcessStatus(final boolean wasUsed, final boolean isDone) {
-            this.wasUsed = wasUsed;
-            this.isDone = isDone;
-        }
-
-        /**
-         * @return whether or not the piece of data was used.
-         */
-        boolean wasUsed() {
-            return wasUsed;
-        }
-
-        /**
-         * @return whether or not all the desired data has been received.
-         */
-        boolean isDone() {
-            return isDone;
-        }
-    }
-
-    /**
-     * Processes a piece of data.
+     * Processes a piece of data that was received by a local peer.
      * 
      * @param peer
-     *            The local peer that received the data.
+     *            The local peer that received the piece of data.
      * @param piece
-     *            The piece of data to be disposed of.
-     * @return a {@link PieceProcessStatus} indicating the result of the
-     *         processing.
+     *            The piece of data that was received by the local peer.
+     * @return {@code true} if and only if the given data-piece was used.
      * @throws FileInfoMismatchException
      *             if the file-information of the given piece doesn't match that
      *             of the extant file except for the {@link FileId}.
@@ -279,15 +253,12 @@ final class ClearingHouse {
      *             if the current thread is interrupted.
      * @throws IOException
      *             if an I/O error occurs.
-     * @see PieceProcessStatus
      */
-    PieceProcessStatus process(final Peer peer, final Piece piece)
+    boolean process(final Peer peer, final Piece piece)
             throws FileInfoMismatchException, IOException, InterruptedException {
-        PieceProcessStatus status;
+        boolean wasUsed;
         if (!predicate.matches(piece.getFileInfo())) {
-            status = predicate.matchesNothing()
-                    ? PieceProcessStatus.NOT_USED_DONE
-                    : PieceProcessStatus.NOT_USED_NOT_DONE;
+            wasUsed = false;
         }
         else {
             try {
@@ -309,11 +280,19 @@ final class ClearingHouse {
                 logger.debug("Can't add data to removed file \"{}\"",
                         piece.getArchivePath());
             }
-            status = predicate.matchesNothing()
-                    ? PieceProcessStatus.USED_DONE
-                    : PieceProcessStatus.USED_NOT_DONE;
+            wasUsed = true;
         }
-        return status;
+        pendingRequests.remove(piece.getInfo());
+        return wasUsed;
+    }
+
+    /**
+     * Indicates if all data has been received.
+     * 
+     * @return {@code true} if and only if all data has been received.
+     */
+    boolean allDataReceived() {
+        return predicate.matchesNothing();
     }
 
     /**
@@ -335,7 +314,8 @@ final class ClearingHouse {
     }
 
     /**
-     * Walks the files in the data archive.
+     * Walks the files in the data archive. Returns only when all files have
+     * been visited.
      * <p>
      * This is a potentially lengthy operation.
      * 
@@ -345,9 +325,11 @@ final class ClearingHouse {
      *            The selection criteria.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             if the current thread is interrupted.
      */
     void walkArchive(final FilePieceSpecSetConsumer consumer,
-            final Filter filter) throws IOException {
+            final Filter filter) throws IOException, InterruptedException {
         archive.walkArchive(consumer, filter);
     }
 
@@ -374,14 +356,16 @@ final class ClearingHouse {
     /**
      * Removes a file if it exists.
      * 
-     * @param fileId
-     *            Identifier of the file to be removed.
+     * @param archivePath
+     *            Archive-pathname of the file to be removed.
      * @throws IOException
      *             if an I/O error occurs.
+     * @throws NullPointerException
+     *             if {@code archivePath == null}.
      */
-    void remove(final FileId fileId) throws IOException {
+    void remove(final ArchivePath archivePath) throws IOException {
         try {
-            archive.remove(fileId);
+            archive.remove(archivePath);
         }
         catch (final IOError e) {
             throw (IOException) e.getCause();
@@ -396,6 +380,7 @@ final class ClearingHouse {
     @Override
     public String toString() {
         return getClass().getSimpleName() + "[archive=" + archive + ", peers=("
-                + peers.size() + ")]";
+                + peers.size() + "), pending request=("
+                + pendingRequests.size() + ")]";
     }
 }

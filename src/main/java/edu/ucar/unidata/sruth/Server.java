@@ -256,13 +256,13 @@ abstract class Server extends UninterruptibleTask<Void> {
             /**
              * Responds to a file being removed by notifying the peer.
              * 
-             * @param fileId
-             *            Identifier of the file.
+             * @param archivePath
+             *            Archive-pathname of the file.
              */
-            void removed(final FileId fileId) {
+            void removed(final ArchivePath archivePath) {
                 final Peer peer = peerRef.get();
                 if (peer != null) {
-                    peer.notifyRemoteOfRemovals(fileId);
+                    peer.notifyRemoteOfRemovals(archivePath);
                 }
             }
 
@@ -418,12 +418,12 @@ abstract class Server extends UninterruptibleTask<Void> {
         /**
          * Responds to a file being removed by notifying all servlets.
          * 
-         * @param fileId
-         *            Identifier of the file.
+         * @param archivePath
+         *            Archive-pathname of the file.
          */
-        synchronized void removed(final FileId fileId) {
+        synchronized void removed(final ArchivePath archivePath) {
             for (final Servlet servlet : servlets) {
-                servlet.removed(fileId);
+                servlet.removed(archivePath);
             }
         }
 
@@ -714,11 +714,11 @@ abstract class Server extends UninterruptibleTask<Void> {
     /**
      * Handles the removal of a file from the archive.
      * 
-     * @param fileId
-     *            Identifier of the removed file.
+     * @param archivePath
+     *            Archive-pathname of the removed file.
      */
-    void removed(final FileId fileId) {
-        servletManager.removed(fileId);
+    void removed(final ArchivePath archivePath) {
+        servletManager.removed(archivePath);
     }
 
     /*

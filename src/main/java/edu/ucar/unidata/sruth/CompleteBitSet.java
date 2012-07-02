@@ -52,6 +52,11 @@ final class CompleteBitSet extends FiniteBitSet {
     }
 
     @Override
+    FiniteBitSet clearBit(final int index) {
+        return new PartialBitSet(size, index);
+    }
+
+    @Override
     FiniteBitSet setAll() {
         return this;
     }
@@ -77,14 +82,18 @@ final class CompleteBitSet extends FiniteBitSet {
     /*
      * (non-Javadoc)
      * 
-     * @see
-     * edu.ucar.unidata.sruth.FiniteBitSet#merge(edu.ucar.unidata.sruth.
+     * @see edu.ucar.unidata.sruth.FiniteBitSet#merge(edu.ucar.unidata.sruth.
      * FiniteBitSet)
      */
     @Override
     FiniteBitSet merge(final FiniteBitSet that) {
         vetForMerger(that);
         return this;
+    }
+
+    @Override
+    public CompleteBitSet clone() {
+        return this; // because instances are immutable
     }
 
     @Override

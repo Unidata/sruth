@@ -263,18 +263,20 @@ public class NodeTest {
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
         final Future<Void> trackerFuture = start(tracker);
+        tracker.waitUntilRunning();
         /*
          * Create and start the sink nodes.
          */
         final SinkNode sinkNode1 = new SinkNode(new Archive(SINK_DIR_1),
                 Predicate.EVERYTHING, trackerAddress);
         final Future<Void> sinkNode1Future = start(sinkNode1);
-        Thread.sleep(1000);
+        sinkNode1.waitUntilRunning();
         final SinkNode sinkNode2 = new SinkNode(new Archive(SINK_DIR_2),
                 Predicate.EVERYTHING, trackerAddress);
         final Future<Void> sinkNode2Future = start(sinkNode2);
+        sinkNode2.waitUntilRunning();
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
 
         assertEquals(0, sourceNode.getClientCount());
         assertEquals(2, sourceNode.getServletCount());
@@ -308,7 +310,7 @@ public class NodeTest {
         final ByteBuffer byteBuf = ByteBuffer.wrap(new byte[1000000]);
         serverArchive.save(new ArchivePath(largeFilePath), byteBuf);
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
 
         for (final Path sinkDir : new Path[] { SINK_DIR_1, SINK_DIR_2 }) {
             final File file = sinkDir.resolve(largeFilePath).toFile();
@@ -316,7 +318,7 @@ public class NodeTest {
             assertTrue(file.length() == 1000000);
         }
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
 
         /*
@@ -363,7 +365,7 @@ public class NodeTest {
                 Predicate.EVERYTHING, trackerAddress);
         final Future<Void> sinkNode2Future = start(sinkNode2);
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
 
         /*
          * Remove a file and a directory.
