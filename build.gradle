@@ -1,0 +1,59 @@
+apply plugin: 'java'
+apply plugin: 'maven'
+
+version = '1.0-SNAPSHOT'
+group = 'edu.ucar.unidata'
+description = "This Unidata package is free and open-source software for the rapid dissemination of arbitrary files over the Internet. It is implemented in Java and integrates a publish/subscribe distribution model with an asynchronous, event-driven, peer-to-peer transport mechanism."
+
+def packagePath = "${project.group}".replace('.','/') + "/${project.name}"
+
+configurations {
+    deployerJars
+}
+
+repositories {
+    mavenRepo url: 'https://artifacts.unidata.ucar.edu/content/groups/unidata'
+    mavenCentral()
+}
+
+dependencies {
+    compile 'net.jcip:jcip-annotations:1.0+'
+    compile 'org.slf4j:slf4j-api:1.6.0+'
+    compile 'org.jdom:jdom:1.1+'
+    testCompile 'junit:junit:4.8+'
+    runtime 'org.slf4j:slf4j-jdk14:1.6.0+'
+    deployerJars "org.apache.maven.wagon:wagon-http-lightweight:1.0-beta-7+"
+}
+
+sourceSets {
+    main {
+        java {
+            exclude "${packagePath}/PublisherApp.java"
+            exclude "${packagePath}/SubscriberApp.java"
+        }
+    }
+}
+
+test {
+    include "${packagePath}/"
+}
+
+jar {
+    dependsOn configurations.runtime
+    from {configurations.runtime.collect {it.isDirectory() ? it : zipTree(it)}}
+    manifest {
+        attributes 'Main-Class': 'edu.ucar.unidata.sruth.Subscriber'
+    }
+}
+
+uploadArchives {
+    repositories.mavenDeployer {
+        configuration = configurations.deployerJars
+        repository(url: "https://artifacts.unidata.ucar.edu/content/repositories/unidata-snapshots") {
+            authentication(
+                userName: "deployment",
+                password: "dep.loy"
+            )
+        }
+    }
+}
