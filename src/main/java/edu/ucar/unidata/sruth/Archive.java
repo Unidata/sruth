@@ -240,7 +240,7 @@ final class Archive {
         /**
          * The distributed topology file.
          */
-        private final DistributedFile<Topology>          topologyFile;
+        private final DistributedFile<Topology>   topologyFile;
         /**
          * The distributed reporting address file.
          */

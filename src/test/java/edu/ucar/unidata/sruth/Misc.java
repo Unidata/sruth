@@ -129,4 +129,34 @@ public final class Misc {
             }
         };
     }
+
+    /**
+     * Returns a reporting task.
+     * 
+     * @param completionService
+     *            The {@link CompletionService} on whose tasks to report
+     * @return a reporting task
+     */
+    public static <T> Callable<T> newReportingTask(
+            final CompletionService<T> completionService) {
+        return new Callable<T>() {
+            @Override
+            public T call() throws InterruptedException {
+                for (;;) {
+                    final Future<T> future = completionService.take();
+                    if (!future.isCancelled()) {
+                        try {
+                            future.get();
+                        }
+                        catch (final ExecutionException e) {
+                            final Throwable cause = e.getCause();
+                            if (!(cause instanceof InterruptedException)) {
+                                logger.error("Unexpected error", cause);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
 }

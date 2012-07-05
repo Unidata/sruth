@@ -105,7 +105,7 @@ final class ClientManager implements Callable<Void> {
                 }
                 catch (final InvalidMessageException e) {
                     logger.debug(
-                            "Invalid communication with tracker: {}: {}. Continuing...",
+                            "Invalid communication with tracker {}: {}. Continuing...",
                             trackerProxy.getAddress(), e.toString());
                 }
                 timeout = waitUntilDoneOrTimeout(false, timeout);
