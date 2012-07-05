@@ -212,6 +212,8 @@ final class ArchiveTime implements Serializable, Comparable<ArchiveTime> {
     @Override
     public String toString() {
         final Date date = new Date(time);
-        return dateFormat.format(date);
+        synchronized (dateFormat) {
+            return dateFormat.format(date);
+        }
     }
 }
