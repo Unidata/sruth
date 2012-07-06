@@ -240,7 +240,7 @@ final class Archive {
         /**
          * The distributed topology file.
          */
-        private final DistributedFile<Topology>   topologyFile;
+        private final DistributedFile<Topology>          topologyFile;
         /**
          * The distributed reporting address file.
          */
@@ -1024,35 +1024,37 @@ final class Archive {
         protected synchronized void close() throws IOException {
             if (randomFile != null) {
                 randomFile.close();
-                final Path newPath = reveal(rootDir, archivePath);
-                for (;;) {
-                    try {
-                        Files.createDirectories(newPath.getParent());
+                randomFile = null;
+                if (!isVisible) {
+                    final Path newPath = reveal(rootDir, archivePath);
+                    for (;;) {
                         try {
-                            logger.debug("Revealing file: {}", newPath);
-                            Files.move(path, newPath,
-                                    StandardCopyOption.ATOMIC_MOVE,
-                                    StandardCopyOption.REPLACE_EXISTING);
-                            path = newPath;
-                            break;
+                            Files.createDirectories(newPath.getParent());
+                            try {
+                                logger.debug("Revealing file: {}", newPath);
+                                Files.move(path, newPath,
+                                        StandardCopyOption.ATOMIC_MOVE,
+                                        StandardCopyOption.REPLACE_EXISTING);
+                                path = newPath;
+                                isVisible = true;
+                                break;
+                            }
+                            catch (final NoSuchFileException e) {
+                                // A directory in the path was just
+                                // deleted
+                                logger.trace(
+                                        "Directory in path just deleted by another thread: {}",
+                                        newPath);
+                            }
                         }
                         catch (final NoSuchFileException e) {
-                            // A directory in the path was just
-                            // deleted
+                            // A directory in the path was just deleted
                             logger.trace(
                                     "Directory in path just deleted by another thread: {}",
                                     newPath);
                         }
                     }
-                    catch (final NoSuchFileException e) {
-                        // A directory in the path was just deleted
-                        logger.trace(
-                                "Directory in path just deleted by another thread: {}",
-                                newPath);
-                    }
                 }
-                randomFile = null;
-                isVisible = true;
             }
         }
 
