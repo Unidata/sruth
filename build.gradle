@@ -28,8 +28,8 @@ dependencies {
 sourceSets {
     main {
         java {
-            exclude "${packagePath}/PublisherApp.java"
-            exclude "${packagePath}/SubscriberApp.java"
+            exclude "**/${packagePath}/PublisherApp.java"
+            exclude "**/${packagePath}/SubscriberApp.java"
         }
     }
 }
