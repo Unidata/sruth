@@ -154,8 +154,7 @@ public class ArchiveTest {
      * @throws IOException
      *             if an I/O error occurs
      */
-    @Test
-    public final void testDeleteMissing() throws FileSystemException,
+    private final void testDeleteMissing() throws FileSystemException,
             IOException {
         final ArchivePath archivePath = new ArchivePath("doesn't exist");
         archive.remove(archivePath);
@@ -178,8 +177,7 @@ public class ArchiveTest {
         ois.close();
     }
 
-    @Test
-    public final void testToplogyDistribution() throws InterruptedException {
+    private final void testToplogyDistribution() throws InterruptedException {
         final Topology topology = new Topology();
         final DistributedTrackerFiles admin = archive
                 .getDistributedTrackerFiles(new InetSocketAddress(
@@ -337,6 +335,8 @@ public class ArchiveTest {
     @Test
     public final void testArchive() throws FileInfoMismatchException,
             IOException, InterruptedException {
+        testDeleteMissing();
+        testToplogyDistribution();
         testPutPiece();
         testGetPiece();
         testExists();
