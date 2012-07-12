@@ -266,20 +266,6 @@ public class ArchiveTest {
     }
 
     /**
-     * Tests performance. Ensures that the archive is populated first and then
-     * read.
-     * 
-     * @throws FileInfoMismatchException
-     * @throws IOException
-     */
-    @Test
-    public final void testPerformance() throws FileInfoMismatchException,
-            IOException {
-        testPutPiece();
-        testGetPiece();
-    }
-
-    /**
      * Test method for
      * {@link edu.ucar.unidata.sruth.Archive#exists(edu.ucar.unidata.sruth.PieceSpec)}
      * .
@@ -287,8 +273,7 @@ public class ArchiveTest {
      * @throws IOException
      * @throws FileInfoMismatchException
      */
-    @Test
-    public final void testExists() throws IOException,
+    private final void testExists() throws IOException,
             FileInfoMismatchException {
         assertTrue(archive.exists(firstPiece().getInfo()));
         final ArchivePath archivePath = new ArchivePath(
@@ -307,8 +292,7 @@ public class ArchiveTest {
      * @throws InterruptedException
      *             if the current thread is interrupted.
      */
-    @Test
-    public final void testWalkArchive() throws IOException,
+    private final void testWalkArchive() throws IOException,
             InterruptedException {
         class Consumer implements FilePieceSpecSetConsumer {
             int fileCount;
@@ -332,8 +316,7 @@ public class ArchiveTest {
      * @throws IOException
      * @throws FileInfoMismatchException
      */
-    @Test
-    public final void testRemove() throws IOException,
+    private final void testRemove() throws IOException,
             FileInfoMismatchException {
         final Piece piece = firstPiece();
         archive.putPiece(piece);
@@ -341,5 +324,23 @@ public class ArchiveTest {
         final ArchivePath archivePath = piece.getArchivePath();
         archive.remove(archivePath);
         assertFalse(archive.exists(piece.getInfo()));
+    }
+
+    /**
+     * Tests performance. Ensures that the archive is populated first and then
+     * read.
+     * 
+     * @throws FileInfoMismatchException
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    @Test
+    public final void testArchive() throws FileInfoMismatchException,
+            IOException, InterruptedException {
+        testPutPiece();
+        testGetPiece();
+        testExists();
+        testWalkArchive();
+        testRemove();
     }
 }
