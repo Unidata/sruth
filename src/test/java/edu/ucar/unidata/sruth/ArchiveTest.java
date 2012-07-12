@@ -245,6 +245,7 @@ public class ArchiveTest {
         for (Piece piece = firstPiece(); piece != null; piece = nextPiece()) {
             stopwatch.start();
             final Piece savedPiece = archive.getPiece(piece.getInfo());
+            assertTrue(savedPiece != null);
             stopwatch.stop();
             pieceCount++;
             byteCount += savedPiece.getSize();
