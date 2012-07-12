@@ -199,8 +199,7 @@ public class ArchiveTest {
      * @throws FileInfoMismatchException
      * @throws IOException
      */
-    @Test
-    public final void testPutPiece() throws FileInfoMismatchException,
+    private final void testPutPiece() throws FileInfoMismatchException,
             IOException {
         final Stopwatch stopwatch = new Stopwatch();
         int pieceCount = 0;
@@ -236,8 +235,7 @@ public class ArchiveTest {
      * @throws IOException
      * @throws FileInfoMismatchException
      */
-    @Test
-    public final void testGetPiece() throws IOException,
+    private final void testGetPiece() throws IOException,
             FileInfoMismatchException {
         final Stopwatch stopwatch = new Stopwatch();
         int pieceCount = 0;
@@ -265,6 +263,20 @@ public class ArchiveTest {
                 / stopwatch.getElapsedTime() + "/s");
         System.out.println("      Bits:   " + byteCount * 8
                 / stopwatch.getElapsedTime() + "/s");
+    }
+
+    /**
+     * Tests performance. Ensures that the archive is populated first and then
+     * read.
+     * 
+     * @throws FileInfoMismatchException
+     * @throws IOException
+     */
+    @Test
+    public final void testPerformance() throws FileInfoMismatchException,
+            IOException {
+        testPutPiece();
+        testGetPiece();
     }
 
     /**
