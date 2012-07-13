@@ -455,7 +455,21 @@ public final class Publisher implements Callable<Void> {
             }
         }
         catch (final IllegalArgumentException e) {
-            logger.info("Usage: ... [-p port] rootDir");
+            logger.info("Usage: ... [-r reportingPort] [-s serverPort] [-t trackerPort] rootDir\n"
+                    + "where:\n"
+                    + "    -r reportingPort   Port number on which the tracker will listen for\n"
+                    + "                       UDP reports of unavailable data-exchange servers.\n"
+                    + "                       If zero, then an ephemeral port will be chosen by\n"
+                    + "                       the operating-system (which is the default).\n"
+                    + "    -s serverPort      Port number on which the local data-exchange server\n"
+                    + "                       will listen for connections. If zero, then an\n"
+                    + "                       ephemeral port will be chosen by the operating-\n"
+                    + "                       system (which is the default).\n"
+                    + "    -t trackerPort     Port number on which the tracker will listen. If\n"
+                    + "                       zero, then an ephemeral port will be chosen by the\n"
+                    + "                       operating-system. The default is the IANA-assigned\n"
+                    + "                       port, 38800.\n"
+                    + "    rootDir            Pathname of the root of the data archive.\n");
             status = 1;
         }
 
