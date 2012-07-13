@@ -2881,6 +2881,20 @@ final class Archive {
                 }
                 return FileVisitResult.CONTINUE;
             }
+
+            @Override
+            public FileVisitResult visitFileFailed(final Path path,
+                    final IOException e) {
+                if (e instanceof NoSuchFileException) {
+                    logger.debug("File was just deleted by another thread: {}",
+                            path);
+                }
+                else {
+                    logger.error("Couldn't visit file \"{}\": {}", path,
+                            e.toString());
+                }
+                return FileVisitResult.CONTINUE;
+            }
         }
         final EnumSet<FileVisitOption> opts = EnumSet
                 .of(FileVisitOption.FOLLOW_LINKS);
