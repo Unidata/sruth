@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import net.jcip.annotations.GuardedBy;
@@ -114,14 +115,16 @@ final class Client extends UninterruptibleTask<Boolean> {
      *             if the remote server closes the connection.
      * @throws InterruptedException
      *             if the current thread is interrupted.
-     * @throws IOException
-     *             if a serious I/O error occurs.
+     * @throws SocketTimeoutException
+     *             if the connection attempt to the remote peer times-out.
      * @throws SocketException
      *             if the remote peer couldn't be accessed.
+     * @throws IOException
+     *             if a serious I/O error occurs.
      */
     @Override
     public Boolean call() throws ConnectException, EOFException, IOException,
-            SocketException, InterruptedException {
+            SocketTimeoutException, SocketException, InterruptedException {
         logger.debug("Starting up: {}", this);
         final String origName = Thread.currentThread().getName();
         final Thread currentThread = Thread.currentThread();

@@ -11,6 +11,8 @@ import java.io.ObjectOutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 
 import net.jcip.annotations.ThreadSafe;
 
@@ -119,11 +121,15 @@ final class ConnectionToServer extends Connection {
      * is set by the user-preference {@value #SO_TIMEOUT_KEY} (default
      * {@value #SO_TIMEOUT_DEFAULT}).
      * 
-     * @throws IOException
+     * @throws SocketTimeoutException
      *             if a connection can't be made to the remote server within the
-     *             timeout.
+     *             timeout
+     * @throws SocketException
+     *             if an error occurs on the socket
+     * @throws IOException
+     *             if an I/O error occurs
      */
-    void open() throws IOException {
+    void open() throws SocketTimeoutException, SocketException, IOException {
         try {
             for (final Socket socket : sockets) {
                 socket.setSoLinger(false, 0); // because flush() always called
@@ -137,6 +143,12 @@ final class ConnectionToServer extends Connection {
         }
         catch (final IOException e) {
             close();
+            if (e instanceof SocketTimeoutException) {
+                throw (SocketTimeoutException) e;
+            }
+            if (e instanceof SocketException) {
+                throw (SocketException) e;
+            }
             throw e;
         }
     }

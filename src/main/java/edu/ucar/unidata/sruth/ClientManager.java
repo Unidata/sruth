@@ -464,6 +464,10 @@ final class ClientManager implements Callable<Void> {
                 logger.info("Couldn't connect to remote server: {}: {}",
                         client.getServerAddress(), e.toString());
             }
+            catch (final SocketTimeoutException e) {
+                logger.info("Remote server is inaccessible: {}: {}",
+                        client.getServerAddress(), e.toString());
+            }
             catch (final SocketException e) {
                 logger.info("Remote server is inaccessible: {}: {}",
                         client.getServerAddress(), e.toString());
