@@ -485,7 +485,21 @@ public final class Subscriber implements Callable<Void> {
             }
         }
         catch (final IllegalArgumentException e) {
-            logger.info("Usage: ... [-a actions] [-d archive] subscription");
+            logger.info("Usage: ... [-a actions] [-d archive] [-s port] subscription\n"
+                    + "where:\n"
+                    + "    -a actions     URL or pathname of the XML document specifying local\n"
+                    + "                   processing actions. The default is to do no local\n"
+                    + "                   processing of received data-products: the instance\n"
+                    + "                   becomes a pure relay node in the network.\n"
+                    + "    -d archive     Pathname of the root of the temporary data archive.\n"
+                    + "                   The default is the subdirectory \"SRUTH\" of the\n"
+                    + "                   user's home-directory.\n"
+                    + "    -s port        Port number on which the local data-exchange server\n"
+                    + "                   will listen for connections. If zero, then an ephemeral\n"
+                    + "                   port will be chosen by the operating-system (which is\n"
+                    + "                   the default).\n"
+                    + "    subscription   URL or pathname of the XML document that contains\n"
+                    + "                   the subscription information.\n");
             System.exit(INVALID_INVOCATION);
         }
 
