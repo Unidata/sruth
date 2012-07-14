@@ -69,6 +69,33 @@ import org.slf4j.Logger;
 @ThreadSafe
 final class Archive {
     /**
+     * Visits archive files.
+     * 
+     * @author Steven R. Emmerson
+     */
+    private abstract static class SimpleVisitor extends SimpleFileVisitor<Path> {
+        /**
+         * Logs no-such-file exceptions at the DEBUG level rather than throwing
+         * them.
+         * 
+         * @throws IOException
+         *             if an I/O error occurs other than a no-such-file
+         *             exception.
+         */
+        @Override
+        public final FileVisitResult visitFileFailed(final Path path,
+                final IOException e) throws IOException {
+            if (e instanceof NoSuchFileException) {
+                logger.debug("File was just deleted by another thread: {}",
+                        path);
+                return FileVisitResult.CONTINUE;
+            }
+            throw (IOException) new IOException("Couldn't visit file \"" + path
+                    + "\"").initCause(e);
+        }
+    }
+
+    /**
      * Tracker-specific administrative files that are distributed via the
      * network.
      * <p>
@@ -534,12 +561,6 @@ final class Archive {
                                 try {
                                     newFile(path);
                                 }
-                                catch (final NoSuchFileException e) {
-                                    // The file was just deleted
-                                    logger.debug(
-                                            "New file was just deleted: {}",
-                                            path);
-                                }
                                 catch (final IOException e) {
                                     logger.error("Error with new file " + path,
                                             e);
@@ -578,18 +599,16 @@ final class Archive {
          * 
          * @param path
          *            The absolute pathname of the new file.
-         * @throws NoSuchFileException
-         *             if the file doesn't exist
          * @throws IOException
-         *             if an I/O error occurs.
+         *             if an I/O error occurs other than a no-such-file
+         *             exception.
          */
-        private void newFile(final Path path) throws NoSuchFileException,
-                IOException {
+        private void newFile(final Path path) throws IOException {
             /*
              * If the new file is a directory, then it must be walked because
              * any files it contains are also new.
              */
-            Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+            Files.walkFileTree(path, new SimpleVisitor() {
                 @Override
                 public FileVisitResult preVisitDirectory(final Path dir,
                         final BasicFileAttributes attributes) {
@@ -705,18 +724,20 @@ final class Archive {
 
         /**
          * Registers a directory and recursively registers all non-hidden
-         * sub-directories.
+         * sub-directories. Logs no-such-file exceptions rather than throwing
+         * them.
          * 
          * @param dir
          *            Pathname of the directory.
          * @throws IOException
-         *             if an I/O error occurs.
+         *             if an I/O error occurs other than a no-such-file
+         *             exception.
          */
         private void registerDirectoryTree(final Path dir) throws IOException {
             final EnumSet<FileVisitOption> opts = EnumSet
                     .of(FileVisitOption.FOLLOW_LINKS);
             Files.walkFileTree(dir, opts, Integer.MAX_VALUE,
-                    new SimpleFileVisitor<Path>() {
+                    new SimpleVisitor() {
                         @Override
                         public FileVisitResult preVisitDirectory(
                                 final Path dir,
@@ -2327,21 +2348,22 @@ final class Archive {
 
     /**
      * Purges the hidden directory of all files that shouldn't exist at the
-     * start of a session (i.e., cleans-up from a previous session).
+     * start of a session (i.e., cleans-up from a previous session). Logs
+     * no-such-file exceptions rather than throwing them.
      * 
      * @param hiddenDir
      *            Pathname of the hidden directory
      * @param keepPath
      *            Pathname of the only file to keep.
      * @throws IOException
-     *             if an I/O error occurs.
+     *             if an I/O error occurs other than a no-such-file exception.
      */
     private static void purgeHiddenDir(final Path hiddenDir, final Path keepPath)
             throws IOException {
         final EnumSet<FileVisitOption> opts = EnumSet
                 .of(FileVisitOption.FOLLOW_LINKS);
         Files.walkFileTree(hiddenDir, opts, Integer.MAX_VALUE,
-                new SimpleFileVisitor<Path>() {
+                new SimpleVisitor() {
                     @Override
                     public FileVisitResult visitFile(final Path path,
                             final BasicFileAttributes attributes)
@@ -2808,7 +2830,8 @@ final class Archive {
     /**
      * Recursively visits all the file-based data-specifications in a directory
      * that match a selection criteria. Doesn't visit files in hidden
-     * directories. Returns when all files have been visited.
+     * directories. Returns when all files have been visited. Logs no-such-file
+     * exceptions rather than throwing them.
      * 
      * @param root
      *            The directory to recursively walk.
@@ -2817,14 +2840,14 @@ final class Archive {
      * @param filter
      *            The selection criteria.
      * @throws IOException
-     *             if an I/O error occurs.
+     *             if an I/O error occurs other than a no-such-file exception.
      * @throws InterruptedException
      *             if the current thread is interrupted.
      */
     private void walkDirectory(final Path root,
             final FilePieceSpecSetConsumer consumer, final Filter filter)
             throws IOException, InterruptedException {
-        final class ArchiveVisitor extends SimpleFileVisitor<Path> {
+        final class ArchiveVisitor extends SimpleVisitor {
             @Override
             public FileVisitResult preVisitDirectory(final Path dir,
                     final BasicFileAttributes attributes) {
@@ -2878,20 +2901,6 @@ final class Archive {
                         Thread.currentThread().interrupt();
                         return FileVisitResult.TERMINATE;
                     }
-                }
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFileFailed(final Path path,
-                    final IOException e) {
-                if (e instanceof NoSuchFileException) {
-                    logger.debug("File was just deleted by another thread: {}",
-                            path);
-                }
-                else {
-                    logger.error("Couldn't visit file \"{}\": {}", path,
-                            e.toString());
                 }
                 return FileVisitResult.CONTINUE;
             }
