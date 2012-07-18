@@ -84,15 +84,19 @@ class SocketExperiment {
         barrier.await();
 
         final Socket socket = new Socket(InetAddress.getLocalHost(), port.get());
+        try {
+            final ObjectOutputStream objectOutputStream = new ObjectOutputStream(
+                    socket.getOutputStream());
+            final ObjectInputStream objectInputStream = new ObjectInputStream(
+                    socket.getInputStream());
 
-        final ObjectOutputStream objectOutputStream = new ObjectOutputStream(
-                socket.getOutputStream());
-        final ObjectInputStream objectInputStream = new ObjectInputStream(
-                socket.getInputStream());
+            objectOutputStream.writeObject(new Integer(0));
+            final Object obj = objectInputStream.readObject();
 
-        objectOutputStream.writeObject(new Integer(0));
-        final Object obj = objectInputStream.readObject();
-
-        System.out.println("Client: " + obj);
+            System.out.println("Client: " + obj);
+        }
+        finally {
+            socket.close();
+        }
     }
 }
