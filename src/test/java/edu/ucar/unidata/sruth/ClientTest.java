@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Paths;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
@@ -110,6 +111,12 @@ public class ClientTest {
 
         clientFuture.get();
         serverFuture.cancel(true);
+        try {
+            serverFuture.get();
+            assert (false);
+        }
+        catch (final CancellationException e) {
+        }
 
         Assert.assertFalse(new File(TESTDIR + "/client/term/localServer-file-1")
                 .exists());
@@ -143,7 +150,18 @@ public class ClientTest {
         Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
         clientFuture.cancel(true);
-        serverFuture.cancel(true);
+        try {
+            clientFuture.get();
+            assert (false);
+        }
+        catch (final CancellationException e) {
+        }
+        try {
+            serverFuture.cancel(true);
+            assert (false);
+        }
+        catch (final CancellationException e) {
+        }
 
         Assert.assertTrue(new File(TESTDIR
                 + "/client/nonterm/localServer-file-1").exists());
