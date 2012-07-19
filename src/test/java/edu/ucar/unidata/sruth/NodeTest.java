@@ -17,7 +17,6 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -125,7 +124,12 @@ public class NodeTest {
                         logger.debug("Task was cancelled: {}", r);
                     }
                     catch (final ExecutionException e) {
-                        logger.error("Task error: " + r, e);
+                        if (e.getCause() instanceof InterruptedException) {
+                            logger.debug("Task was interrupted: {}", r);
+                        }
+                        else {
+                            logger.error("Task error: " + r, e);
+                        }
                     }
                     catch (final InterruptedException e) {
                         logger.error("Assertion error", r);
@@ -136,13 +140,13 @@ public class NodeTest {
         }
     }
 
-    private static LoggingCancellingExecutor<Void> executorService = new LoggingCancellingExecutor<Void>(
-                                                                           0,
-                                                                           Integer.MAX_VALUE,
-                                                                           0,
-                                                                           TimeUnit.SECONDS,
-                                                                           new SynchronousQueue<Runnable>()) {
-                                                                   };
+    private final LoggingCancellingExecutor<Void> executorService = new LoggingCancellingExecutor<Void>(
+                                                                          0,
+                                                                          Integer.MAX_VALUE,
+                                                                          0,
+                                                                          TimeUnit.SECONDS,
+                                                                          new SynchronousQueue<Runnable>()) {
+                                                                  };
 
     /**
      * @throws java.lang.Exception
@@ -158,30 +162,6 @@ public class NodeTest {
     public void tearDown() throws Exception {
     }
 
-    /**
-     * Starts a task.
-     */
-    private static Future<Void> start(final Callable<Void> task) {
-        return executorService.submit(task);
-    }
-
-    /**
-     * Stops a task.
-     * 
-     * @param future
-     *            The future of the task to stop.
-     * @throws InterruptedException
-     *             if the current thread is interrupted.
-     * @throws ExecutionException
-     *             if the task terminated due to an error.
-     */
-    private static void stop(final Future<Void> future)
-            throws InterruptedException, ExecutionException {
-        if (!future.cancel(true)) {
-            future.get();
-        }
-    }
-
     @Test
     public void testNodes() throws IOException, InterruptedException,
             ExecutionException {
@@ -192,7 +172,7 @@ public class NodeTest {
          * Create and start the source-node.
          */
         final SourceNode sourceNode = new SourceNode(new Archive(SOURCE_DIR));
-        final Future<Void> sourceFuture = start(sourceNode);
+        executorService.submit(sourceNode);
         final InetSocketAddress serverSocketAddress = sourceNode
                 .getServerSocketAddress();
 
@@ -202,14 +182,14 @@ public class NodeTest {
         final Tracker tracker = new Tracker(serverSocketAddress,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
-        final Future<Void> trackerFuture = start(tracker);
+        executorService.submit(tracker);
 
         /*
          * Create and start the sink-node.
          */
         final SinkNode sinkNode = new SinkNode(new Archive(SINK_DIR),
                 Predicate.EVERYTHING, trackerAddress);
-        final Future<Void> sinkFuture = start(sinkNode);
+        executorService.submit(sinkNode);
 
         // Thread.sleep(Long.MAX_VALUE);
         Thread.sleep(2000);
@@ -220,14 +200,14 @@ public class NodeTest {
         assertEquals(0, sinkNode.getServletCount());
         assertEquals(1, sinkNode.getClientCount());
 
-        stop(sinkFuture);
-        stop(trackerFuture);
-        stop(sourceFuture);
-        sinkNode.awaitCompletion();
-        tracker.awaitCompletion();
-        sourceNode.awaitCompletion();
+        executorService.shutdownNow();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
 
-        tracker.awaitCompletion();
+        /*
+         * stop(sinkFuture); stop(trackerFuture); stop(sourceFuture);
+         * sinkNode.awaitCompletion(); tracker.awaitCompletion();
+         * sourceNode.awaitCompletion();
+         */
 
         File file;
 
@@ -258,25 +238,25 @@ public class NodeTest {
         final SourceNode sourceNode = new SourceNode(serverArchive);
         final InetSocketAddress serverSocketAddress = sourceNode
                 .getServerSocketAddress();
-        final Future<Void> sourceNodeFuture = start(sourceNode);
+        executorService.submit(sourceNode);
         /*
          * Create and start the tracker.
          */
         final Tracker tracker = new Tracker(serverSocketAddress,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
-        final Future<Void> trackerFuture = start(tracker);
+        executorService.submit(tracker);
         tracker.waitUntilRunning();
         /*
          * Create and start the sink nodes.
          */
         final SinkNode sinkNode1 = new SinkNode(new Archive(SINK_DIR_1),
                 Predicate.EVERYTHING, trackerAddress);
-        final Future<Void> sinkNode1Future = start(sinkNode1);
+        executorService.submit(sinkNode1);
         sinkNode1.waitUntilRunning();
         final SinkNode sinkNode2 = new SinkNode(new Archive(SINK_DIR_2),
                 Predicate.EVERYTHING, trackerAddress);
-        final Future<Void> sinkNode2Future = start(sinkNode2);
+        executorService.submit(sinkNode2);
         sinkNode2.waitUntilRunning();
 
         Thread.sleep(1000);
@@ -298,6 +278,18 @@ public class NodeTest {
         assertEquals(1, minClientNode.getServletCount());
         assertEquals(0, maxClientNode.getServletCount());
 
+        /*
+         * Test dropping a large file into the source directory.
+         */
+        final Path largeFilePath = SUBDIR.resolve("largeFile");
+        final ByteBuffer byteBuf = ByteBuffer.wrap(new byte[1000000]);
+        serverArchive.save(new ArchivePath(largeFilePath), byteBuf);
+
+        Thread.sleep(2000);
+
+        executorService.shutdownNow();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+
         for (final Path sinkDir : new Path[] { SINK_DIR_1, SINK_DIR_2 }) {
             for (final Path name : new Path[] { FILE_1, FILE_2, SUBFILE }) {
                 final File file = sinkDir.resolve(name).toFile();
@@ -306,35 +298,11 @@ public class NodeTest {
             }
         }
 
-        /*
-         * Test dropping a large file into the source directory.
-         */
-        final Path largeFilePath = SUBDIR.resolve("largeFile");
-        final ByteBuffer byteBuf = ByteBuffer.wrap(new byte[1000000]);
-        serverArchive.save(new ArchivePath(largeFilePath), byteBuf);
-
-        Thread.sleep(1000);
-
         for (final Path sinkDir : new Path[] { SINK_DIR_1, SINK_DIR_2 }) {
             final File file = sinkDir.resolve(largeFilePath).toFile();
             assertTrue(file.exists());
             assertTrue(file.length() == 1000000);
         }
-
-        Thread.sleep(1000);
-        // Thread.sleep(Long.MAX_VALUE);
-
-        /*
-         * Stop the nodes.
-         */
-        stop(sinkNode1Future);
-        stop(sinkNode2Future);
-        stop(trackerFuture);
-        stop(sourceNodeFuture);
-        sinkNode1.awaitCompletion();
-        sinkNode2.awaitCompletion();
-        tracker.awaitCompletion();
-        sourceNode.awaitCompletion();
     }
 
     // Obviated by addition of DelayedPathActionQueue to Archive
@@ -354,23 +322,23 @@ public class NodeTest {
         final AbstractNode sourceNode = new SourceNode(serverArchive);
         final InetSocketAddress serverSocketAddress = sourceNode
                 .getServerSocketAddress();
-        final Future<Void> sourceNodeFuture = start(sourceNode);
+        executorService.submit(sourceNode);
         /*
          * Create and start the tracker.
          */
         final Tracker tracker = new Tracker(serverSocketAddress,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         final InetSocketAddress trackerAddress = tracker.getServerAddress();
-        final Future<Void> trackerFuture = start(tracker);
+        executorService.submit(tracker);
         /*
          * Create and start the sink nodes.
          */
         final AbstractNode sinkNode1 = new SinkNode(new Archive(REMOVAL_DIR_1),
                 Predicate.EVERYTHING, trackerAddress);
-        final Future<Void> sinkNode1Future = start(sinkNode1);
+        executorService.submit(sinkNode1);
         final AbstractNode sinkNode2 = new SinkNode(new Archive(REMOVAL_DIR_2),
                 Predicate.EVERYTHING, trackerAddress);
-        final Future<Void> sinkNode2Future = start(sinkNode2);
+        executorService.submit(sinkNode2);
 
         Thread.sleep(1000);
 
@@ -383,6 +351,9 @@ public class NodeTest {
         Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
 
+        executorService.shutdownNow();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+
         /*
          * Verify removals.
          */
@@ -393,17 +364,5 @@ public class NodeTest {
                 assertFalse(file.exists());
             }
         }
-
-        /*
-         * Stop the nodes.
-         */
-        stop(sinkNode1Future);
-        stop(sinkNode2Future);
-        stop(trackerFuture);
-        stop(sourceNodeFuture);
-        sinkNode1.awaitCompletion();
-        sinkNode2.awaitCompletion();
-        tracker.awaitCompletion();
-        sourceNode.awaitCompletion();
     }
 }
