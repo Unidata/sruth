@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import net.jcip.annotations.ThreadSafe;
 
@@ -19,15 +21,19 @@ abstract class AbstractNode implements Callable<Void> {
     /**
      * The clearing-house for data.
      */
-    protected final ClearingHouse clearingHouse;
+    protected final ClearingHouse   clearingHouse;
     /**
      * The local server.
      */
-    protected final Server        localServer;
+    protected final Server          localServer;
     /**
      * The node identifier.
      */
-    protected final NodeId        nodeId;
+    protected final NodeId          nodeId;
+    /**
+     * The {@link ExecutorService} for the subtasks.
+     */
+    protected final ExecutorService executorService;
 
     /**
      * Constructs from the data archive, a specification of the locally-desired
@@ -49,10 +55,15 @@ abstract class AbstractNode implements Callable<Void> {
      * @see #createServer(ClearingHouse, InetSocketAddressSet)
      */
     AbstractNode(final Archive archive, final Predicate predicate,
-            final InetSocketAddressSet inetSockAddrSet) throws IOException {
+            final InetSocketAddressSet inetSockAddrSet,
+            final ExecutorService executorService) throws IOException {
         clearingHouse = new ClearingHouse(archive, predicate);
         localServer = createServer(clearingHouse, inetSockAddrSet);
         nodeId = new NodeId(localServer.getInetSocketAddress());
+        if (executorService == null) {
+            throw new NullPointerException();
+        }
+        this.executorService = executorService;
     }
 
     /**
@@ -114,4 +125,15 @@ abstract class AbstractNode implements Callable<Void> {
      * @return the number of active clients in this instance.
      */
     abstract int getClientCount();
+
+    /**
+     * Waits until this instance has completed.
+     * 
+     * @throws InterruptedException
+     *             if the current thread is interrupted
+     */
+    final void awaitCompletion() throws InterruptedException {
+        Thread.interrupted();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+    }
 }

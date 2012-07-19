@@ -18,7 +18,6 @@ import java.util.concurrent.CompletionService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -91,19 +90,10 @@ final class SourceNode extends AbstractNode {
      */
     private static final Logger           logger            = Util.getLogger();
     /**
-     * The {@link ExecutorService} for the localServer and file-watcher tasks.
-     */
-    private final CancellingExecutor      executor          = new CancellingExecutor(
-                                                                    2,
-                                                                    2,
-                                                                    0,
-                                                                    TimeUnit.SECONDS,
-                                                                    new SynchronousQueue<Runnable>());
-    /**
      * The task completion service.
      */
     private final CompletionService<Void> completionService = new ExecutorCompletionService<Void>(
-                                                                    executor);
+                                                                    executorService);
     /**
      * The watcher for new files.
      */
@@ -193,7 +183,9 @@ final class SourceNode extends AbstractNode {
      */
     SourceNode(final Archive archive, final InetSocketAddressSet inetSockAddrSet)
             throws IOException {
-        super(archive, Predicate.NOTHING, inetSockAddrSet);
+        super(archive, Predicate.NOTHING, inetSockAddrSet,
+                new CancellingExecutor(2, 2, 0, TimeUnit.SECONDS,
+                        new SynchronousQueue<Runnable>()));
     }
 
     @Override
@@ -243,7 +235,7 @@ final class SourceNode extends AbstractNode {
             }
         }
         finally {
-            executor.shutdownNow();
+            executorService.shutdownNow();
             awaitCompletion();
             Thread.currentThread().setName(origThreadName);
             logger.trace("Done: {}", this);
@@ -260,14 +252,6 @@ final class SourceNode extends AbstractNode {
     void waitUntilRunning() throws InterruptedException {
         localServer.waitUntilRunning();
         archiveWatcher.waitUntilRunning();
-    }
-
-    /**
-     * Waits until this instance has completed.
-     */
-    void awaitCompletion() throws InterruptedException {
-        Thread.interrupted();
-        executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /**

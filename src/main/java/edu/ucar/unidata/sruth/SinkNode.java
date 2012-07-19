@@ -15,7 +15,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
@@ -54,10 +53,6 @@ final class SinkNode extends AbstractNode {
      * The logging service.
      */
     private static final Logger            logger = Util.getLogger();
-    /**
-     * The task execution service
-     */
-    private final ExecutorService          executorService;
 
     /**
      * Constructs from a data archive, a specification of the locally-desired
@@ -148,7 +143,9 @@ final class SinkNode extends AbstractNode {
     SinkNode(final Archive archive, final Predicate predicate,
             final InetSocketAddress trackerAddress,
             final InetSocketAddressSet inetSockAddrSet) throws IOException {
-        super(archive, predicate, inetSockAddrSet);
+        super(archive, predicate, inetSockAddrSet, new CancellingExecutor(1,
+                1 + predicate.getFilterCount(), 0, TimeUnit.SECONDS,
+                new SynchronousQueue<Runnable>()));
         if (trackerAddress == null) {
             throw new NullPointerException();
         }
@@ -158,8 +155,8 @@ final class SinkNode extends AbstractNode {
                 .getDistributedTrackerFiles(trackerAddress);
         trackerProxy = new TrackerProxy(trackerAddress,
                 localServer.getSocketAddress(), distributedTrackerFiles);
-        clientManagers = new ArrayList<ClientManager>(getPredicate()
-                .getFilterCount());
+        clientManagers = new ArrayList<ClientManager>(
+                predicate.getFilterCount());
         synchronized (this) {
             for (final Filter filter : getPredicate()) {
                 final ClientManager clientManager = new ClientManager(
@@ -168,8 +165,6 @@ final class SinkNode extends AbstractNode {
                 clientManagers.add(clientManager);
             }
         }
-        executorService = new CancellingExecutor(1, 1 + clientManagers.size(),
-                0, TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
     }
 
     @Override
@@ -294,14 +289,6 @@ final class SinkNode extends AbstractNode {
                 clientManager.waitUntilRunning();
             }
         }
-    }
-
-    /**
-     * Waits until this instance has completed.
-     */
-    void awaitCompletion() throws InterruptedException {
-        Thread.interrupted();
-        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
     }
 
     /**

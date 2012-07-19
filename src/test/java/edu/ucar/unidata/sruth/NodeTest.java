@@ -223,6 +223,9 @@ public class NodeTest {
         stop(sinkFuture);
         stop(trackerFuture);
         stop(sourceFuture);
+        sinkNode.awaitCompletion();
+        tracker.awaitCompletion();
+        sourceNode.awaitCompletion();
 
         tracker.awaitCompletion();
 
@@ -252,7 +255,7 @@ public class NodeTest {
          * Create and start the source node.
          */
         final Archive serverArchive = new Archive(SOURCE_DIR);
-        final AbstractNode sourceNode = new SourceNode(serverArchive);
+        final SourceNode sourceNode = new SourceNode(serverArchive);
         final InetSocketAddress serverSocketAddress = sourceNode
                 .getServerSocketAddress();
         final Future<Void> sourceNodeFuture = start(sourceNode);
@@ -328,6 +331,10 @@ public class NodeTest {
         stop(sinkNode2Future);
         stop(trackerFuture);
         stop(sourceNodeFuture);
+        sinkNode1.awaitCompletion();
+        sinkNode2.awaitCompletion();
+        tracker.awaitCompletion();
+        sourceNode.awaitCompletion();
     }
 
     // Obviated by addition of DelayedPathActionQueue to Archive
@@ -394,5 +401,9 @@ public class NodeTest {
         stop(sinkNode2Future);
         stop(trackerFuture);
         stop(sourceNodeFuture);
+        sinkNode1.awaitCompletion();
+        sinkNode2.awaitCompletion();
+        tracker.awaitCompletion();
+        sourceNode.awaitCompletion();
     }
 }
