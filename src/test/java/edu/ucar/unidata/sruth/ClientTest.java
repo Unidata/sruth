@@ -4,13 +4,13 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Paths;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -90,14 +90,14 @@ public class ClientTest {
 
     @Test
     public void testTermination() throws IOException, InterruptedException,
-            ExecutionException {
+            ExecutionException, TimeoutException {
         logger.info("testTermination():");
         system(new String[] { "mkdir", "-p", TESTDIR + "/client/term" });
 
         Archive archive = new Archive(Paths.get(TESTDIR + "/localServer"));
         final Server server = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
-        final Future<Void> serverFuture = voidCompleter.submit(server);
+        voidCompleter.submit(server);
         final InetSocketAddress serverSocketAddress = server.getSocketAddress();
 
         final Filter filter = Filter.getInstance("localServer-file-2");
@@ -109,14 +109,10 @@ public class ClientTest {
                 serverSocketAddress, filter, clearingHouse);
         final Future<Boolean> clientFuture = booleanCompleter.submit(client);
 
-        clientFuture.get();
-        serverFuture.cancel(true);
-        try {
-            serverFuture.get();
-            assert (false);
-        }
-        catch (final CancellationException e) {
-        }
+        clientFuture.get(10, TimeUnit.SECONDS);
+
+        executorService.shutdownNow();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
 
         Assert.assertFalse(new File(TESTDIR + "/client/term/localServer-file-1")
                 .exists());
@@ -137,7 +133,7 @@ public class ClientTest {
         Archive archive = new Archive(TESTDIR + "/localServer");
         final Server server = new SourceServer(new ClearingHouse(archive,
                 Predicate.NOTHING));
-        final Future<Void> serverFuture = voidCompleter.submit(server);
+        voidCompleter.submit(server);
         final InetSocketAddress serverSocketAddress = server.getSocketAddress();
 
         archive = new Archive(TESTDIR + "/client/nonterm");
@@ -145,23 +141,13 @@ public class ClientTest {
                 Predicate.EVERYTHING);
         final Client client = new Client(serverSocketAddress,
                 serverSocketAddress, Filter.EVERYTHING, clearingHouse);
-        final Future<Boolean> clientFuture = booleanCompleter.submit(client);
+        booleanCompleter.submit(client);
 
         Thread.sleep(1000);
         // Thread.sleep(Long.MAX_VALUE);
-        clientFuture.cancel(true);
-        try {
-            clientFuture.get();
-            assert (false);
-        }
-        catch (final CancellationException e) {
-        }
-        try {
-            serverFuture.cancel(true);
-            assert (false);
-        }
-        catch (final CancellationException e) {
-        }
+
+        executorService.shutdownNow();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
 
         Assert.assertTrue(new File(TESTDIR
                 + "/client/nonterm/localServer-file-1").exists());
