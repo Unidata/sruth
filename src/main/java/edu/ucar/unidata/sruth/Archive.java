@@ -2041,16 +2041,17 @@ final class Archive {
          */
         private SegmentedArchiveFile getArchiveFile(final FileInfo fileInfo,
                 final boolean readonly) throws FileSystemException, IOException {
-            assert Thread.holdsLock(openSegmentedFiles);
-            for (;;) {
-                try {
-                    return SegmentedArchiveFile.newInstance(rootDir, fileInfo,
-                            readonly);
-                }
-                catch (final FileSystemException e) {
-                    // Too many open files
-                    if (removeLru() == null) {
-                        throw e;
+            synchronized (openSegmentedFiles) {
+                for (;;) {
+                    try {
+                        return SegmentedArchiveFile.newInstance(rootDir,
+                                fileInfo, readonly);
+                    }
+                    catch (final FileSystemException e) {
+                        // Too many open files
+                        if (removeLru() == null) {
+                            throw e;
+                        }
                     }
                 }
             }
@@ -2067,17 +2068,18 @@ final class Archive {
          *             if an I/O error occurs.
          */
         private SegmentedArchiveFile removeLru() throws IOException {
-            assert Thread.holdsLock(openSegmentedFiles);
-            final SegmentedArchiveFile file;
-            final Iterator<Map.Entry<ArchivePath, SegmentedArchiveFile>> iter = openSegmentedFiles
-                    .entrySet().iterator();
-            if (!iter.hasNext()) {
-                return null;
+            synchronized (openSegmentedFiles) {
+                final SegmentedArchiveFile file;
+                final Iterator<Map.Entry<ArchivePath, SegmentedArchiveFile>> iter = openSegmentedFiles
+                        .entrySet().iterator();
+                if (!iter.hasNext()) {
+                    return null;
+                }
+                file = iter.next().getValue();
+                file.close();
+                iter.remove();
+                return file;
             }
-            file = iter.next().getValue();
-            file.close();
-            iter.remove();
-            return file;
         }
 
         /**
