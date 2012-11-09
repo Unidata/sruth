@@ -2537,7 +2537,8 @@ final class Archive {
 
     /**
      * Writes a piece of data. If a newer version of the file exists, then the
-     * data isn't written.
+     * data isn't written. Notifies data-product listeners. May block during
+     * notifications.
      * 
      * @param piece
      *            Piece of data to be written.
@@ -2551,11 +2552,14 @@ final class Archive {
      *             with that of the given piece
      * @throws IOException
      *             if an I/O error occurred.
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      * @throws NullPointerException
      *             if {@code piece == null}.
      */
     boolean putPiece(final Piece piece) throws FileSystemException,
-            NoSuchFileException, FileInfoMismatchException, IOException {
+            NoSuchFileException, FileInfoMismatchException, IOException,
+            InterruptedException {
         final FileInfo fileInfo = piece.getFileInfo();
         final SegmentedArchiveFile file = archiveFileManager.get(fileInfo,
                 false);

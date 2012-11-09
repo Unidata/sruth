@@ -106,7 +106,7 @@ public class XmlActionFileTest {
                         srcPath, "size"));
         final DataProduct dataProduct = new DataProduct(srcDir, fileInfo);
         // Process the data-product
-        assertTrue(processor.offer(dataProduct));
+        processor.put(dataProduct);
         Thread.sleep(200);
         assertTrue(Files.exists(destPath));
         final int status = Misc.system("cmp", srcPath.toString(),

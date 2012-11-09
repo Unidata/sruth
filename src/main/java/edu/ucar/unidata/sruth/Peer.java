@@ -403,12 +403,14 @@ final class Peer implements Callable<Boolean> {
     }
 
     /**
-     * Process a piece of data.
+     * Process a piece of data. May block.
      * 
      * @param piece
      *            The piece of data.
      * @throws IOException
+     *             if an I/O error occurs
      * @throws InterruptedException
+     *             if the current thread is interrupted
      */
     void process(final Piece piece) throws IOException, InterruptedException {
         try {
@@ -527,7 +529,7 @@ final class Peer implements Callable<Boolean> {
             }, remoteFilter);
             return null;
         }
-    
+
         /*
          * (non-Javadoc)
          * 
@@ -557,7 +559,7 @@ final class Peer implements Callable<Boolean> {
          * The type of the received objects.
          */
         private final Class<T>                type;
-    
+
         /**
          * Constructs from a stream with the remote peer, and the type of
          * received objects.
@@ -573,11 +575,11 @@ final class Peer implements Callable<Boolean> {
             if (null == type) {
                 throw new NullPointerException();
             }
-    
+
             this.stream = stream.getInput();
             this.type = type;
         }
-    
+
         /**
          * Reads objects from the connection with the remote peer and processes
          * them. Will block until the connection is initialized by the remote
@@ -628,7 +630,7 @@ final class Peer implements Callable<Boolean> {
             }
             return null;
         }
-    
+
         /**
          * Returns the next object from an object input stream or {@code null}
          * if no more objects are forthcoming.
@@ -657,7 +659,7 @@ final class Peer implements Callable<Boolean> {
                 throw new AssertionError(impossible);
             }
         }
-    
+
         /**
          * Indicates if processing of incoming messages should stop.
          * <p>
@@ -666,7 +668,7 @@ final class Peer implements Callable<Boolean> {
         protected boolean allDone() {
             return false;
         }
-    
+
         /**
          * Stops this instance by closing the relevant {@link Connection#Stream}
          * .
@@ -675,7 +677,7 @@ final class Peer implements Callable<Boolean> {
         protected final void stop() {
             stream.close();
         }
-    
+
         /*
          * (non-Javadoc)
          * 
@@ -751,7 +753,7 @@ final class Peer implements Callable<Boolean> {
         PieceReceiver(final Connection connection) {
             super(connection.getDataStream(), Piece.class);
         }
-    
+
         @Override
         protected boolean allDone() {
             return clearingHouse.allDataReceived();
@@ -772,7 +774,7 @@ final class Peer implements Callable<Boolean> {
          * The underlying {@link Connection#Stream}.
          */
         private final Connection.Stream.Output stream;
-    
+
         /**
          * Constructs from a stream to the remote peer.
          * 
@@ -784,7 +786,7 @@ final class Peer implements Callable<Boolean> {
         protected Sender(final Connection.Stream stream) {
             this.stream = stream.getOutput();
         }
-    
+
         /**
          * Executes this instance. Completes normally if and only if 1) the
          * {@link #nextMessage()} method returns {@code null}; 2) the underlying
@@ -817,7 +819,7 @@ final class Peer implements Callable<Boolean> {
             }
             return null;
         }
-    
+
         /**
          * Returns the next message to send.
          * 
@@ -826,7 +828,7 @@ final class Peer implements Callable<Boolean> {
          *             if the current thread is interrupted.
          */
         protected abstract T nextMessage() throws InterruptedException;
-    
+
         /**
          * Stops the thread executing this instance by closing the output
          * stream.
@@ -835,7 +837,7 @@ final class Peer implements Callable<Boolean> {
         protected final void stop() {
             stream.close();
         }
-    
+
         /*
          * (non-Javadoc)
          * 
@@ -867,7 +869,7 @@ final class Peer implements Callable<Boolean> {
         RequestSender(final Connection connection) {
             super(connection.getRequestStream());
         }
-    
+
         @Override
         public PieceRequest nextMessage() throws InterruptedException {
             return new PieceRequest(requestQueue.take());
@@ -895,7 +897,7 @@ final class Peer implements Callable<Boolean> {
         NoticeSender(final Connection connection) {
             super(connection.getNoticeStream());
         }
-    
+
         @Override
         protected Notice nextMessage() throws InterruptedException {
             return noticeQueue.take();
@@ -922,7 +924,7 @@ final class Peer implements Callable<Boolean> {
         PieceSender(final Connection connection) {
             super(connection.getDataStream());
         }
-    
+
         @Override
         protected Piece nextMessage() throws InterruptedException {
             return pieceQueue.take();
@@ -943,7 +945,7 @@ final class Peer implements Callable<Boolean> {
          */
         @GuardedBy("this")
         private PieceSpecSetIface pieceSpecSet = EmptyPieceSpecSet.INSTANCE;
-    
+
         /**
          * Adds a data-specification.
          * 
@@ -954,7 +956,7 @@ final class Peer implements Callable<Boolean> {
             pieceSpecSet = pieceSpecSet.merge(spec);
             notify();
         }
-    
+
         /**
          * Adds a set of data-piece specifications.
          * 
@@ -966,7 +968,7 @@ final class Peer implements Callable<Boolean> {
             pieceSpecSet = pieceSpecSet.merge(specs);
             notify();
         }
-    
+
         /**
          * Indicates if this instance has a specification or not.
          * 
@@ -976,7 +978,7 @@ final class Peer implements Callable<Boolean> {
         synchronized boolean isEmpty() {
             return pieceSpecSet.isEmpty();
         }
-    
+
         /**
          * Returns the next data-specification. Blocks until one is available.
          * 
@@ -990,7 +992,7 @@ final class Peer implements Callable<Boolean> {
             }
             return removeAndReturn();
         }
-    
+
         /**
          * Removes and returns the next data-specification if one exists;
          * otherwise, returns {@code null}.
@@ -1003,7 +1005,7 @@ final class Peer implements Callable<Boolean> {
                     ? null
                     : removeAndReturn();
         }
-    
+
         @GuardedBy("this")
         synchronized private PieceSpecSetIface removeAndReturn() {
             final PieceSpecSetIface specs = pieceSpecSet;
@@ -1036,7 +1038,7 @@ final class Peer implements Callable<Boolean> {
          */
         @GuardedBy("this")
         private ArchivePathSet      removals    = new ArchivePathSet();
-    
+
         /**
          * Adds a notice about new data.
          * 
@@ -1051,7 +1053,7 @@ final class Peer implements Callable<Boolean> {
             logger.trace("New-data notice added: {}", spec);
             notify();
         }
-    
+
         /**
          * Adds a notice of old data.
          * <p>
@@ -1077,7 +1079,7 @@ final class Peer implements Callable<Boolean> {
             logger.trace("Old-data notice added: {}", spec);
             notify();
         }
-    
+
         /**
          * Adds a notice of removal of a file.
          * 
@@ -1089,7 +1091,7 @@ final class Peer implements Callable<Boolean> {
             logger.trace("Removal notice added: {}", archivePath);
             notify();
         }
-    
+
         /**
          * Returns the next notice. Blocks until one is available.
          * 

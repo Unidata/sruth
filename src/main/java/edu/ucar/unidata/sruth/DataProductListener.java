@@ -5,7 +5,6 @@
  */
 package edu.ucar.unidata.sruth;
 
-
 /**
  * Listener for data-products.
  * 
@@ -17,6 +16,8 @@ interface DataProductListener {
      * 
      * @param dataProduct
      *            The data-product to be processed.
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
-    public void process(DataProduct dataProduct);
+    public void process(DataProduct dataProduct) throws InterruptedException;
 }

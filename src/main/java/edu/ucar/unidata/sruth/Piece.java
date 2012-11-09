@@ -125,7 +125,7 @@ final class Piece implements PeerMessage {
     }
 
     /**
-     * Processes reception of this instance by the local peer.
+     * Processes reception of this instance by the local peer. May block.
      * 
      * @param peer
      *            The local peer

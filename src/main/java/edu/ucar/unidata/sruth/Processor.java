@@ -14,7 +14,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,7 +43,7 @@ public final class Processor implements Callable<Void> {
      * The queue of unprocessed data-products.
      */
     // TODO: Use a more limited queue -- possibly a user preference
-    private final BlockingQueue<DataProduct>           processingQueue = new LinkedBlockingQueue<DataProduct>();
+    private final BlockingQueue<DataProduct>           processingQueue = new SynchronousQueue<DataProduct>();
     /**
      * The "isRunning" latch.
      */
@@ -106,15 +106,16 @@ public final class Processor implements Callable<Void> {
     }
 
     /**
-     * Queues a data-product for processing.
+     * Queues a data-product for processing. Blocks until the data-product can
+     * be queued.
      * 
      * @param dataProduct
      *            The data-product to be processed
-     * @return {@code true} if and only if the data-product was successfully
-     *         queued.
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
-    boolean offer(final DataProduct dataProduct) {
-        return processingQueue.offer(dataProduct);
+    void put(final DataProduct dataProduct) throws InterruptedException {
+        processingQueue.put(dataProduct);
     }
 
     /**

@@ -82,7 +82,7 @@ public class ProcessorTest {
 
     /**
      * Test method for
-     * {@link edu.ucar.unidata.sruth.Processor#offer(edu.ucar.unidata.sruth.DataProduct)}
+     * {@link edu.ucar.unidata.sruth.Processor#put(edu.ucar.unidata.sruth.DataProduct)}
      * .
      * 
      * @throws InterruptedException
@@ -102,7 +102,7 @@ public class ProcessorTest {
                 new FileId(new ArchivePath(name)), (Long) Files.getAttribute(
                         srcDir.resolve(name), "size"));
         final DataProduct dataProduct = new DataProduct(srcDir, fileInfo);
-        assertTrue(processor.offer(dataProduct));
+        processor.put(dataProduct);
         Thread.sleep(500);
         assertTrue(Files.exists(destDir.resolve(name)));
         final int status = Misc.system("cmp", srcDir.resolve(name).toString(),

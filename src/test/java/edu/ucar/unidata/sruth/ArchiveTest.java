@@ -196,9 +196,11 @@ public class ArchiveTest {
      * 
      * @throws FileInfoMismatchException
      * @throws IOException
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
     private final void testPutPiece() throws FileInfoMismatchException,
-            IOException {
+            IOException, InterruptedException {
         final Stopwatch stopwatch = new Stopwatch();
         int pieceCount = 0;
         long byteCount = 0;
@@ -313,9 +315,11 @@ public class ArchiveTest {
      * 
      * @throws IOException
      * @throws FileInfoMismatchException
+     * @throws InterruptedException
+     *             if the current thread is interrupted
      */
     private final void testRemove() throws IOException,
-            FileInfoMismatchException {
+            FileInfoMismatchException, InterruptedException {
         final Piece piece = firstPiece();
         archive.putPiece(piece);
         assertTrue(archive.exists(piece.getInfo()));

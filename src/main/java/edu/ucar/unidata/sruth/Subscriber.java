@@ -146,11 +146,9 @@ public final class Subscriber implements Callable<Void> {
 
         archive.addDataProductListener(new DataProductListener() {
             @Override
-            public void process(final DataProduct dataProduct) {
-                if (!processor.offer(dataProduct)) {
-                    logger.error("Couldn't process data-product: {}",
-                            dataProduct);
-                }
+            public void process(final DataProduct dataProduct)
+                    throws InterruptedException {
+                processor.put(dataProduct);
             }
         });
         sinkNode = new SinkNode(archive, predicate, trackerAddress, serverPort);

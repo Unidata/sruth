@@ -237,7 +237,9 @@ final class ClearingHouse {
     }
 
     /**
-     * Processes a piece of data that was received by a local peer.
+     * Processes a piece of data that was received by a local peer. May cause
+     * the resulting, complete data-product to be processed. May block queuing
+     * data-product for processing.
      * 
      * @param peer
      *            The local peer that received the piece of data.
