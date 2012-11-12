@@ -153,7 +153,7 @@ public final class Subscriber implements Callable<Void> {
         });
         sinkNode = new SinkNode(archive, predicate, trackerAddress, serverPort);
         this.predicate = predicate;
-        this.processor = new Processor();
+        this.processor = processor;
     }
 
     /**
@@ -372,7 +372,7 @@ public final class Subscriber implements Callable<Void> {
         final int INVALID_INVOCATION = 1;
         Path archivePath = Paths.get(System.getProperty("user.home")
                 + File.separatorChar + Util.PACKAGE_NAME);
-        Processor processor = new Processor();
+        Processor processor = new Processor(); // does nothing
         Subscription subscription = null;
         int serverPort = 0;
 

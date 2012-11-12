@@ -40,9 +40,9 @@ public final class Processor implements Callable<Void> {
      */
     private final ConcurrentMap<Pattern, List<Action>> actions         = new ConcurrentHashMap<Pattern, List<Action>>();
     /**
-     * The queue of unprocessed data-products.
+     * The queue of unprocessed data-products. It's synchronous to prevent an
+     * out-of-memory error.
      */
-    // TODO: Use a more limited queue -- possibly a user preference
     private final BlockingQueue<DataProduct>           processingQueue = new SynchronousQueue<DataProduct>();
     /**
      * The "isRunning" latch.
