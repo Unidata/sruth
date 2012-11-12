@@ -236,6 +236,102 @@ public class PubSubTest {
         assertEquals(0, status);
     }
 
+    /**
+     * Generic method for testing publish/subscribe.
+     * 
+     * @param preSubFileCount
+     *            Number of files to publish before starting the subscribers.
+     * @param subscriberRootPaths
+     *            Absolute pathnames of the subscriber archives.
+     * @param postSubFileCount
+     *            Number of files to publish after starting the subscribers.
+     * @throws IOException
+     *             if an I/O error occurs.
+     * @throws InterruptedException
+     *             If the current thread is interrupted.
+     * @throws ExecutionException
+     *             if a subtask fails.
+     * @throws FileInfoMismatchException
+     *             if a data-product is inconsistent.
+     */
+    private void pubSubTest(final int preSubFileCount,
+            final Path[] subscriberRootPaths, final int postSubFileCount)
+            throws IOException, InterruptedException, ExecutionException,
+            FileInfoMismatchException {
+        /*
+         * Create the publisher.
+         */
+        final Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
+
+        System.out.println("Tracker address: " + publisher.getTrackerAddress());
+        System.out.println("Source address: " + publisher.getSourceAddress());
+
+        /*
+         * Publish some files before the publisher is started.
+         */
+        for (int i = 0; i < preSubFileCount; i++) {
+            publishFile(publisher);
+        }
+
+        /*
+         * Start the publisher.
+         */
+        final Future<Void> pubFuture = start(publisher);
+        publisher.waitUntilRunning();
+
+        final List<Subscriber> subscribers = new LinkedList<Subscriber>();
+        final List<Future<Void>> subFutures = new LinkedList<Future<Void>>();
+
+        if (subscriberRootPaths.length > 0) {
+            /*
+             * Create the subscribers.
+             */
+            for (final Path rootDir : subscriberRootPaths) {
+                subscribers.add(new Subscriber(rootDir, publisher
+                        .getTrackerAddress(), Predicate.EVERYTHING,
+                        new Processor()));
+            }
+            /*
+             * Start the subscribers.
+             */
+            for (final Subscriber subscriber : subscribers) {
+                subFutures.add(start(subscriber));
+                subscriber.waitUntilRunning();
+            }
+
+            Thread.sleep(sleepAmount);
+            // Thread.sleep(Long.MAX_VALUE);
+        }
+
+        if (postSubFileCount > 0) {
+            /*
+             * Publish some files after the subscribers are started.
+             */
+            for (int i = 0; i < postSubFileCount; i++) {
+                publishFile(publisher);
+            }
+
+            Thread.sleep(sleepAmount);
+            // Thread.sleep(Long.MAX_VALUE);
+        }
+
+        /*
+         * Verify transmission of published files.
+         */
+        for (final Subscriber subscriber : subscribers) {
+            diffDirs(subscriber.getRootDir());
+        }
+
+        /*
+         * Stop the subscribers and then the publisher.
+         */
+        for (final Future<Void> future : subFutures) {
+            stop(future);
+        }
+        Thread.sleep(sleepAmount);
+        stop(pubFuture);
+    }
+
     @Test
     public void testNoTracker() throws InterruptedException, IOException {
         final InetSocketAddress trackerAddress = new InetSocketAddress(0);
@@ -244,6 +340,18 @@ public class PubSubTest {
         final Future<Void> subscriberFuture = start(subscriber);
         Thread.sleep(sleepAmount);
         stop(subscriberFuture);
+    }
+
+    @Test
+    public void testSimplePubSub() throws IOException, InterruptedException,
+            ExecutionException, FileInfoMismatchException {
+        pubSubTest(1, new Path[] { SUB_ROOT.resolve("testSimplePubSub") }, 0);
+    }
+
+    @Test
+    public void testPubSub() throws IOException, InterruptedException,
+            ExecutionException, FileInfoMismatchException {
+        pubSubTest(PRE_SUB_FILE_COUNT, absSubRootDirs, POST_SUB_FILE_COUNT);
     }
 
     @Test
@@ -308,78 +416,6 @@ public class PubSubTest {
         Thread.sleep(sleepAmount);
         stop(pubFuture);
 
-    }
-
-    @Test
-    public void testPubSub() throws IOException, InterruptedException,
-            ExecutionException, FileInfoMismatchException {
-        /*
-         * Create the publisher.
-         */
-        final Publisher publisher = new Publisher(PUB_ROOT, 0, 0, 0);
-
-        System.out.println("Tracker address: " + publisher.getTrackerAddress());
-        System.out.println("Source address: " + publisher.getSourceAddress());
-
-        /*
-         * Publish some files before the publisher is started.
-         */
-        for (int i = 0; i < PRE_SUB_FILE_COUNT; i++) {
-            publishFile(publisher);
-        }
-
-        /*
-         * Start the publisher.
-         */
-        final Future<Void> pubFuture = start(publisher);
-        publisher.waitUntilRunning();
-
-        /*
-         * Create the subscribers.
-         */
-        final List<Subscriber> subscribers = new LinkedList<Subscriber>();
-        for (final Path rootDir : absSubRootDirs) {
-            subscribers
-                    .add(new Subscriber(rootDir, publisher.getTrackerAddress(),
-                            Predicate.EVERYTHING, new Processor()));
-        }
-        /*
-         * Start the subscribers.
-         */
-        final List<Future<Void>> subFutures = new LinkedList<Future<Void>>();
-        for (final Subscriber subscriber : subscribers) {
-            subFutures.add(start(subscriber));
-            subscriber.waitUntilRunning();
-        }
-
-        Thread.sleep(sleepAmount);
-        // Thread.sleep(Long.MAX_VALUE);
-
-        /*
-         * Publish some files after the subscribers are started.
-         */
-        for (int i = 0; i < POST_SUB_FILE_COUNT; i++) {
-            publishFile(publisher);
-        }
-
-        Thread.sleep(sleepAmount);
-        // Thread.sleep(Long.MAX_VALUE);
-
-        /*
-         * Verify transmission of published files.
-         */
-        for (final Subscriber subscriber : subscribers) {
-            diffDirs(subscriber.getRootDir());
-        }
-
-        /*
-         * Stop the subscribers and then the publisher.
-         */
-        for (final Future<Void> future : subFutures) {
-            stop(future);
-        }
-        Thread.sleep(sleepAmount);
-        stop(pubFuture);
     }
 
     @Test
