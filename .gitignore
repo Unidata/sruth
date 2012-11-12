@@ -7,3 +7,6 @@ target
 /build
 .gradle
 gradle-app.setting
+java_pid*.index
+java_pid*Leak_Suspects.zip
+java_pid*.threads
