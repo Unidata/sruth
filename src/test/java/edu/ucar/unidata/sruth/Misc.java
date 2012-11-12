@@ -1,5 +1,5 @@
 /**
- * Copyright 2010 University Corporation for Atmospheric Research.  All rights
+ * Copyright 2012 University Corporation for Atmospheric Research.  All rights
  * reserved.  See file LICENSE.txt in the top-level directory for licensing
  * information.
  */
@@ -101,7 +101,9 @@ public final class Misc {
     }
 
     /**
-     * Returns a reporting task.
+     * Returns a reporting task, which takes completed tasks from the given
+     * {@link CompletionService} and logs an error message for each completed
+     * task that completes due to an unexpected error.
      * 
      * @param completionService
      *            The {@link CompletionService} on whose tasks to report
