@@ -122,9 +122,59 @@ final class DataProduct {
         return Files.newByteChannel(path, StandardOpenOption.READ);
     }
 
-    /**
-     * Returns
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#hashCode()
      */
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((archivePath == null)
+                ? 0
+                : archivePath.hashCode());
+        result = prime * result + ((fileInfo == null)
+                ? 0
+                : fileInfo.hashCode());
+        return result;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.lang.Object#equals(java.lang.Object)
+     */
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final DataProduct other = (DataProduct) obj;
+        if (archivePath == null) {
+            if (other.archivePath != null) {
+                return false;
+            }
+        }
+        else if (!archivePath.equals(other.archivePath)) {
+            return false;
+        }
+        if (fileInfo == null) {
+            if (other.fileInfo != null) {
+                return false;
+            }
+        }
+        else if (!fileInfo.equals(other.fileInfo)) {
+            return false;
+        }
+        return true;
+    }
 
     /*
      * (non-Javadoc)
